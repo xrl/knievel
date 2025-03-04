@@ -1,0 +1,10 @@
+[package]
+name = "knievel"
+description = "Fearlessly fast ad delivery that steals the show"
+license = "MIT"
+homepage = "https://github.com/xrl/knievel"
+repository = "https://github.com/xrl/knievel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
