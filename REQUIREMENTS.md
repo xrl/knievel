@@ -62,9 +62,11 @@ These are explicitly future work, not "never." See §11.
   [`poem-openapi`](https://docs.rs/poem-openapi/). Handlers and request/
   response types are annotated; the OpenAPI spec is generated from the
   binary and exposed at `GET /openapi.json`.
-- **Datastore:** Postgres-native. Knievel targets a dedicated **schema**
-  inside operator-supplied Postgres (Aurora-compatible). The `pg_partman`
-  extension is a hard requirement; no portable fallback. See §7.
+- **Datastore:** Postgres-native, vanilla. Knievel targets a dedicated
+  **schema** inside operator-supplied Postgres (Aurora and every other
+  major managed variant supported, including Supabase). No required
+  Postgres extensions beyond `pgcrypto`. Knievel manages its own
+  partitions in-process; see §7.
 - **Hot path:** the configuration snapshot lives in process memory, keyed
   by `(project_id, resource)`, refreshed on change notification. Decision
   requests touch RAM only.
@@ -306,11 +308,13 @@ configurable per project (default 24 h).
 
 ## 7. Storage
 
-Knievel is Postgres-native. It targets a single schema (default
-`knievel`) inside operator-supplied Postgres, and depends on the
-`pg_partman` extension for partition lifecycle management.
-Aurora Postgres is a first-class supported deployment; both
-`pg_partman` and `pgcrypto` are available there.
+Knievel is Postgres-native and **vanilla**. It targets a single schema
+(default `knievel`) inside operator-supplied Postgres. The only
+required extension is `pgcrypto`. Knievel manages its own partitions
+in-process from a leader-elected tokio task — no `pg_partman`, no
+external scheduler. This works on every major managed Postgres,
+including the strict ones (Cloud SQL without bgw support, Supabase).
+Minimum Postgres version: **14** (for `DETACH PARTITION CONCURRENTLY`).
 
 ### 7.1 Schema and isolation
 
@@ -351,8 +355,10 @@ process can serve thousands of small Projects efficiently.
 
 Two tables:
 
-- **`events_raw`** — append-only, range-partitioned by day on `ts`,
-  managed by `pg_partman`. Columns: `ts`, `org_id`, `project_id`,
+- **`events_raw`** — append-only, range-partitioned by day on `ts`.
+  Declared via standard Postgres declarative partitioning (`PARTITION
+  BY RANGE (ts)`); leaf partitions follow the naming convention
+  `events_raw_p<YYYY_MM_DD>`. Columns: `ts`, `org_id`, `project_id`,
   `kind` (`decision` | `impression` | `click`), `placement_id`,
   `site_id`, `zone_id`, `ad_id`, `creative_id`, `flight_id`,
   `campaign_id`, `advertiser_id`, `url`, `referrer_host`,
@@ -363,17 +369,65 @@ Two tables:
   zone_id, flight_id, ad_id, creative_id, kind)`. Computed by a
   periodic job before raw partitions age out. Indefinite retention.
 
-`pg_partman` configuration:
+Partition policy:
 
-- `p_premake => 4` — always keep 4 days of future partitions ready.
-- No default partition. A failed COPY due to a missing partition is a
-  loud signal that maintenance is broken; we want the alert, not a
-  silent catch-all.
-- Partition maintenance runs **in-process** via a tokio task that
-  calls `partman.run_maintenance('knievel.events_raw')` hourly. Avoids
-  putting cron jobs into the operator's database.
+- **Premake = 4 days.** Maintenance always ensures 4 days of future
+  partitions exist. With hourly maintenance, a leader outage of up to
+  ~4 days is harmless.
+- **No default partition.** A failed `COPY` due to a missing partition
+  is a loud signal that maintenance is broken; we want the alert, not
+  a silent catch-all that silently corrupts the time-series index.
 
-### 7.4 Write path
+### 7.4 Partition manager (in-process, leader-elected)
+
+Knievel ships a small partition manager — roughly 100 lines of Rust —
+running on a single elected leader pod. Behaviour per maintenance
+tick (default hourly):
+
+1. For each day in `[today, today + premake]`, ensure the leaf
+   partition exists:
+   ```sql
+   CREATE TABLE IF NOT EXISTS knievel.events_raw_p2026_05_10
+     PARTITION OF knievel.events_raw
+     FOR VALUES FROM ('2026-05-10') TO ('2026-05-11');
+   ```
+2. List existing leaf partitions of `events_raw` from `pg_inherits` +
+   `pg_class`, parse the date from the name, and detach + drop any
+   whose upper bound is older than `today − retention_days`:
+   ```sql
+   ALTER TABLE knievel.events_raw DETACH PARTITION
+     knievel.events_raw_p2026_04_01 CONCURRENTLY;
+   DROP TABLE knievel.events_raw_p2026_04_01;
+   ```
+3. Emit a structured log entry and a metric per run with counts of
+   partitions created and dropped.
+
+Leader election uses a Postgres session-level advisory lock held on a
+dedicated long-lived connection (see §7.5). When the leader's session
+ends — graceful shutdown, crash, or Aurora failover — the lock is
+released automatically and a follower acquires it on its next poll
+(default 30 s).
+
+The same leader runs other small periodic jobs (rollup compute,
+idempotency-key reaper, token last-used flush) so we don't pay for N
+leader elections.
+
+### 7.5 Leader election
+
+Implemented with `pg_try_advisory_lock(MAGIC_KEY, schema_oid)` on a
+dedicated connection separate from the query and flusher pools.
+Properties:
+
+- **Crash-safe.** Session ends → lock auto-released. No heartbeats, no
+  expiry math, no split-brain.
+- **Connection IS the lease.** Reconnect = re-elect. Pod restart = lock
+  released by Postgres immediately.
+- **Bounded failover.** ≤ 30 s between leader loss and successor.
+- **Watchdog.** Leader asserts "must complete a maintenance run every
+  N hours"; failure exits the process (which releases the lock and
+  forces re-election). Same condition is reflected in `/readyz`.
+
+### 7.6 Write path
 
 Per-request DB I/O is forbidden on the hot path. Events go to a
 bounded `tokio::sync::mpsc` channel. A flusher task drains every 1–2 s
@@ -383,7 +437,7 @@ appropriate partition by `ts`. Channel saturation surfaces as `503` on
 the decision endpoint rather than silent loss. Failures are reported
 to Sentry with the batch size and offending row sample.
 
-### 7.5 Migrations
+### 7.7 Migrations
 
 Plain SQL files in `migrations/`, embedded into the binary via
 `sqlx::migrate!()`. Run on startup behind `KNIEVEL_AUTO_MIGRATE=true`,
@@ -391,19 +445,22 @@ or via `knievel-cli migrate`. All files start with
 `SET search_path TO knievel, public;` so migrations are
 schema-targeted regardless of session defaults.
 
-### 7.6 Connection budget
+### 7.8 Connection budget
 
 Knievel competes with the host application for the cluster's
 connection pool. Per knievel instance, default budget:
 
-- **1** long-lived `LISTEN` connection (writer endpoint).
+- **1** long-lived `LISTEN` connection (writer endpoint, snapshot loader).
+- **1** long-lived advisory-lock connection on every pod (the leader's
+  connection holds the lock; followers' connections poll). Held in the
+  pool but not returned.
 - **8** query pool connections (sqlx default), env-overridable.
 - **2** dedicated event-flusher connections for `COPY`.
 
-Total ≈ **11** per instance. Operators with pgbouncer in front of
+Total ≈ **12** per instance. Operators with pgbouncer in front of
 Aurora should size accordingly.
 
-### 7.7 What's deferred
+### 7.9 What's deferred
 
 - **Redis** — only needed when frequency capping or per-user pacing
   ships.
@@ -694,7 +751,10 @@ Required series:
 - `knievel_event_channel_depth` (gauge, single global)
 - `knievel_event_channel_dropped_total{reason}` (counter)
 - `knievel_snapshot_age_seconds` (gauge, one per loader)
-- `knievel_partman_maintenance_runs_total{result}` (counter)
+- `knievel_partition_maintenance_runs_total{result}` (counter)
+- `knievel_partition_maintenance_seconds_since_last` (gauge)
+- `knievel_partitions_created_total` / `knievel_partitions_dropped_total` (counters)
+- `knievel_maintenance_leader{pod}` (gauge, 1 if this pod is leader, 0 otherwise)
 - standard `process_*`, `tokio_*`, `sqlx_pool_*` series.
 
 ### 10.6 Health and readiness
@@ -702,7 +762,8 @@ Required series:
 - `/healthz` — liveness. `200` if the process is running.
 - `/readyz` — readiness. `200` only if (a) snapshot has loaded once,
   (b) DB writer is reachable, (c) event flusher hasn't deadlocked,
-  (d) partman maintenance has run within the last 24 h.
+  (d) some pod (this one or another) reports a successful partition
+  maintenance run within the last 24 h.
 
 ### 10.7 Graceful shutdown
 
@@ -775,7 +836,6 @@ Order is rough; each item is independently shippable.
 - [Understanding Kevel](https://dev.kevel.com/docs/understanding-kevel)
 - [`poem-openapi`](https://docs.rs/poem-openapi/)
 - [`sqlx`](https://github.com/launchbadge/sqlx)
-- [`pg_partman`](https://github.com/pgpartman/pg_partman)
 - [`figment`](https://docs.rs/figment/) (layered configuration)
 - [`tracing`](https://docs.rs/tracing/) and
   [`tracing-subscriber`](https://docs.rs/tracing-subscriber/)

@@ -33,10 +33,21 @@ events:
   # Channel saturation surfaces as 503 on the decision endpoint.
   channel_capacity: 100000
 
-partman:
-  # In-process maintenance loop, no pg_cron required.
+partitions:
+  # Knievel manages its own partitions in-process from a leader-elected
+  # tokio task. No pg_partman, no pg_cron, no external scheduler.
   maintenance_interval_seconds: 3600
-  premake_partitions: 4
+  # Always keep this many days of future partitions ahead of `now()`.
+  # With hourly maintenance, a leader outage of up to ~4 days is
+  # harmless.
+  premake_days: 4
+  # Leader-election follower poll interval — how long after the
+  # current leader's session ends a follower will pick up the work.
+  follower_poll_seconds: 30
+  # Watchdog: if no maintenance run completes in this window, the
+  # process exits (releasing the advisory lock and triggering a
+  # re-election somewhere else).
+  watchdog_hours: 6
 
 hmac:
   # Default per-project HMAC bootstrap. Each project rotates its own

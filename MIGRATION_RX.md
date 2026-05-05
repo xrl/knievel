@@ -15,33 +15,35 @@ Postgres cluster. No separate database, no separate cluster.
 Run as a Postgres superuser (or via RX's IaC):
 
 ```sql
--- Extensions (one-time, cluster-level).
+-- Extension (one-time, cluster-level).
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS pg_partman;
 
 -- Dedicated schema and role.
 CREATE SCHEMA knievel;
 CREATE ROLE knievel_app LOGIN PASSWORD :'knievel_password';
 
 GRANT USAGE, CREATE ON SCHEMA knievel TO knievel_app;
-GRANT USAGE ON SCHEMA partman TO knievel_app;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA partman TO knievel_app;
 
 ALTER ROLE knievel_app SET search_path = knievel, public;
 ```
 
 `knievel_app` has **no grants on RX's tables**. Defense in depth
-against accidental joins or query bugs.
+against accidental joins or query bugs. Knievel does not require
+`pg_partman` or any other non-vanilla extension — partition lifecycle
+is managed in-process by a leader-elected tokio task using standard
+Postgres declarative partitioning.
 
 ### Connection budget
 
-Each knievel pod uses ~11 connections against the cluster:
+Each knievel pod uses ~12 connections against the cluster:
 
-- 1 long-lived `LISTEN` (writer endpoint, never the reader).
+- 1 long-lived `LISTEN` connection (writer endpoint, never reader).
+- 1 long-lived advisory-lock connection (leader election; held by all
+  pods, not just the current leader).
 - 8 query-pool connections.
 - 2 event-flusher `COPY` connections.
 
-Two replicas → 22 connections. Coordinate with whoever owns the
+Two replicas → 24 connections. Coordinate with whoever owns the
 Aurora pgbouncer / connection limits.
 
 ### Aurora endpoints
