@@ -65,7 +65,16 @@ Response envelope:
 }
 ```
 
-`limit` defaults to 50, max 500. No `totalRecords`.
+`limit` defaults to 50, max 500. No `totalRecords` — counting is
+expensive and rarely useful at this layer.
+
+Every list operation carries an `x-knievel-paginated: true` vendor
+extension in the OpenAPI spec, plus an `x-knievel-paginated-items`
+pointer (default `items`) and `x-knievel-paginated-cursor` pointer
+(default `nextCursor`). Generated client wrappers (e.g. the Ruby gem
+in `REQUIREMENTS.md` §8 item 3) key off these extensions to expose
+`Enumerable`/`Iterator` semantics over cursor walks rather than
+making the caller write pagination loops.
 
 ### Filters
 

@@ -495,9 +495,17 @@ Aurora should size accordingly.
    partition maintenance task, migrations.
 2. **`openapi.yaml`** — generated from the binary by `cargo xtask
    openapi`, committed to the repo, served at `/openapi.json`.
-3. **Generated client libraries** — at minimum a Ruby gem
-   (`knievel-ruby`) generated via `openapi-generator-cli` in CI,
-   published on tag. Other languages on demand.
+3. **Generated client libraries + idiomatic wrapper.** At minimum a
+   Ruby gem (`knievel-ruby`), generated via `openapi-generator-cli` in
+   CI and published on tag. The generated code is the transport
+   layer; the gem additionally ships hand-written `Resource` wrappers
+   that turn list operations into `Enumerable` objects backed by
+   cursor pagination. List endpoints in the OpenAPI spec are marked
+   with an `x-knievel-paginated` vendor extension, which the wrapper
+   keys off of. Result: idiomatic Ruby use including `each`,
+   `each_page`, `lazy`, `first(n)`, and short-circuiting iteration —
+   all without the caller writing pagination loops. Other languages
+   on demand; each lang ships a comparable wrapper.
 4. **`knievel-cli`** — admin CLI for project provisioning, token
    rotation, snapshot inspection, migration replay. Shares the OpenAPI
    client.
