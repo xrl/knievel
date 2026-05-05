@@ -388,6 +388,55 @@ exist so the data model and auth checks are in place.
 | `PATCH` | `/v1/orgs/{orgId}/members/{userId}` | Change org role or per-project roles. |
 | `DELETE` | `/v1/orgs/{orgId}/members/{userId}` | Remove. |
 
+### 2.4 Ad Library
+
+An Org-scoped catalog of reusable creative content. Project Ads can
+reference library items in lieu of inlining a creative
+(`REQUIREMENTS.md` §5.1).
+
+| Verb | Path | Purpose |
+|---|---|---|
+| `GET` | `/v1/orgs/{orgId}/ad-library/items` | List. Filter: `externalId`, `isActive`. |
+| `POST` | `/v1/orgs/{orgId}/ad-library/items` | Create. |
+| `POST` | `/v1/orgs/{orgId}/ad-library/items:batchUpsert` | Bulk by `externalId`. |
+| `GET` | `/v1/orgs/{orgId}/ad-library/items/{itemId}` | Read. |
+| `PATCH` | `/v1/orgs/{orgId}/ad-library/items/{itemId}` | Update. |
+| `GET` | `/v1/orgs/{orgId}/ad-library/items/{itemId}/references` | List the Project Ads referencing this item. |
+
+Body — same `oneOf` creative shape as Project Creatives, plus
+catalog metadata:
+
+```json
+{
+  "externalId":  "library-spring-banner",
+  "name":        "Spring banner — 728x90",
+  "description": "Reusable cross-project spring banner",
+  "creative": {
+    "type":            "image",
+    "imageUrl":        "https://cdn.example.com/banner.jpg",
+    "width":           728,
+    "height":          90,
+    "alt":             "Spring sale",
+    "clickThroughUrl": "https://acme.example.com/sale"
+  },
+  "isActive": true
+}
+```
+
+`native` template values are validated against the referenced
+template; the template must exist in **every Project that
+references this item**. The `references` endpoint helps spot
+references that would break if the item is archived.
+
+Modifying a library item is reflected in all referring Ads after
+the next snapshot swap (typically <5 s; see `REQUIREMENTS.md` §7.2).
+There is no per-reference override of creative content — that's
+what the inline form is for.
+
+Manage with Org Admin role; Project tokens cannot mutate the library
+but can read it (so referring Ads' creative content can be
+introspected in the admin UI).
+
 ---
 
 ## 3. Project Resources
@@ -470,19 +519,23 @@ Body:
 
 ### 3.4 Ads
 
-The flight↔creative binding plus a delivery weight.
+The flight↔creative binding plus a delivery weight. Each Ad either
+**inlines** a project-scoped creative or **references** an item in
+the org's Ad Library (§2.4).
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/ads` | List. Filter: `flightId`, `creativeId`, `externalId`, `isActive`. |
+| `GET` | `/v1/projects/{projectId}/ads` | List. Filter: `flightId`, `creativeId`, `adLibraryItemId`, `externalId`, `isActive`. |
 | `POST` | `/v1/projects/{projectId}/ads` | Create. |
 | `POST` | `/v1/projects/{projectId}/ads:batchUpsert` | Bulk. The hot management path for sync jobs. |
 | `GET` | `/v1/projects/{projectId}/ads/{id}` | Read. |
 | `PATCH` | `/v1/projects/{projectId}/ads/{id}` | Update. |
 
-Body:
+Body — `oneOf` on `creativeId` vs `adLibraryItemId` (exactly one
+required):
 
 ```json
+// Inline creative.
 {
   "externalId": "ad-2024-spring-1",
   "flightId":   333,
@@ -491,6 +544,21 @@ Body:
   "isActive":   true
 }
 ```
+
+```json
+// Reference an org-shared library item.
+{
+  "externalId":      "ad-2024-spring-1",
+  "flightId":        333,
+  "adLibraryItemId": "ali_AbCd...",
+  "weight":          100,
+  "isActive":        true
+}
+```
+
+Library references are resolved through the in-memory snapshot at
+decision time; no extra round-trip. Updating a library item updates
+all referencing Ads after the next snapshot swap.
 
 ### 3.5 Creatives
 

@@ -332,13 +332,59 @@ auth:
   modes: [jwt]
   jwt:
     issuers:
+      # Keycloak: out-of-cluster service-to-service + future human OIDC.
       - issuer:    https://keycloak.scientist.com/realms/scientist
         audience:  knievel
         algorithms: [RS256]
         claim:     knievel
+
+      # Kubernetes SA tokens: in-cluster pods (RX Rails app).
+      - issuer:    https://kubernetes.default.svc.cluster.local
+        audience:  knievel
+        algorithms: [RS256]
+        claim_mapping:
+          rules:
+            - match: { sub: system:serviceaccount:rx-prod:rx-rails }
+              principal: { scope: org, org_id: scientist-com-prod, role: editor }
+            - match: { sub: system:serviceaccount:rx-staging:rx-rails }
+              principal: { scope: org, org_id: scientist-com-staging, role: editor }
 ```
 
-No opaque tokens needed in steady state; identity stays in Keycloak.
+No opaque tokens needed in steady state.
+
+### Recommended path: Kubernetes SA tokens for the Rails app
+
+RX runs on Kubernetes; the simplest zero-trust answer is to skip
+Keycloak entirely for the in-cluster Rails app and use its own
+ServiceAccount token as the Bearer credential to knievel.
+
+In RX's deployment manifest (per environment):
+
+```yaml
+spec:
+  serviceAccountName: rx-rails
+  containers:
+    - name: rails
+      volumeMounts:
+        - { name: knievel-token, mountPath: /var/run/secrets/knievel, readOnly: true }
+  volumes:
+    - name: knievel-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: token
+              audience: knievel
+              expirationSeconds: 600
+```
+
+The Rails app reads `/var/run/secrets/knievel/token`, sends it as
+`Authorization: Bearer …`, and re-reads on a timer (the kubelet
+auto-rotates the file). No client_secret to rotate, no Keycloak hop
+in the request path. See `AUTH.md` "Kubernetes ServiceAccount
+Tokens" for the full picture.
+
+Keycloak stays in play for human OIDC (admin UI, future) and for any
+out-of-cluster integrations that need to talk to knievel.
 
 ## Configuration (RX side)
 

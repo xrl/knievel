@@ -21,9 +21,35 @@ database:
   schema: knievel
   max_connections: 8
   flusher_connections: 2
-  # Run sqlx migrations at startup. Operators who prefer out-of-band
-  # migrations leave this false and use `knievel-cli migrate`.
-  auto_migrate: false
+  # Run sqlx migrations at startup. Knievel keeps migrations small and
+  # additive; impactful ones are flagged in release notes.
+  auto_migrate: true
+
+snapshot:
+  # Notify + version-poll hybrid. NOTIFY is the fast path; the poll
+  # backstops it when Postgres' NOTIFY queue drops messages or Aurora
+  # failovers drop the listener.
+  poll_interval_seconds: 5
+
+images:
+  # Object storage backend for creative image assets.
+  storage:
+    backend: s3
+    bucket:  ${KNIEVEL_IMAGE_BUCKET}
+    region:  ${KNIEVEL_IMAGE_REGION:us-east-1}
+    # Path-style for MinIO / non-AWS S3-compatible.
+    endpoint:    ${KNIEVEL_IMAGE_ENDPOINT:}
+    path_style:  ${KNIEVEL_IMAGE_PATH_STYLE:false}
+    access_key:  ${KNIEVEL_IMAGE_ACCESS_KEY}
+    secret_key:  ${KNIEVEL_IMAGE_SECRET_KEY}
+  upload:
+    max_bytes: 41943040    # 40 MiB
+    allowed_mime_types:
+      - image/jpeg
+      - image/png
+      - image/gif
+      - image/webp
+      - image/avif
 
 events:
   # Bounded for shared-cluster deployments where backups include our data.
@@ -50,9 +76,14 @@ partitions:
   watchdog_hours: 6
 
 hmac:
-  # Default per-project HMAC bootstrap. Each project rotates its own
-  # secret via `PATCH /v1/orgs/{orgId}/projects/{projectId}`.
+  # Per-project HMAC secrets are server-generated at project creation.
+  # This `default_secret` only seeds the server-internal entropy pool
+  # for new projects; it is never used directly to sign URLs.
   default_secret: ${KNIEVEL_HMAC_DEFAULT_SECRET}
+  # On rotation (PATCH /v1/orgs/{orgId}/projects/{projectId}), accept
+  # both the new and the previous secret as verifiers for this many
+  # hours so already-minted impression/click URLs stay valid.
+  rotation_overlap_hours: 8
 
 auth:
   # Which credential modes to accept on Management/Decision endpoints.
@@ -66,6 +97,8 @@ auth:
     # {issuer}/.well-known/openid-configuration unless `jwks_url` is
     # set explicitly.
     issuers:
+      # Keycloak: rich JWT carrying a `knievel` claim minted by a
+      # protocol mapper. See AUTH.md.
       - issuer:    ${KNIEVEL_JWT_ISSUER:}
         audience:  ${KNIEVEL_JWT_AUDIENCE:knievel}
         jwks_url:  ""
@@ -79,6 +112,28 @@ auth:
         claim_format: object
         cache_ttl_seconds:  3600
         clock_skew_seconds: 30
+
+      # Kubernetes ServiceAccount tokens: zero-trust, in-cluster.
+      # The cluster's API server is the issuer; pods send their
+      # projected SA token as Bearer; knievel maps `sub` -> principal.
+      # See AUTH.md "Kubernetes ServiceAccount Tokens".
+      - issuer:    https://kubernetes.default.svc.cluster.local
+        audience:  knievel
+        algorithms: [RS256]
+        claim_mapping:
+          rules:
+            - match:
+                sub: system:serviceaccount:rx-prod:knievel-client
+              principal:
+                scope:   org
+                org_id:  scientist-com-prod
+                role:    editor
+            - match:
+                sub: system:serviceaccount:rx-staging:knievel-client
+              principal:
+                scope:   org
+                org_id:  scientist-com-staging
+                role:    editor
 
 logging:
   level: ${KNIEVEL_LOG_LEVEL:info}

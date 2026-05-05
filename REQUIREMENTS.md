@@ -194,6 +194,8 @@ other. Not v0; called out so the data model leaves room for it.
 
 ```
 Organization                                  ← billing, users
+  ├── AdLibrary                                ← reusable, org-shared ads
+  │     └── AdLibraryItem                      ← creative + metadata
   └── Project                                  ← isolated workspace
         ├── Advertiser → Campaign → Flight → Ad → Creative
         ├── Channel → Site → Zone              ← inventory
@@ -203,8 +205,31 @@ Organization                                  ← billing, users
 ```
 
 The inventory chain (Channel → Site → Zone) and demand chain (Advertiser →
-Campaign → Flight → Ad → Creative) are unchanged from Kevel; only the
-top-level grouping is renamed (Project) and bumped under an Org.
+Campaign → Flight → Ad → Creative) are unchanged from Kevel; the
+top-level grouping is renamed (Project) and bumped under an Org, and
+an org-scoped Ad Library is added alongside.
+
+### 5.1 Ad Library
+
+An Org-scoped catalog of reusable ad content. Each `AdLibraryItem`
+carries a creative (image, html, or native template values) plus
+catalog metadata (name, description, default ad type hints).
+
+Project-scoped `Ad` rows take one of two shapes (a `oneOf` in the
+spec):
+
+- **Inline** — embeds a project-local `creativeId` directly. The
+  current/default shape; what you use when the ad lives entirely
+  within one project.
+- **Reference** — `{ adLibraryItemId: ... }` instead of
+  `creativeId`. The Ad inherits the library item's creative content
+  at decision time. The Project supplies the flight binding,
+  weight, and Project-scoped advertiser context.
+
+This solves cross-project ad reuse without duplicating data: one
+library item, many references. Decision-time resolution is O(1)
+through the in-memory snapshot. When a library item is updated, all
+references see the new content (after the next snapshot swap).
 
 Every persistable entity carries:
 
@@ -328,6 +353,15 @@ HMAC-SHA256 signatures over `(project_id, ad_id, creative_id,
 placement_id_hash, issued_at, nonce)` with a per-project secret. TTL
 configurable per project (default 24 h).
 
+The per-project secret is **server-generated** at project creation
+(via `crypto.rand_bytes`); the operator never supplies one. Rotation
+via `PATCH /v1/orgs/{orgId}/projects/{projectId}` keeps the previous
+secret valid as a verifier for **8 hours** so already-minted
+impression/click URLs continue to work during the overlap. After the
+overlap, only the new secret is accepted. Documented in `AUTH.md`
+and surfaced as a one-line warning in the rotation endpoint's
+response.
+
 ## 7. Storage
 
 Knievel is Postgres-native and **vanilla**. It targets a single schema
@@ -366,12 +400,28 @@ policies (defense in depth).
 ### 7.2 Configuration store
 
 Source of truth for all knievel-managed entities. Mutated only via the
-Management API. The snapshot loader subscribes via `LISTEN/NOTIFY` to a
-`config_changed` channel; on notify it pulls diffs and atomically swaps
-the in-memory snapshot. Cold-start hydration is one query per table.
+Management API. Cold-start hydration is one query per table.
 
-The in-memory snapshot is keyed by `(project_id, resource)` so a single
-process can serve thousands of small Projects efficiently.
+**Refresh strategy: notify + version-poll.** Each mutation increments
+a monotonic `config_version` row in a small bookkeeping table and
+emits a `NOTIFY config_changed`. The snapshot loader:
+
+1. Subscribes to `LISTEN config_changed` on a long-lived writer
+   connection. On notify, pulls the diff since the snapshot's
+   current version and atomically swaps in the new snapshot.
+2. Independently polls `SELECT config_version` every 5 s as a
+   backstop. If the DB version has advanced beyond the snapshot's
+   without a corresponding `NOTIFY` (Postgres' NOTIFY queue can
+   drop messages under load, and Aurora failovers drop in-flight
+   listeners), the poll picks up the divergence and triggers the
+   same diff-pull path.
+
+Either trigger results in the same atomic snapshot swap. Worst-case
+staleness is bounded by the poll interval (5 s) regardless of NOTIFY
+behavior.
+
+The in-memory snapshot is keyed by `(project_id, resource)` so a
+single process can serve thousands of small Projects efficiently.
 
 ### 7.3 Events
 
@@ -482,7 +532,35 @@ connection pool. Per knievel instance, default budget:
 Total ≈ **12** per instance. Operators with pgbouncer in front of
 Aurora should size accordingly.
 
-### 7.9 Reporting and downstream analytics
+### 7.9 Image storage
+
+Knievel stores creative image assets in an **S3-compatible object
+store** by default. Operators configure the endpoint, bucket, and
+credentials; AWS S3, MinIO, R2, GCS-via-S3-compat, and on-prem
+equivalents all work without code changes.
+
+Upload constraints (defaults; operator-tunable):
+
+- **Max size:** 40 MB per image.
+- **Allowed MIME types:** `image/jpeg`, `image/png`, `image/gif`,
+  `image/webp`, `image/avif`. SVG is **not** accepted (script-execution
+  risk in the rendering page); HEIC/HEIF is not accepted (limited
+  browser support); BMP/TIFF are not accepted (legacy, oversized).
+- **Validation:** server sniffs the magic bytes and verifies they
+  match the declared MIME type; mismatch is `415 Unsupported Media
+  Type`. Files are stored with their content-type set so CDNs serve
+  them correctly.
+- **Naming:** stored under
+  `{bucket}/projects/{project_id}/creatives/{creative_id}/{uuid}.{ext}`.
+  Returned `imageUrl` is signed (or unsigned, public-read) per
+  operator config.
+- **No virus scanning in v0.** Operators that need it wrap the
+  upload endpoint with their own scanner. Documented as a known gap.
+
+Local-disk and Postgres-bytea backends are roadmap items; v0 is
+S3-only to keep the scope honest.
+
+### 7.10 Reporting and downstream analytics
 
 Reporting is a primary motivation for knievel, not an afterthought.
 The data model is shaped to be friendly to downstream warehousing
@@ -515,7 +593,7 @@ and dbt-style transformations:
 Concrete dbt integration patterns, role grants, and sample models
 live in `REPORTING.md`.
 
-### 7.10 What's deferred
+### 7.11 What's deferred
 
 - **Redis** — only needed when frequency capping or per-user pacing
   ships.
@@ -540,8 +618,10 @@ live in `REPORTING.md`.
    all without the caller writing pagination loops. Other languages
    on demand; each lang ships a comparable wrapper.
 4. **`knievel-cli`** — admin CLI for project provisioning, token
-   rotation, snapshot inspection, migration replay. Shares the OpenAPI
-   client.
+   rotation, snapshot inspection, migration replay, and **`seed-demo`**
+   (populates a fresh knievel install with a sample org, project,
+   advertisers, flights, ads, and creatives so a contributor can
+   issue meaningful decisions immediately). Shares the OpenAPI client.
 5. **Container image** — minimal distroless or `gcr.io/distroless/cc`
    based, multi-arch (`amd64` + `arm64`), published on tag.
 6. **Helm chart** (`charts/knievel`) — first-class deployment artifact,
@@ -663,6 +743,16 @@ Key chart conventions:
 - Optional `ServiceMonitor` for Prometheus Operator users.
 - `helm template` output validated in CI with `helm lint` and
   `kubeconform`.
+
+**HA across availability zones.** Knievel is single-region in v0,
+but operators running multi-AZ clusters should spread replicas
+across zones. The chart exposes `affinity` as raw values so any
+shape works; the chart README walks through the standard
+`topologySpreadConstraints` recipe (`topologyKey:
+topology.kubernetes.io/zone`, `whenUnsatisfiable: DoNotSchedule`,
+`maxSkew: 1`) plus a soft `podAntiAffinity` on the same key. Sample
+values block ships in the README so new operators can copy-paste
+without learning Kubernetes-API internals.
 
 ## 9. Performance Targets
 
@@ -878,18 +968,59 @@ Order is rough; each item is independently shippable.
 
 ## 12. Open Questions
 
-- **Snapshot refresh strategy** — pure `LISTEN/NOTIFY` is lossy under
-  load; a notify-then-version-poll backstop is probably worth the
-  complexity.
-- **Image hosting backend** — operator-configurable (S3-compatible,
-  local disk, Postgres bytea), but pick a default. Lean S3 for the
-  reference deployment.
-- **CreativeTemplate schema language** — JSON Schema is the obvious
-  answer; verify `poem-openapi` expresses the cross-reference cleanly.
-- **Cross-project ads** — duplicate-on-write vs. broadcast endpoint vs.
-  an "ad library" abstraction. Defer until a real use case appears.
-- **User/auth backend for the admin UI** — local accounts vs. SSO-only.
-  Lean SSO-only when the UI ships.
+Most of the questions raised during design have been resolved and
+folded into the spec. The remaining few:
+
+- **`poem-openapi` JSON Schema cross-reference** — `CreativeTemplate.schema`
+  embeds a JSON Schema document; verify `poem-openapi` round-trips it
+  through the generated OpenAPI without flattening or escaping. Spike
+  before the first creative-templates endpoint lands.
+- **`force.*` decision-overrides permission level.** Currently any role
+  with decision access can use `force.adId`/etc. They bypass eligibility
+  filters; should probably require Project Admin. Decide before the
+  endpoint goes public.
+- **Idempotency-Key TTL longer than 24 h** for batch sync jobs that
+  retry across CI runs. 24 h is plenty for online retries; consider
+  bumping to 7 days for `:batchUpsert` endpoints specifically.
+- **JWT claim format default** (`object` vs `flat`). Both supported;
+  `object` is the documented default. Reconfirm after first integration
+  uses it in anger.
+
+### Resolved (folded in earlier)
+
+- Snapshot refresh: notify + version-poll (5 s backstop). §7.2.
+- Image hosting: S3-compatible default, 40 MB max, allow-list
+  `image/{jpeg,png,gif,webp,avif}`. §7.9.
+- `CreativeTemplate.schema`: JSON Schema. §6.
+- Cross-project ads: org-scoped Ad Library; project Ads can inline a
+  creative or reference a library item. §5.1.
+- Admin UI auth: SSO/OIDC only, no local accounts. §11 roadmap.
+- Cursor encoding: HMAC-signed blob over `(last_id, last_ts)`.
+- HMAC secret rotation: 8-hour overlap during which `n` and `n-1`
+  both verify. §6.3 / `AUTH.md`.
+- Member removal does **not** auto-revoke their tokens; documented
+  loudly. Tokens time out by their own expiry.
+- JWT principal (`iss`, `sub`, `azp`) included in tracing/log fields
+  and Sentry scope; mapping to humans is the operator's job. §10.
+- Migrations auto-run at startup; impactful migrations called out in
+  release notes for operator coordination.
+- Cold-start ordering: migrate → load snapshot → start partition
+  election → accept requests, all reflected in `/readyz`.
+- API versioning: Stripe-style additive forever; OpenAPI is the
+  contract.
+- `ads:upsertWithFlightAndCreative` stays a self-healing gem helper
+  (no wire-side transaction).
+- Empty decision arrays count toward request volume for billing /
+  pacing purposes.
+- Project HMAC secret server-generated at project creation. §6.3.
+- `knievel-cli seed-demo` for new contributor installs.
+- Multi-AZ HA via Helm `topologySpreadConstraints` documented in
+  chart README. §8.1.
+- DR / RPO targets explicitly out of scope; inherit from the host
+  Postgres.
+- Kubernetes ServiceAccount JWTs as a first-class auth mode, with
+  per-issuer `claim_mapping` to derive principal from `sub`.
+  `AUTH.md`.
 
 ## References
 

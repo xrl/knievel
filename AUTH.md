@@ -224,6 +224,132 @@ auth:
 That's it. Knievel discovers the JWKS, validates incoming JWTs, and
 maps the `knievel` claim to its internal `Principal`.
 
+## Kubernetes ServiceAccount Tokens
+
+When knievel is reached from pods inside a Kubernetes cluster, the
+zero-trust answer is to use the pod's projected ServiceAccount token
+as the Bearer credential. No static secrets, automatic rotation,
+identity is the SA itself.
+
+### How it works
+
+Modern Kubernetes (1.21+) issues bound ServiceAccount tokens as
+JWTs, signed by the cluster's API server. Each pod can mount a
+projected token with a deployment-specified audience. The cluster
+exposes a JWKS at `https://kubernetes.default.svc/openid/v1/jwks`,
+reachable from any in-cluster workload.
+
+Knievel validates these tokens with the same JWKS machinery used for
+Keycloak — just a different `issuer` entry in
+`auth.jwt.issuers[]`.
+
+### The catch: SA tokens have no `knievel` claim
+
+A typical SA token's payload looks like:
+
+```json
+{
+  "iss":  "https://kubernetes.default.svc.cluster.local",
+  "sub":  "system:serviceaccount:rx-prod:knievel-client",
+  "aud":  ["knievel"],
+  "exp":  1717003600,
+  "kubernetes.io": { "namespace": "rx-prod",
+                     "serviceaccount": { "name": "knievel-client", "uid": "..." } }
+}
+```
+
+No `knievel` claim, so we can't read scope/role/org_id directly.
+Instead, knievel supports a per-issuer **claim mapping** that derives
+the principal from a deterministic claim (typically `sub`):
+
+```yaml
+auth:
+  jwt:
+    issuers:
+      - issuer:    https://kubernetes.default.svc.cluster.local
+        audience:  knievel
+        algorithms: [RS256]
+        # No `claim` — fall back to claim_mapping rules.
+        claim_mapping:
+          # First matching rule wins. Match keys can be any top-level
+          # claim (sub, kubernetes.io.namespace, etc.).
+          rules:
+            - match:
+                sub: system:serviceaccount:rx-prod:knievel-client
+              principal:
+                scope:   org
+                org_id:  scientist-com-prod
+                role:    editor
+            - match:
+                sub: system:serviceaccount:rx-staging:knievel-client
+              principal:
+                scope:   org
+                org_id:  scientist-com-staging
+                role:    editor
+```
+
+Multiple issuers coexist — knievel picks the right one from the
+JWT's `iss` claim. So the same knievel can simultaneously trust
+Keycloak (for humans and out-of-cluster service-to-service) and the
+Kubernetes API server (for in-cluster pods).
+
+### Pod side: projected token
+
+In the deployment manifest, mount a projected SA token with
+`audience: knievel`:
+
+```yaml
+spec:
+  serviceAccountName: knievel-client
+  containers:
+    - name: app
+      volumeMounts:
+        - name: knievel-token
+          mountPath: /var/run/secrets/knievel
+          readOnly: true
+  volumes:
+    - name: knievel-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: token
+              audience: knievel
+              expirationSeconds: 600       # auto-rotated by kubelet
+```
+
+The application reads `/var/run/secrets/knievel/token` and uses it
+as the Bearer credential. Re-read periodically (or each request);
+the kubelet rotates the file before expiry.
+
+### Why this is the right default for in-cluster deployments
+
+- **No static secrets.** No long-lived API key in a Kubernetes
+  Secret to leak or rotate manually.
+- **Automatic rotation.** Tokens expire in 10 minutes by default;
+  the kubelet re-projects before expiry. The app reads from disk;
+  the disk file is current.
+- **Principal is the SA.** Audit lines naturally contain
+  `system:serviceaccount:<ns>:<name>` — no separate "which client
+  is this" lookup.
+- **Federation-free.** No Keycloak round-trip, no token exchange,
+  no extra service in the path. Per-request auth is one signature
+  verification against an in-cluster JWKS.
+
+### Alternatives (heavier)
+
+- **Token exchange via Keycloak.** Pod presents SA token to
+  Keycloak's `token-exchange` endpoint; Keycloak (federated with the
+  cluster's OIDC issuer) returns a Keycloak access token with the
+  full `knievel` claim. Useful if you want claim mapping managed in
+  Keycloak's UI rather than in knievel config. Adds one hop per
+  token refresh.
+- **SPIFFE / SPIRE.** Industry-standard workload identity; SPIRE
+  issues JWT-SVIDs that knievel validates as any other JWT. Worth
+  the operational investment only if you have many services that
+  all want the same primitive.
+
+Both are additive — the JWKS code path is shared.
+
 ## Trade-offs
 
 ### Revocation is by expiry
