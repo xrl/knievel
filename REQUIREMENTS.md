@@ -62,13 +62,21 @@ These are explicitly future work, not "never." See §11.
   [`poem-openapi`](https://docs.rs/poem-openapi/). Handlers and request/
   response types are annotated; the OpenAPI spec is generated from the
   binary and exposed at `GET /openapi.json`.
-- **Datastore:** Postgres for both configuration (source of truth) and
-  events (range-partitioned). No Redis in v0.
+- **Datastore:** Postgres-native. Knievel targets a dedicated **schema**
+  inside operator-supplied Postgres (Aurora-compatible). The `pg_partman`
+  extension is a hard requirement; no portable fallback. See §7.
 - **Hot path:** the configuration snapshot lives in process memory, keyed
   by `(project_id, resource)`, refreshed on change notification. Decision
   requests touch RAM only.
 - **Event path:** decision/impression/click events are buffered in an
-  in-process channel and `COPY`'d to Postgres in batches every 1–2 s.
+  in-process channel and `COPY`'d to the partitioned events table in
+  batches every 1–2 s. Postgres routes rows to the correct partition.
+- **Observability:** structured JSON logs via `tracing`, OpenTelemetry
+  spans exported via OTLP, pervasive Sentry error reporting. All three
+  carry the same `request_id` / `trace_id` for correlation. See §10.
+- **Configuration:** layered — built-in defaults, then a `config.yaml`
+  file with `${VAR}` env-interpolation, then individual env-var
+  overrides. See §10.1.
 
 ## 4. Multi-Tenancy
 
@@ -298,54 +306,114 @@ configurable per project (default 24 h).
 
 ## 7. Storage
 
-### 7.1 Configuration
+Knievel is Postgres-native. It targets a single schema (default
+`knievel`) inside operator-supplied Postgres, and depends on the
+`pg_partman` extension for partition lifecycle management.
+Aurora Postgres is a first-class supported deployment; both
+`pg_partman` and `pgcrypto` are available there.
 
-Postgres. All entities carry `(org_id, project_id)` columns; isolation
-enforced at the query layer and via Postgres row-level security policies
-(defense in depth).
+### 7.1 Schema and isolation
 
-Source of truth. Mutated only via the Management API. Snapshot loader
-subscribes via `LISTEN/NOTIFY` to a `config_changed` channel; pulls
-diffs and atomically swaps the in-memory snapshot. Cold-start hydration
-is one query per table.
+All knievel tables live in a single schema, default name `knievel`,
+configurable per deployment. The schema is owned by a dedicated
+Postgres role (`knievel_app`) with grants only on its own schema:
+
+```sql
+CREATE SCHEMA knievel;
+CREATE ROLE knievel_app LOGIN PASSWORD '...';
+GRANT USAGE, CREATE ON SCHEMA knievel TO knievel_app;
+ALTER ROLE knievel_app SET search_path = knievel, public;
+```
+
+Knievel migrations only touch its own schema. The `_sqlx_migrations`
+tracking table lives in `knievel` too.
+
+Knievel runs against the cluster **writer endpoint** in shared-Aurora
+deployments. `LISTEN/NOTIFY` does not propagate to readers; the
+snapshot loader needs the writer. Reconnect-with-backoff handles
+Aurora failovers.
+
+All entities carry `(org_id, project_id)` columns. Isolation is
+enforced at the query layer and via Postgres row-level security
+policies (defense in depth).
+
+### 7.2 Configuration store
+
+Source of truth for all knievel-managed entities. Mutated only via the
+Management API. The snapshot loader subscribes via `LISTEN/NOTIFY` to a
+`config_changed` channel; on notify it pulls diffs and atomically swaps
+the in-memory snapshot. Cold-start hydration is one query per table.
 
 The in-memory snapshot is keyed by `(project_id, resource)` so a single
 process can serve thousands of small Projects efficiently.
 
-### 7.2 Events
+### 7.3 Events
 
 Two tables:
 
-- **`events_raw`** — append-only, range-partitioned by day, managed with
-  `pg_partman`. Columns: `ts`, `org_id`, `project_id`, `kind`
-  (`decision` | `impression` | `click`), `placement_id`, `site_id`,
-  `zone_id`, `ad_id`, `creative_id`, `flight_id`, `campaign_id`,
-  `advertiser_id`, `url`, `referrer_host`, `user_agent_hash`,
-  `signature_nonce`, `dedup_key`. Retention 30–90 days; old partitions
-  detached and dropped.
+- **`events_raw`** — append-only, range-partitioned by day on `ts`,
+  managed by `pg_partman`. Columns: `ts`, `org_id`, `project_id`,
+  `kind` (`decision` | `impression` | `click`), `placement_id`,
+  `site_id`, `zone_id`, `ad_id`, `creative_id`, `flight_id`,
+  `campaign_id`, `advertiser_id`, `url`, `referrer_host`,
+  `user_agent_hash`, `signature_nonce`, `dedup_key`. **Default
+  retention 30 days** (conservative because backups are the operator's
+  responsibility in shared-DB deployments); operator-configurable.
 - **`events_rollup`** — hourly aggregates by `(project_id, site_id,
-  zone_id, flight_id, ad_id, creative_id, kind)`. Computed by a periodic
-  job before raw partitions age out. Indefinite retention.
+  zone_id, flight_id, ad_id, creative_id, kind)`. Computed by a
+  periodic job before raw partitions age out. Indefinite retention.
 
-### 7.3 Write path
+`pg_partman` configuration:
 
-Per-request DB I/O is forbidden on the hot path. Events go to a bounded
-`tokio::sync::mpsc` channel. A flusher task drains every 1–2 s (or 5 k
-events, whichever first) and `COPY`s into the current `events_raw`
-partition. Channel saturation surfaces as `503` on the decision endpoint
-rather than silent loss.
+- `p_premake => 4` — always keep 4 days of future partitions ready.
+- No default partition. A failed COPY due to a missing partition is a
+  loud signal that maintenance is broken; we want the alert, not a
+  silent catch-all.
+- Partition maintenance runs **in-process** via a tokio task that
+  calls `partman.run_maintenance('knievel.events_raw')` hourly. Avoids
+  putting cron jobs into the operator's database.
 
-### 7.4 What's deferred
+### 7.4 Write path
+
+Per-request DB I/O is forbidden on the hot path. Events go to a
+bounded `tokio::sync::mpsc` channel. A flusher task drains every 1–2 s
+(or 5 k events, whichever first) and `COPY`s into the parent
+`knievel.events_raw` table — Postgres routes each row to the
+appropriate partition by `ts`. Channel saturation surfaces as `503` on
+the decision endpoint rather than silent loss. Failures are reported
+to Sentry with the batch size and offending row sample.
+
+### 7.5 Migrations
+
+Plain SQL files in `migrations/`, embedded into the binary via
+`sqlx::migrate!()`. Run on startup behind `KNIEVEL_AUTO_MIGRATE=true`,
+or via `knievel-cli migrate`. All files start with
+`SET search_path TO knievel, public;` so migrations are
+schema-targeted regardless of session defaults.
+
+### 7.6 Connection budget
+
+Knievel competes with the host application for the cluster's
+connection pool. Per knievel instance, default budget:
+
+- **1** long-lived `LISTEN` connection (writer endpoint).
+- **8** query pool connections (sqlx default), env-overridable.
+- **2** dedicated event-flusher connections for `COPY`.
+
+Total ≈ **11** per instance. Operators with pgbouncer in front of
+Aurora should size accordingly.
+
+### 7.7 What's deferred
 
 - **Redis** — only needed when frequency capping or per-user pacing
   ships.
 - **TimescaleDB / ClickHouse** — escape hatches if/when partitioned
-  Postgres stops keeping up.
+  Postgres stops keeping up. Not v0.
 
 ## 8. Deliverables
 
 1. **`knievel`** Rust binary — server, snapshot loader, event flusher,
-   migrations.
+   partition maintenance task, migrations.
 2. **`openapi.yaml`** — generated from the binary by `cargo xtask
    openapi`, committed to the repo, served at `/openapi.json`.
 3. **Generated client libraries** — at minimum a Ruby gem
@@ -354,11 +422,127 @@ rather than silent loss.
 4. **`knievel-cli`** — admin CLI for project provisioning, token
    rotation, snapshot inspection, migration replay. Shares the OpenAPI
    client.
-5. **Compose / Helm manifests** — knievel + Postgres for local dev and
-   single-node deployment.
+5. **Container image** — minimal distroless or `gcr.io/distroless/cc`
+   based, multi-arch (`amd64` + `arm64`), published on tag.
+6. **Helm chart** (`charts/knievel`) — first-class deployment artifact,
+   not an afterthought. See §8.1.
+7. **Compose manifest** — single-binary + bring-your-own-Postgres for
+   local development and reference single-node deployments.
 
 Per-consumer migration guides (e.g., `MIGRATION_RX.md`) live alongside
 the spec but are not part of the v0 platform deliverable surface.
+
+### 8.1 Helm chart
+
+`values.yaml` exposes a high-level idiomatic shape; the chart's
+templates render those values into a `config.yaml` and mount it as a
+ConfigMap. The Deployment carries a `checksum/config` annotation
+computed from the rendered ConfigMap so any values change rolls the
+pods.
+
+Sketch of the values surface:
+
+```yaml
+image:
+  repository: ghcr.io/xrl/knievel
+  tag: ""               # defaults to chart appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: 2,    memory: 1Gi }
+
+database:
+  # Aurora cluster writer endpoint.
+  host: ""              # required
+  port: 5432
+  name: ""              # required
+  schema: knievel
+  sslMode: require
+  existingSecret: ""    # holds username + password
+  userKey: username
+  passwordKey: password
+  maxConnections: 8
+
+events:
+  retentionDays: 30
+  flushIntervalMs: 1000
+  flushBatchSize: 5000
+
+hmac:
+  existingSecret: ""    # default per-project HMAC key bootstrap
+  key: hmac-default
+
+sentry:
+  enabled: true
+  existingSecret: ""    # holds DSN
+  dsnKey: dsn
+  environment: ""       # defaults to .Release.Namespace
+  tracesSampleRate: 0.0 # OTel handles tracing; Sentry for errors only
+  release: ""           # defaults to image.tag
+
+otel:
+  enabled: true
+  endpoint: ""          # OTLP gRPC, e.g. http://otel-collector:4317
+  serviceName: knievel
+  resourceAttributes: {} # service.namespace, deployment.environment, etc.
+
+logging:
+  level: info
+  format: json
+  decisionsSampleRate: 0.01
+
+api:
+  publicBaseUrl: ""     # used in minted impression/click URLs
+  bindAddr: 0.0.0.0:8080
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts: []
+  tls: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities: { drop: [ALL] }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+```
+
+Templates render values into a single mounted file at
+`/etc/knievel/config.yaml`. Secrets (DSNs, DB passwords) are resolved
+via `existingSecret` references and projected as env vars; the
+`config.yaml` references them via `${VAR}` interpolation rather than
+embedding their plaintext.
+
+Key chart conventions:
+
+- `checksum/config` pod annotation = `sha256sum` of the rendered
+  ConfigMap. Helm chart upgrade with new values triggers a rollout.
+- Resource names follow `{{ include "knievel.fullname" . }}`; standard
+  Helm labels (`app.kubernetes.io/...`) on every resource.
+- Optional `ServiceMonitor` for Prometheus Operator users.
+- `helm template` output validated in CI with `helm lint` and
+  `kubeconform`.
 
 ## 9. Performance Targets
 
@@ -375,18 +559,171 @@ Starting numbers; we measure and adjust.
 
 ## 10. Operational
 
-- Config via env vars + optional TOML (`KNIEVEL_DATABASE_URL`,
-  `KNIEVEL_LISTEN_ADDR`, `KNIEVEL_HMAC_DEFAULT_SECRET`,
-  `KNIEVEL_PUBLIC_BASE_URL`).
-- Structured JSON logs via `tracing`. Decision-endpoint sampling at 1%
-  by default; full sample on errors.
-- Prometheus `/metrics`. Counters by `(project, decision_outcome)` and
-  `(project, kind)` for events.
-- Health: `/healthz` (liveness), `/readyz` (snapshot loaded, DB
-  reachable, flusher healthy).
-- Graceful shutdown: stop accepting requests, drain in-flight, flush
-  event channel, exit. Bounded by a configurable deadline.
-- Migrations via `sqlx-cli` or `refinery`; run on startup behind a flag.
+### 10.1 Configuration
+
+Layered, in order of precedence (later wins):
+
+1. Built-in defaults (compiled in).
+2. `config.yaml` (path from `KNIEVEL_CONFIG`, default
+   `/etc/knievel/config.yaml`).
+3. Individual env-var overrides (`KNIEVEL_*`).
+
+The `config.yaml` is preprocessed for `${VAR}` and `${VAR:default}`
+interpolation before parse, so secrets injected as env vars (DB
+password, Sentry DSN, HMAC key) can be referenced inline without
+templating tools. `${VAR}` with an unset `VAR` and no default is a
+hard error at startup.
+
+`config.yaml` schema (illustrative; full schema lives in code +
+`config.example.yaml`):
+
+```yaml
+api:
+  bind_addr: 0.0.0.0:8080
+  public_base_url: https://ads.example.com
+
+database:
+  url: postgres://knievel_app:${DB_PASSWORD}@${DB_HOST}/${DB_NAME}?sslmode=require
+  schema: knievel
+  max_connections: 8
+  flusher_connections: 2
+  auto_migrate: false
+
+events:
+  retention_days: 30
+  flush_interval_ms: 1000
+  flush_batch_size: 5000
+
+hmac:
+  default_secret: ${KNIEVEL_HMAC_DEFAULT_SECRET}
+
+logging:
+  level: info
+  format: json
+  decisions_sample_rate: 0.01
+
+tracing:
+  otel:
+    enabled: true
+    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+    service_name: knievel
+    resource_attributes:
+      deployment.environment: ${KNIEVEL_ENV:production}
+
+errors:
+  sentry:
+    enabled: true
+    dsn: ${SENTRY_DSN:}
+    environment: ${KNIEVEL_ENV:production}
+    release: ${KNIEVEL_RELEASE:}
+    sample_rate: 1.0
+```
+
+Loading is done with `figment` layering the three sources. Empty
+`sentry.dsn` is permitted and disables the integration — keeps dev
+runs from needing a Sentry project.
+
+### 10.2 Logging
+
+Structured JSON via `tracing` + `tracing-subscriber::fmt::json()`.
+Every line includes `timestamp`, `level`, `target`, `message`,
+`request_id`, and (when in a span) `trace_id` + `span_id` from the
+OTel context.
+
+Per-context fields attached at request entry:
+
+- `org_id`, `project_id`, `route`, `method`, `status`, `duration_ms`
+- For decision requests: `placement_count`, `decision_outcome` (hit /
+  miss / blocked / forced)
+- For management writes: `resource`, `external_id`, `idempotent_replay`
+
+Decision endpoint logs are sampled at `decisions_sample_rate` (default
+1%); errors and 4xx/5xx always log fully, regardless of sample.
+
+### 10.3 Distributed tracing (OpenTelemetry)
+
+`opentelemetry` + `opentelemetry-otlp` (gRPC) + `opentelemetry-sdk`
++ `tracing-opentelemetry` bridging from `tracing`. Spans:
+
+- One per HTTP request, with HTTP semantic conventions.
+- One per snapshot refresh cycle.
+- One per event flush batch (with `batch_size` and `partition_count`
+  attributes).
+- One per outbound DB call (via `sqlx` instrumentation).
+
+Trace context propagated via standard W3C `traceparent` header.
+Exported to whatever OTLP endpoint the operator configures (Tempo,
+Honeycomb, Datadog Agent, Grafana Cloud, etc.). Sampling is
+tail-based at the collector; knievel always emits.
+
+### 10.4 Error reporting (Sentry)
+
+`sentry` Rust SDK + `sentry-tower` HTTP middleware (per-request hub
+with auto-attached scope) + `sentry-tracing` (forwards `tracing`
+events as breadcrumbs and elevates `ERROR` to Sentry exceptions).
+Panic capture is enabled at boot.
+
+What gets reported:
+
+- All unhandled errors that surface as `5xx` responses.
+- Panics (with full backtrace).
+- Non-panic `tracing::error!()` calls — including event-flusher
+  failures, snapshot-load failures, partition-missing errors.
+- Migration failures at startup.
+
+Per-request scope automatically attaches:
+
+- `request_id`, `org_id`, `project_id`, `route`, `method`
+- Sanitized request headers (no `Authorization`)
+- Token name (not the secret) when present
+
+Sentry DSN is optional in config; missing DSN disables reporting
+entirely (useful for local dev). Sentry is for errors only;
+performance/tracing live in OTel.
+
+### 10.5 Metrics
+
+Prometheus exposition at `/metrics`. Default labels: `project_id`,
+`org_id` (cardinality bounded — one row per active project).
+
+Required series:
+
+- `knievel_decision_requests_total{project_id, outcome}`
+- `knievel_decision_duration_seconds{project_id}` (histogram)
+- `knievel_event_flush_batch_size{project_id}` (histogram)
+- `knievel_event_channel_depth` (gauge, single global)
+- `knievel_event_channel_dropped_total{reason}` (counter)
+- `knievel_snapshot_age_seconds` (gauge, one per loader)
+- `knievel_partman_maintenance_runs_total{result}` (counter)
+- standard `process_*`, `tokio_*`, `sqlx_pool_*` series.
+
+### 10.6 Health and readiness
+
+- `/healthz` — liveness. `200` if the process is running.
+- `/readyz` — readiness. `200` only if (a) snapshot has loaded once,
+  (b) DB writer is reachable, (c) event flusher hasn't deadlocked,
+  (d) partman maintenance has run within the last 24 h.
+
+### 10.7 Graceful shutdown
+
+On SIGTERM:
+
+1. Stop accepting new connections (HTTP `Connection: close`).
+2. Drain in-flight requests up to `shutdown_drain_timeout` (default
+   30 s).
+3. Flush the event channel — final `COPY` of all buffered events.
+4. Close DB connections, OTel exporter, Sentry transport (with
+   their own bounded flush deadlines).
+5. Exit.
+
+Total budget bounded by `shutdown_total_timeout` (default 60 s).
+
+### 10.8 Database migrations
+
+`sqlx-cli`-style: plain SQL files in `migrations/`, embedded via
+`sqlx::migrate!()`. Run on startup if `database.auto_migrate: true`,
+or via `knievel-cli migrate`. All migrations target the configured
+schema and are idempotent at the migration-runner level (`_sqlx_migrations`).
 
 ## 11. Roadmap (post-v0)
 
@@ -437,5 +774,13 @@ Order is rough; each item is independently shippable.
 - [Kevel Management API tutorial](https://dev.kevel.com/docs/management-api-tutorial)
 - [Understanding Kevel](https://dev.kevel.com/docs/understanding-kevel)
 - [`poem-openapi`](https://docs.rs/poem-openapi/)
+- [`sqlx`](https://github.com/launchbadge/sqlx)
 - [`pg_partman`](https://github.com/pgpartman/pg_partman)
+- [`figment`](https://docs.rs/figment/) (layered configuration)
+- [`tracing`](https://docs.rs/tracing/) and
+  [`tracing-subscriber`](https://docs.rs/tracing-subscriber/)
+- [`opentelemetry-rust`](https://github.com/open-telemetry/opentelemetry-rust)
+- [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/)
+- [Sentry Rust SDK](https://docs.rs/sentry/)
 - [OpenAPI Generator](https://openapi-generator.tech)
+- [Aurora PostgreSQL extensions](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/AuroraPostgreSQL.Extensions.html)

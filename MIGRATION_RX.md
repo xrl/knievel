@@ -5,6 +5,68 @@ to `REQUIREMENTS.md` and `API.md`; **not part of the platform spec**.
 Knievel is a general-purpose ad platform; this document is one
 consumer's mapping.
 
+## Database Setup
+
+Knievel runs against a dedicated schema inside RX's existing Aurora
+Postgres cluster. No separate database, no separate cluster.
+
+### One-time provisioning (per environment)
+
+Run as a Postgres superuser (or via RX's IaC):
+
+```sql
+-- Extensions (one-time, cluster-level).
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_partman;
+
+-- Dedicated schema and role.
+CREATE SCHEMA knievel;
+CREATE ROLE knievel_app LOGIN PASSWORD :'knievel_password';
+
+GRANT USAGE, CREATE ON SCHEMA knievel TO knievel_app;
+GRANT USAGE ON SCHEMA partman TO knievel_app;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA partman TO knievel_app;
+
+ALTER ROLE knievel_app SET search_path = knievel, public;
+```
+
+`knievel_app` has **no grants on RX's tables**. Defense in depth
+against accidental joins or query bugs.
+
+### Connection budget
+
+Each knievel pod uses ~11 connections against the cluster:
+
+- 1 long-lived `LISTEN` (writer endpoint, never the reader).
+- 8 query-pool connections.
+- 2 event-flusher `COPY` connections.
+
+Two replicas → 22 connections. Coordinate with whoever owns the
+Aurora pgbouncer / connection limits.
+
+### Aurora endpoints
+
+`KNIEVEL_DATABASE_URL` must point at the **cluster writer endpoint**.
+`LISTEN/NOTIFY` does not propagate to readers, so a reader endpoint
+silently breaks snapshot refresh. Knievel reconnects with backoff
+across Aurora failovers automatically.
+
+### Backup blast radius
+
+`events_raw` partitions are part of RX's existing backup window. To
+keep that bounded, knievel's **default events retention is 30 days**
+(see `events.retention_days` in `config.yaml`). Bump only after
+checking with whoever owns the backup story.
+
+### Where the schema lives across environments
+
+| RX environment | Cluster | Schema | Role |
+|---|---|---|---|
+| `production` | `rx-prod-aurora` | `knievel` | `knievel_app` |
+| `staging` | `rx-staging-aurora` | `knievel` | `knievel_app` |
+
+Same schema name in both; isolation comes from the cluster boundary.
+
 ## Topology
 
 | RX environment | Knievel Org | Knievel Projects |
@@ -197,7 +259,9 @@ The `blocked_creative_ids` computation
 providers + archived organizations) **stays exactly as today**. It's
 RX state, knievel doesn't model it.
 
-## Configuration
+## Configuration (RX side)
+
+What RX's Rails app needs to set, to talk to knievel:
 
 | Old (Kevel) | New (Knievel) |
 |---|---|
@@ -205,6 +269,41 @@ RX state, knievel doesn't model it.
 | `KEVEL_NETWORK_ID` | (replaced by per-call `projectId`) |
 | `https://e-{network}.adzerk.net/api/v2` | `KNIEVEL_BASE_URL` (e.g. `https://ads.scientist.com`) |
 | (none) | `KNIEVEL_ORG_EXTERNAL_ID` (e.g. `scientist-com-prod`) |
+
+## Configuration (knievel deployment)
+
+Knievel itself is configured via `config.yaml` rendered from the Helm
+chart's `values.yaml`. RX's relevant Helm values for the deployment
+within RX's cluster:
+
+```yaml
+database:
+  host: rx-prod-aurora.cluster-xyz.us-east-1.rds.amazonaws.com
+  port: 5432
+  name: rx_production
+  schema: knievel
+  sslMode: require
+  existingSecret: knievel-db
+  maxConnections: 8
+
+events:
+  retentionDays: 30        # bounded for shared-cluster backups
+
+sentry:
+  enabled: true
+  existingSecret: knievel-sentry
+  environment: production
+
+otel:
+  enabled: true
+  endpoint: http://otel-collector.observability:4317
+  serviceName: knievel
+  resourceAttributes:
+    deployment.environment: production
+
+api:
+  publicBaseUrl: https://ads.scientist.com
+```
 
 ## Rollout Strategy
 

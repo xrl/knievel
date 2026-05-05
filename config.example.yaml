@@ -1,0 +1,73 @@
+# Knievel reference configuration.
+#
+# The running config is built by layering, in order of increasing precedence:
+#   1. Built-in defaults (compiled in).
+#   2. This file (path from $KNIEVEL_CONFIG, default /etc/knievel/config.yaml).
+#   3. Individual env-var overrides (KNIEVEL_*).
+#
+# `${VAR}` and `${VAR:default}` placeholders are expanded from the process
+# environment before YAML parsing. Unset `${VAR}` with no default is a hard
+# startup error.
+
+api:
+  bind_addr: 0.0.0.0:8080
+  # Used to mint absolute impression/click URLs in decision responses.
+  public_base_url: ${KNIEVEL_PUBLIC_BASE_URL}
+
+database:
+  # Cluster writer endpoint. LISTEN/NOTIFY does NOT propagate to readers,
+  # so a reader endpoint silently breaks snapshot refresh.
+  url: postgres://knievel_app:${DB_PASSWORD}@${DB_HOST}:${DB_PORT:5432}/${DB_NAME}?sslmode=require
+  schema: knievel
+  max_connections: 8
+  flusher_connections: 2
+  # Run sqlx migrations at startup. Operators who prefer out-of-band
+  # migrations leave this false and use `knievel-cli migrate`.
+  auto_migrate: false
+
+events:
+  # Bounded for shared-cluster deployments where backups include our data.
+  retention_days: 30
+  flush_interval_ms: 1000
+  flush_batch_size: 5000
+  # Channel saturation surfaces as 503 on the decision endpoint.
+  channel_capacity: 100000
+
+partman:
+  # In-process maintenance loop, no pg_cron required.
+  maintenance_interval_seconds: 3600
+  premake_partitions: 4
+
+hmac:
+  # Default per-project HMAC bootstrap. Each project rotates its own
+  # secret via `PATCH /v1/orgs/{orgId}/projects/{projectId}`.
+  default_secret: ${KNIEVEL_HMAC_DEFAULT_SECRET}
+
+logging:
+  level: ${KNIEVEL_LOG_LEVEL:info}
+  format: json
+  decisions_sample_rate: 0.01
+
+tracing:
+  otel:
+    enabled: true
+    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4317}
+    service_name: knievel
+    resource_attributes:
+      service.namespace: ${SERVICE_NAMESPACE:default}
+      deployment.environment: ${KNIEVEL_ENV:production}
+
+errors:
+  sentry:
+    # Empty DSN disables Sentry entirely (useful for local dev).
+    enabled: true
+    dsn: ${SENTRY_DSN:}
+    environment: ${KNIEVEL_ENV:production}
+    release: ${KNIEVEL_RELEASE:}
+    sample_rate: 1.0
+    # Performance/tracing live in OTel; Sentry is for errors only.
+    traces_sample_rate: 0.0
+
+shutdown:
+  drain_timeout_seconds: 30
+  total_timeout_seconds: 60
