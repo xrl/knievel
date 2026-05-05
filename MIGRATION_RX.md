@@ -386,6 +386,149 @@ Tokens" for the full picture.
 Keycloak stays in play for human OIDC (admin UI, future) and for any
 out-of-cluster integrations that need to talk to knievel.
 
+## Local Development for RX Engineers
+
+RX engineers run RX as a native `bin/rails server` process, with
+knievel coming up from docker-compose alongside Postgres. Auth in
+this setup is opaque-token-only — no Keycloak, no Kubernetes SA, no
+IdP dependencies. The token is provisioned automatically on first
+`docker compose up`.
+
+### The compose pieces
+
+In RX's repo (alongside the existing `compose.yaml` for Postgres,
+Redis, etc.), add a knievel section:
+
+```yaml
+services:
+  knievel-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER:     knievel_app
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB:       knievel
+    volumes:
+      - knievel-pgdata:/var/lib/postgresql/data
+      - ./dev/knievel-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knievel_app -d knievel"]
+      interval: 2s
+      retries: 30
+
+  knievel:
+    image: ghcr.io/xrl/knievel:latest
+    depends_on:
+      knievel-postgres: { condition: service_healthy }
+    environment:
+      KNIEVEL_CONFIG: /etc/knievel/config.yaml
+      DB_HOST: knievel-postgres
+      DB_NAME: knievel
+      DB_PASSWORD: dev
+    volumes:
+      - ./dev/knievel-config.yaml:/etc/knievel/config.yaml:ro
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/readyz"]
+      interval: 2s
+      retries: 30
+
+  knievel-seed:
+    image: ghcr.io/xrl/knievel:latest
+    depends_on:
+      knievel: { condition: service_healthy }
+    entrypoint:
+      - knievel-cli
+      - seed-demo
+      - --org-external-id=scientist-com-dev
+      - --project-external-id=rx-org-dev
+      - --token=kvl_dev_rx_local
+      - --write-token-to=/out/knievel-dev-token
+    environment:
+      DB_HOST: knievel-postgres
+      DB_NAME: knievel
+      DB_PASSWORD: dev
+    volumes:
+      - ./tmp:/out
+    restart: "no"
+
+volumes:
+  knievel-pgdata:
+```
+
+`dev/knievel-init.sql` runs once at first DB boot:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE SCHEMA IF NOT EXISTS knievel AUTHORIZATION knievel_app;
+ALTER ROLE knievel_app SET search_path = knievel, public;
+```
+
+`dev/knievel-config.yaml` (only the auth/dev-relevant bits; copy
+the rest from `config.example.yaml`):
+
+```yaml
+api:
+  bind_addr: 0.0.0.0:8080
+  public_base_url: http://localhost:8080
+database:
+  url: postgres://knievel_app:${DB_PASSWORD}@${DB_HOST}/${DB_NAME}?sslmode=disable
+  schema: knievel
+  auto_migrate: true
+auth:
+  modes: [opaque]    # no Keycloak, no SA tokens in dev
+errors:
+  sentry: { enabled: false, dsn: "" }
+tracing:
+  otel: { enabled: false }
+```
+
+### Rails side
+
+Add to RX's `.env.development`:
+
+```
+KNIEVEL_BASE_URL=http://localhost:8080
+KNIEVEL_TOKEN_FILE=tmp/knievel-dev-token
+```
+
+The gem reads the token from disk at boot (and on
+`SIGUSR1`-triggered re-reads, in case the seed re-ran). For
+engineers who'd rather hardcode, set
+`KNIEVEL_TOKEN=kvl_dev_rx_local` directly — the token's value is
+fixed in the compose file via `--token=`.
+
+`tmp/knievel-dev-token` should be gitignored.
+
+### Common workflows
+
+- **Wipe and start over:** `docker compose down -v knievel
+  knievel-postgres && docker compose up`. The seed sidecar re-runs
+  and re-mints the same token (because `--token=` is fixed in
+  compose).
+- **Update knievel:** `docker compose pull knievel && docker
+  compose up -d`. Migrations run automatically on startup
+  (`auto_migrate: true`).
+- **Inspect ad-serving state:** `docker compose exec
+  knievel-postgres psql -U knievel_app -d knievel` — connect
+  directly with the dev role.
+- **Reset just demo data:** `knievel-cli seed-demo --reset` rebuilds
+  the demo content without touching auth state or migrations.
+
+### Why no auth bypass for dev
+
+Tempting to skip auth entirely in dev, easy to ship that flag
+somewhere it shouldn't be. The opaque-token path is one
+`docker compose up` and zero runtime ceremony for engineers; the
+real auth code path runs every time. Cheap insurance.
+
+### When you'd want Keycloak in the dev stack
+
+Only when actively debugging the JWT path — claim-mapping rules,
+protocol-mapper changes on the Keycloak side, OIDC discovery
+behavior. For everyday RX feature work it's pure overhead. See
+`AUTH.md` "Local Development" → "Testing the JWT path locally" for
+how to layer Keycloak into the same compose stack.
+
 ## Configuration (RX side)
 
 What RX's Rails app needs to set, to talk to knievel:

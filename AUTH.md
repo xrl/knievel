@@ -451,6 +451,84 @@ Both modes can run simultaneously. Practical migration shape:
 Knievel doesn't preference one mode over the other — whichever the
 client presents wins.
 
+## Local Development
+
+Dev mode is **opaque-tokens-only**, self-bootstrapping via
+`knievel-cli seed-demo`. JWT issuers (Keycloak, K8s API server) stay
+disabled by default — neither is meaningfully available when the
+calling app is running natively from `bin/rails server` or
+equivalent.
+
+### The flow
+
+```
+docker compose up
+  ├── postgres                           (the dev cluster)
+  ├── knievel                            (auth.modes: [opaque])
+  └── knievel-seed                       (one-shot init)
+        runs: knievel-cli seed-demo \
+              --write-token-to=/out/knievel-dev-token
+        volume mount: ./tmp:/out
+```
+
+The seed sidecar:
+
+1. Waits for knievel's `/readyz` to return 200.
+2. Connects directly to Postgres (bypassing HTTP — bootstrap auth
+   is a chicken-and-egg problem; the CLI shares the schema and
+   writes rows in a transaction).
+3. Creates a demo Organization, demo Project, default Site/Zone,
+   one CreativeTemplate, and a sample
+   Advertiser → Campaign → Flight → Ad → Creative chain so
+   decision requests return something interesting.
+4. Mints one opaque Org Editor token, hashes it for storage, and
+   writes the plaintext value to the host-mounted file.
+
+The calling app reads that file from disk and uses it as the Bearer
+credential. Real auth code path, real opaque-token validation, no
+bypass — just no IdP in the picture.
+
+### Configuration knobs
+
+```yaml
+# config.yaml (dev overrides)
+auth:
+  modes: [opaque]               # JWT off in dev
+```
+
+```bash
+# Reproducible token value (e.g. for CI fixtures):
+knievel-cli seed-demo --token=kvl_dev_local_demo_token
+
+# Default: random token, written to the path passed to --write-token-to.
+```
+
+### Why no auth bypass
+
+We considered (and rejected) a "dev mode skips auth" flag. It's a
+common shortcut and a common security incident — a flag that ships
+to staging or worse. Opaque tokens are cheap to provision via the
+CLI; the seed sidecar makes it a single `docker compose up`. The
+real auth code path runs every time, so dev catches auth bugs that
+prod would otherwise hit first.
+
+### Testing the JWT path locally
+
+Optional, not the default. When debugging Keycloak protocol mappers
+or claim-mapping rules:
+
+1. Add a Keycloak service to the compose file (or point at a shared
+   dev-environment Keycloak).
+2. Configure knievel's `auth.modes: [opaque, jwt]` and add a
+   `jwt.issuers[]` entry for the dev realm.
+3. The calling app's gem is configured to fetch from Keycloak
+   instead of reading the token file.
+4. Both modes coexist; you can flip back without rebuilding.
+
+K8s ServiceAccount tokens are not a dev-mode concern. They're
+production/staging-cluster path only; the local native Rails
+process has no projected token to present.
+
 ## OIDC for Humans (post-v0)
 
 When the admin UI lands, humans authenticate via Keycloak using the
