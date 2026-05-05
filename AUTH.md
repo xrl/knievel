@@ -335,6 +335,49 @@ the kubelet rotates the file before expiry.
   no extra service in the path. Per-request auth is one signature
   verification against an in-cluster JWKS.
 
+### EKS: in-cluster issuer vs. external OIDC URL
+
+EKS clusters publish their ServiceAccount tokens via **two**
+discoverable issuers, and they identify *the same tokens* — just
+differ in how knievel reaches the JWKS:
+
+- **`https://kubernetes.default.svc.cluster.local`** — the standard
+  in-cluster issuer. JWKS at
+  `https://kubernetes.default.svc/openid/v1/jwks`. Reachable only
+  from pods inside the cluster. **This is what you want when
+  knievel runs in the same EKS cluster as the calling app.**
+- **`https://oidc.eks.<region>.amazonaws.com/id/<cluster-id>`** —
+  EKS's public per-cluster OIDC endpoint, primarily used by IRSA
+  (IAM Roles for Service Accounts). Reachable from outside the
+  cluster. Configured per-cluster; visible in the EKS console under
+  "OpenID Connect provider URL." Requires OIDC association to be
+  enabled on the cluster (default for any cluster that's been used
+  with IRSA).
+
+Pick by where knievel lives:
+
+| Scenario | Issuer to trust |
+|---|---|
+| Knievel and calling app in the same EKS cluster. | `https://kubernetes.default.svc.cluster.local` |
+| Knievel runs elsewhere (different cluster, EC2, on-prem) and is called by EKS pods. | `https://oidc.eks.<region>.amazonaws.com/id/<cluster-id>` |
+| Knievel called by pods from multiple EKS clusters. | One issuer entry per cluster's public OIDC URL. |
+
+Don't mix them — pick one per cluster you trust. Using the public
+URL for in-cluster traffic adds a needless public-endpoint
+dependency (DNS, NAT egress, key-cache hit on every cold start);
+using the in-cluster URL from outside the cluster doesn't resolve
+at all.
+
+The token contents are identical regardless of which issuer URL the
+JWKS is fetched from — the API server signs the same JWT either
+way. The only difference is the `iss` claim that ends up baked into
+the token, which has to match whichever URL knievel has configured.
+
+(Same nuance applies, in spirit, to GKE Workload Identity Federation
+and AKS — both expose external OIDC endpoints alongside the
+in-cluster one. We don't enumerate them here because RX is on EKS;
+the pattern transfers verbatim.)
+
 ### Alternatives (heavier)
 
 - **Token exchange via Keycloak.** Pod presents SA token to
