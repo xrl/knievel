@@ -22,11 +22,17 @@ JSON only. UTF-8 only.
 
 ### Authentication
 
-- **Management + Decision endpoints:** `Authorization: Bearer <token>`.
-  - **Org tokens** can address any Project in their Org via the
-    `/v1/projects/{projectId}/...` paths.
-  - **Project tokens** can only address their own Project.
-  - Wrong org or project for the token → `403`.
+- **Management + Decision endpoints:** `Authorization: Bearer <credential>`.
+  Two coexisting credential types are accepted (per-deployment config
+  picks which are enabled):
+  - **Opaque tokens** — prefix `kvl_<env>_<scope>_<random>`. DB
+    lookup. Org-scoped tokens may address any Project in their Org;
+    Project-scoped tokens are limited to their own Project.
+  - **JWTs** — standard three-segment JWT. Validated statelessly
+    against the issuer's JWKS (Keycloak or any OIDC provider).
+    Authorization context is read from a `knievel` claim (`scope`,
+    `org_id`, `project_id`, `role`). See `AUTH.md`.
+  - Wrong org or project for the credential → `403`.
 - **Event endpoints (`/e/...`)**: unauthenticated. Browsers hit them
   directly. Authorization is the HMAC signature in the URL.
 - **System endpoints**: unauthenticated by default; operator can put them

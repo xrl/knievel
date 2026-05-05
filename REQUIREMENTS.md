@@ -135,13 +135,24 @@ Concretely:
 
 ### 4.3 Authentication & authorization
 
-**Token types:**
+Knievel accepts two coexisting credential types on its Management and
+Decision endpoints. Per-deployment config picks which are enabled.
 
-- **Org token** — scoped to an Org and a role. May address any Project
-  within that Org via `/v1/projects/{projectId}/...`. The calling app's
-  primary credential.
-- **Project token** — scoped to a single Project and a role. For
-  per-tenant access (the eventual admin UI; per-customer integrations).
+| Mode | Format | Notes |
+|---|---|---|
+| **Opaque token** | `kvl_<env>_<scope>_<random>` | Minted by knievel, stored argon2id-hashed, revocable. Bootstrap and admin-UI sessions. |
+| **JWT** | Standard three-segment JWT | Validated statelessly against issuer JWKS. For deployments with Keycloak / OIDC already in place. |
+
+Detection is by prefix (`kvl_` for opaque, anything else parses as
+JWT). Either or both can be enabled simultaneously; cutover from
+opaque to JWT is a flag flip.
+
+**Token scopes (both modes):**
+
+- **Org-scoped** — addresses any Project in the Org via
+  `/v1/projects/{projectId}/...`. The calling app's primary credential.
+- **Project-scoped** — single Project. For per-tenant access (eventual
+  admin UI; per-customer integrations).
 
 **Roles:**
 
@@ -157,9 +168,20 @@ Org tokens carry a project-level role applied to every project they
 address (typically `org-admin` ⇒ Project Admin, or `org-editor` ⇒
 Project Editor).
 
-Token format: `kvl_<env>_<scope>_<random>` (e.g.
-`kvl_prod_org_AbCd_8f2a...`). Stored argon2id-hashed; never recoverable
-after creation. Revocable. Last-used timestamp tracked.
+**Opaque token format:** `kvl_<env>_<scope>_<random>` (e.g.
+`kvl_prod_org_AbCd_8f2a...`). Stored argon2id-hashed; never
+recoverable after creation. Revocable. Last-used timestamp tracked.
+
+**JWT validation:** issuer + audience check, signature verified
+against per-issuer JWKS (auto-discovered, cached, `kid`-rotation
+aware). Algorithm allow-list rejects `alg: none` and HMAC variants.
+Authorization context lives in a `knievel` custom claim (`scope`,
+`org_id`, `project_id`, `role`). Multiple issuers supported for
+federation.
+
+Full details — JWT claim shape, Keycloak protocol-mapper setup, JWKS
+config, mode-coexistence semantics, OIDC-for-humans roadmap — in
+`AUTH.md`.
 
 ### 4.4 Site Group scoping (roadmap)
 

@@ -54,6 +54,32 @@ hmac:
   # secret via `PATCH /v1/orgs/{orgId}/projects/{projectId}`.
   default_secret: ${KNIEVEL_HMAC_DEFAULT_SECRET}
 
+auth:
+  # Which credential modes to accept on Management/Decision endpoints.
+  # Either or both can be enabled. Detection is by Bearer prefix:
+  # opaque tokens start with `kvl_`; everything else parses as JWT.
+  modes: [opaque, jwt]
+
+  jwt:
+    # One or more trusted issuers. The first whose `iss` claim matches
+    # is used. JWKS is auto-discovered from
+    # {issuer}/.well-known/openid-configuration unless `jwks_url` is
+    # set explicitly.
+    issuers:
+      - issuer:    ${KNIEVEL_JWT_ISSUER:}
+        audience:  ${KNIEVEL_JWT_AUDIENCE:knievel}
+        jwks_url:  ""
+        # `alg: none` and HMAC variants are always rejected; this list
+        # narrows the asymmetric algorithms we'll accept.
+        algorithms: [RS256, ES256]
+        # Where the knievel claim lives in the JWT.
+        claim:        knievel
+        # `object` (default): single nested {scope, org_id, ...} object.
+        # `flat`: separate top-level claims (knievel_scope, knievel_org_id, ...).
+        claim_format: object
+        cache_ttl_seconds:  3600
+        clock_skew_seconds: 30
+
 logging:
   level: ${KNIEVEL_LOG_LEVEL:info}
   format: json

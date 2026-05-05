@@ -261,15 +261,72 @@ The `blocked_creative_ids` computation
 providers + archived organizations) **stays exactly as today**. It's
 RX state, knievel doesn't model it.
 
+## Authentication (Keycloak)
+
+RX's Rails app authenticates to knievel via JWTs issued by RX's
+existing Keycloak (`keycloak.scientist.com`). One Keycloak client per
+knievel environment.
+
+### Keycloak setup (per environment)
+
+Create a confidential client in the appropriate realm (e.g. `scientist`):
+
+- **Client ID**: `knievel-prod` (and `knievel-staging`).
+- **Client authentication**: ON.
+- **Service accounts roles**: ON.
+- **Standard flow** / **direct access grants**: OFF.
+
+Add two protocol mappers on the client:
+
+1. **Audience mapper** — *Mapper Type: Audience*, included custom
+   audience `knievel`, add to access token.
+2. **Hardcoded claim mapper** — *Token Claim Name: `knievel`*, *Claim
+   JSON Type: JSON*, *Claim value*:
+   ```json
+   {"scope": "org", "org_id": "scientist-com-prod", "role": "editor"}
+   ```
+   (substitute `scientist-com-staging` for staging).
+
+The Rails app obtains tokens via standard OAuth2 client credentials:
+
+```
+POST https://keycloak.scientist.com/realms/scientist/protocol/openid-connect/token
+grant_type=client_credentials
+client_id=knievel-prod
+client_secret=<from keycloak>
+```
+
+The returned access token (15-minute TTL by default) goes in the
+`Authorization: Bearer ...` header on every knievel call. The Ruby gem
+caches and refreshes automatically.
+
+### Knievel-side config (Helm values)
+
+```yaml
+auth:
+  modes: [jwt]
+  jwt:
+    issuers:
+      - issuer:    https://keycloak.scientist.com/realms/scientist
+        audience:  knievel
+        algorithms: [RS256]
+        claim:     knievel
+```
+
+No opaque tokens needed in steady state; identity stays in Keycloak.
+
 ## Configuration (RX side)
 
 What RX's Rails app needs to set, to talk to knievel:
 
 | Old (Kevel) | New (Knievel) |
 |---|---|
-| `KEVEL_API_KEY` | `KNIEVEL_ORG_TOKEN` |
+| `KEVEL_API_KEY` | (replaced by Keycloak client credentials below) |
 | `KEVEL_NETWORK_ID` | (replaced by per-call `projectId`) |
 | `https://e-{network}.adzerk.net/api/v2` | `KNIEVEL_BASE_URL` (e.g. `https://ads.scientist.com`) |
+| (none) | `KEYCLOAK_TOKEN_URL` (e.g. `https://keycloak.scientist.com/realms/scientist/protocol/openid-connect/token`) |
+| (none) | `KNIEVEL_KC_CLIENT_ID` (`knievel-prod` / `knievel-staging`) |
+| (none) | `KNIEVEL_KC_CLIENT_SECRET` |
 | (none) | `KNIEVEL_ORG_EXTERNAL_ID` (e.g. `scientist-com-prod`) |
 
 ## Configuration (knievel deployment)
