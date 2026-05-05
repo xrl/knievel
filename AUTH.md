@@ -393,6 +393,209 @@ the pattern transfers verbatim.)
 
 Both are additive — the JWKS code path is shared.
 
+## Authorization
+
+Authentication tells knievel **who** the caller is. Authorization
+decides **what they can do**. The model is small, explicit, and
+identical regardless of how the principal was identified — same role
+enum, same enforcement, whether the Bearer was an opaque token, a
+Keycloak JWT, or a Kubernetes SA token.
+
+### The model
+
+Five roles, two scopes:
+
+| Role | Scope | Capabilities |
+|---|---|---|
+| `org-owner` | Org | Manage org, billing, projects, members, all tokens. Implicit Project Admin on every project. |
+| `org-admin` | Org | Same minus billing and ownership transfer. Implicit Project Admin on every project. |
+| `admin` | Project (or "everywhere" via Org token) | Full CRUD on resources; manage project tokens / members. |
+| `editor` | Project (or "everywhere" via Org token) | CRUD on Advertisers, Campaigns, Flights, Ads, Creatives, Templates, Sites, Zones, Ad Library items. The integration role. |
+| `reader` | Project (or "everywhere" via Org token) | `GET` everything in scope, including `POST /decisions` and `POST /decisions:explain`. |
+
+Ordering for "at least":
+
+```
+reader < editor < admin < org-admin < org-owner
+```
+
+A token's `(scope, role)` is fixed at issuance — it doesn't change
+mid-session, doesn't escalate via headers, doesn't downgrade except
+by the operator revoking and reminting.
+
+### How a request is gated
+
+For every authenticated request, in order:
+
+1. **Principal extraction.** The auth layer (covered above) yields a
+   `Principal { token_type, scope, org_id, project_id?, role }`.
+   `project_id` is `Some` only for Project-scoped tokens.
+2. **Org match.** Compare the principal's `org_id` to the org
+   implied by the request path:
+   - `/v1/orgs/{orgId}/...` → must equal `principal.org_id`.
+   - `/v1/projects/{projectId}/...` → look up the project's parent
+     org from the snapshot; must equal `principal.org_id`.
+   Mismatch → `403 forbidden / wrong_tenant`.
+3. **Project match** (only for project-scoped paths).
+   - Project-scoped tokens: path `{projectId}` must equal the
+     token's `project_id`. Mismatch → `403 forbidden / wrong_project`.
+   - Org-scoped tokens: any project in the org is fine (org_id check
+     in step 2 already covered this).
+4. **Role check.** The endpoint declares a minimum role. Project
+   endpoints need a project-level role (or higher org role).
+   Org endpoints need the appropriate org-level role.
+   - Org-Admin/Owner tokens implicitly satisfy any Project Admin
+     requirement.
+   - An Org token with `role=editor` is treated as Project Editor
+     on every project in the org (and as a non-mutating org reader
+     for org-level GETs like listing projects or the Ad Library).
+   - `org-owner` is **not** automatically project-superuser beyond
+     `org-admin`; it adds billing/transfer powers, nothing else.
+   Insufficient role → `403 forbidden / role_insufficient`.
+
+All checks happen before any handler logic runs. A failed authz
+check looks identical from the outside whether the principal's scope
+or role was wrong; the response code (`forbidden`) is opaque, the
+detail string is what differentiates for log debugging.
+
+### Endpoint → minimum role
+
+#### Decision and Decision Explainer (project-scoped)
+
+| Endpoint | Min role | Notes |
+|---|---|---|
+| `POST /v1/projects/{p}/decisions` | `reader` | The query path. |
+| `POST /v1/projects/{p}/decisions:explain` | `reader` | Reveals nothing the caller can't already see via flight/ad/creative GETs. |
+| Decision request with **any** `force.*` field set | `admin` | Bypasses eligibility filters and reveals validity of arbitrary IDs; admin-level capability. Server inspects the body and escalates the required role accordingly. |
+
+#### Project resources (project-scoped, all under `/v1/projects/{p}/`)
+
+Resources: Advertisers, Campaigns, Flights, Ads, Creatives,
+CreativeTemplates, Sites, Zones.
+
+| Operation | Min role |
+|---|---|
+| `GET` (list, get) | `reader` |
+| `POST` create | `editor` |
+| `PATCH` update | `editor` |
+| `:batchUpsert` | `editor` |
+| `POST /creatives/{id}/image` | `editor` |
+
+Read-only inventory (Channels, Priorities, AdTypes):
+
+| Operation | Min role |
+|---|---|
+| `GET` | `reader` |
+
+#### Org resources (under `/v1/orgs/{o}/`)
+
+| Endpoint | Min role |
+|---|---|
+| `GET /projects` | `reader` (any token in org) |
+| `GET /projects/{id}` | `reader` |
+| `POST /projects` | `org-admin` |
+| `POST /projects:batchUpsert` | `org-admin` |
+| `PATCH /projects/{id}` | `org-admin` |
+| `GET /tokens` | `org-admin` |
+| `POST /tokens` | `org-admin` |
+| `DELETE /tokens/{id}` | `org-admin` |
+| `GET /members` | `org-admin` |
+| `POST /members` (invite) | `org-owner` |
+| `PATCH /members/{u}` (role change) | `org-owner` |
+| `DELETE /members/{u}` | `org-owner` |
+| `GET /ad-library/items` | `reader` (any token in org) |
+| `GET /ad-library/items/{id}` | `reader` |
+| `POST /ad-library/items` | `editor` (org-scoped) |
+| `PATCH /ad-library/items/{id}` | `editor` |
+| `POST /ad-library/items:batchUpsert` | `editor` |
+| `GET /ad-library/items/{id}/references` | `reader` |
+
+#### Public and system endpoints
+
+| Endpoint | Auth |
+|---|---|
+| `GET /e/i/{signed}` | None — HMAC in URL. |
+| `GET /e/c/{signed}` | None — HMAC in URL. |
+| `GET /openapi.json` | None by default (operator can gate via reverse proxy). |
+| `GET /healthz`, `/readyz`, `/metrics`, `/version` | None by default. |
+
+### Cross-cutting rules
+
+- **Project Editor + Ad Library references.** A Project Editor can
+  create an Ad that references `adLibraryItemId` (the library is
+  org-scoped, but referencing it from a project Ad is just a
+  validated foreign key). The library content itself remains
+  read-only to project-only tokens; mutation requires an org-scoped
+  Editor or higher.
+- **Ad Library item deletion (via `isActive: false`)** with
+  references still present succeeds (soft delete) but emits a
+  warning header (`X-Knievel-Warning: dangling_references`) listing
+  the project Ads that reference it. References continue to resolve
+  via the snapshot until they're updated.
+- **Org Owner self-removal** is rejected unless ownership is
+  transferred first. The endpoint returns `409 conflict /
+  last_owner`.
+- **Member's per-project roles** (when humans land via the admin UI)
+  are stored on the membership row, not the token. Tokens always
+  carry their full role set baked in at issuance.
+
+### Implementation
+
+The plan is per-handler role guards via a `poem-openapi` extractor:
+
+```rust
+#[handler]
+async fn upsert_advertiser(
+    Principal(p): Principal<RequireProject<Editor>>,
+    // ... other extractors ...
+) -> Result<Json<Advertiser>> { ... }
+```
+
+`Principal<R>` is generic over a `RequireRole` trait that encodes the
+minimum role + scope. The extractor:
+
+1. Pulls and validates the Bearer (opaque or JWT).
+2. Resolves project IDs in the path against the principal's scope.
+3. Compares the principal's effective role (with org-token
+   inheritance) against the endpoint's required role.
+4. Either yields the validated `Principal` or returns `401`/`403`.
+
+The OpenAPI spec advertises the requirement on each operation via
+`x-knievel-required-role: editor` (or similar) so generated clients
+can surface it in docs and test fixtures.
+
+### Audit and observability
+
+Every authz outcome is fed to the structured-log layer:
+
+- `Allow` → `INFO` with `principal_id`, `principal_role`,
+  `endpoint`, `request_id`. Decision-endpoint allows are sampled at
+  the same rate as the rest of the endpoint logging
+  (`logging.decisions_sample_rate`); other endpoints log full.
+- `Deny` → always logged at `WARN`, with the reason code
+  (`wrong_tenant` / `wrong_project` / `role_insufficient`). Also
+  captured to Sentry as a breadcrumb (not a thrown error — denials
+  are expected operational events) so a sudden spike in denials
+  shows up in dashboards.
+
+### What's deferred
+
+- **Site Group scoping.** Project members/tokens scoped to a subset
+  of Sites within a project. Roadmap; data model leaves room.
+- **Granular per-resource permissions.** A token that can read
+  decisions but not flights, etc. Out of scope; the four roles
+  cover the v0 use cases.
+- **Per-role rate limits.** Currently rate limits are per-token.
+  Per-role caps may emerge if abuse patterns demand it.
+- **Project-scoped token mint endpoints** (`POST
+  /v1/projects/{p}/tokens`). Currently all token mint flows go
+  through the org level. Adds value when the admin UI ships and
+  Project Admins want to mint scoped tokens without involving the
+  org admin.
+- **Attribute-based access control** (e.g. "this token can only
+  read Advertisers tagged `region=eu`"). Out of scope until a real
+  use case appears.
+
 ## Trade-offs
 
 ### Revocation is by expiry
