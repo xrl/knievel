@@ -2,42 +2,39 @@
 
 **Tagline:** Fearlessly fast ad delivery that steals the show.
 
-Knievel is a Rust ad server inspired by [Kevel](https://dev.kevel.com)'s
-domain model, but with its own clean OpenAPI-defined wire format. The first
-consumer is the RX app, which today calls Kevel directly; knievel will
-replace that integration via a generated Ruby client gem at the existing
-call sites.
+Knievel is a Rust ad-serving platform inspired by [Kevel](https://dev.kevel.com)'s
+domain model, with its own clean OpenAPI-defined wire format. It targets
+multi-tenant deployments — one process can host many isolated workspaces —
+and ships a generated client library alongside the server so calling apps
+speak the API through real types rather than hand-rolled HTTP.
 
-This document is the working spec. It will be wrong in places — we iterate.
+This document is the working spec. Wrong in places — we iterate.
 
 ## 1. Goals
 
-1. Replace RX's Kevel usage end-to-end: same call sites, same render path,
-   no behavior change visible to providers or end users.
-2. OpenAPI-first: the spec is the contract. The Rust server and the Ruby
-   client gem are both derived from it.
-3. Sub-millisecond p50 decision latency on a single node for typical RX
-   placements.
-4. Single statically-linked Rust binary + Postgres. No second datastore in
-   v0.
-5. A foundation that can grow into the broader Kevel feature surface
-   without rewrites.
+1. Deliver a clean OpenAPI 3.1 surface for ad serving + management. The spec
+   is the contract; both the Rust server and the generated client libraries
+   are derived from it.
+2. Native multi-tenancy: one binary serves many isolated Projects without
+   per-tenant infrastructure.
+3. Sub-millisecond p50 decision latency on a single node.
+4. Statically-linked Rust binary + Postgres. No second datastore in v0.
+5. A foundation that grows into the broader Kevel feature surface (UserDB,
+   geo, frequency capping, auctions, reporting) without rewrites.
+6. Minimal operator burden — a small team should be able to run knievel
+   without specialized ops staff.
 
 ## 2. Non-Goals (v0)
 
-- Kevel wire compatibility. We are not mimicking `divName`, `e-{networkId}.adzerk.net`,
-  the `text/plain` JSON CORS hack, or Kevel's URL conventions. Drop-in
-  compatibility is a Ruby gem swap, not a wire-format swap.
-- Browser-direct ad calls. RX proxies through its app server today; that
-  is the intended deployment shape (see §4).
-- UserDB / per-user behavioral targeting. RX does not use it.
+- Kevel wire compatibility. Drop-in compatibility for existing integrations
+  is the job of generated client libraries, not the server.
+- Browser-direct ad calls. Knievel assumes a trusted server-to-server
+  caller in v0; browser-direct is a v1+ deployment mode.
+- UserDB / per-user behavioral targeting.
 - Geo, IP, lat/long, radius, day-parting, keyword, custom-property
   targeting.
-- Frequency capping, pacing simulation, eCPM auctions, second-price
-  clearing, pricing data, relevancy scores.
-- Reporting API surface. RX tracks its own analytics from impression and
-  click pings.
-- Multi-network in a single binary.
+- Frequency capping, eCPM auctions, second-price clearing, pricing data.
+- Reporting API surface (callers track from impression/click pings in v0).
 - Web admin UI. CLI + API only.
 - Header bidding, OpenRTB, DSP/SSP integration.
 
@@ -46,19 +43,19 @@ These are explicitly future work, not "never." See §11.
 ## 3. Architecture
 
 ```
-┌──────────────┐    POST /v1/decisions    ┌──────────────┐
-│   RX app     │ ───────────────────────▶ │   knievel    │
-│  (Ruby gem)  │ ◀─────────────────────── │  (Rust/poem) │
-└──────────────┘                          └──────┬───────┘
-       ▲                                         │
-       │                                  in-mem │ snapshot
-       │                                         ▼
-       │                                  ┌──────────────┐
-       └─ impression/click pings ────────▶│   Postgres   │
-          GET /e/i/<sig>                  │   (config +  │
-          GET /e/c/<sig>                  │  partitioned │
-                                          │   events)    │
-                                          └──────────────┘
+┌──────────────┐     POST /v1/projects/{p}/decisions    ┌──────────────┐
+│ Calling app  │ ──────────────────────────────────────▶│   knievel    │
+│ (via gen'd   │ ◀──────────────────────────────────────│ (Rust/poem)  │
+│  client lib) │                                         └──────┬───────┘
+└──────────────┘                                                │
+       ▲                                                in-mem  │
+       │                                              snapshot  ▼
+       │                                                  ┌──────────────┐
+       └─ impression/click pings ─────────────────────────▶│   Postgres   │
+          GET /e/i/<sig>                                   │  (config +   │
+          GET /e/c/<sig>                                   │  partitioned │
+                                                           │   events)    │
+                                                           └──────────────┘
 ```
 
 - **Web framework:** [`poem`](https://github.com/poem-web/poem) +
@@ -66,211 +63,284 @@ These are explicitly future work, not "never." See §11.
   response types are annotated; the OpenAPI spec is generated from the
   binary and exposed at `GET /openapi.json`.
 - **Datastore:** Postgres for both configuration (source of truth) and
-  events (partitioned). No Redis in v0.
-- **Hot path:** the configuration snapshot lives in process memory,
-  refreshed on change notification. Decision requests touch RAM only.
+  events (range-partitioned). No Redis in v0.
+- **Hot path:** the configuration snapshot lives in process memory, keyed
+  by `(project_id, resource)`, refreshed on change notification. Decision
+  requests touch RAM only.
 - **Event path:** decision/impression/click events are buffered in an
   in-process channel and `COPY`'d to Postgres in batches every 1–2 s.
 
-## 4. Integration Shape
+## 4. Multi-Tenancy
+
+Knievel uses a two-level tenant hierarchy:
+
+- **Organization** — billing entity, user roster, owns API tokens that may
+  span its Projects.
+- **Project** — an isolated ad-serving workspace. Has its own Advertisers,
+  Campaigns, Flights, Ads, Creatives, Sites, Zones, taxonomies. Hard
+  isolation between Projects in the same Org.
+
+A single-tenant deployment is just one Org with one Project — the same
+shape Kevel calls a "Network."
+
+### 4.1 Common deployment patterns
+
+Knievel supports — and stays ergonomic across — three shapes:
+
+- **Single-project deployment.** One publisher, one Org, one Project. The
+  simplest shape; analogous to one Kevel Network.
+- **Project-per-environment.** `prod`, `staging`, `dev` as sibling Projects
+  under one Org. A single Org token can address all three.
+- **Project-per-tenant.** A multi-tenant calling app spins up one Project
+  per end customer. Hundreds of small Projects are fine; provisioning is
+  a single idempotent API call.
+
+Knievel does not pick one for you.
+
+### 4.2 Integration shape
 
 Knievel is designed for **server-to-server** calls from a trusted upstream
-(the app server). Browser-direct mode is a future addition.
+(the calling app). Browsers do not call the Decision API directly in v0;
+they only hit the public event endpoints (`/e/...`).
 
-This matches industry direction for first-party ad serving: ad-blocker
-resistance, server-side enrichment, simpler auth, easier backend swaps.
+Why proxy-first:
+
+- **Ad-blocker resistance.** Decision requests originate from the calling
+  app's own infrastructure, not a known ad-network domain.
+- **Server-side enrichment.** The calling app can enrich the request with
+  trusted context (auth state, A/B bucket, subscription tier).
+- **Caller-driven post-filtering** via `block.creativeIds` / etc., for
+  state knievel doesn't model (e.g., "this listing was just unpublished").
+- **Simpler auth.** One Bearer token, not per-browser bot filtering +
+  signed requests + CORS preflights.
 
 Concretely:
 
-- The decision endpoint takes a Bearer token. One trusted credential per
-  network; no per-browser bot filtering, no CORS preflight, no signed
-  client requests.
+- Decision and Management endpoints take `Authorization: Bearer <token>`.
 - Plain `application/json`. No `text/plain` workaround.
-- CORS is off by default. Browser-direct mode (CORS, anonymous decision,
-  rate-limited, bot-signal aware) is a v1+ feature.
-- Impression and click pings are GETs that browsers hit directly; their
+- CORS off by default. Browser-direct mode (CORS, anonymous decision,
+  bot filtering) is a v1+ feature.
+- Impression/click pings are GETs that browsers hit directly; their
   signatures are HMAC-minted at decision time.
+
+### 4.3 Authentication & authorization
+
+**Token types:**
+
+- **Org token** — scoped to an Org and a role. May address any Project
+  within that Org via `/v1/projects/{projectId}/...`. The calling app's
+  primary credential.
+- **Project token** — scoped to a single Project and a role. For
+  per-tenant access (the eventual admin UI; per-customer integrations).
+
+**Roles:**
+
+| Role | Scope | Capabilities |
+|---|---|---|
+| Org Owner | Org | Manage org, billing, projects, members, all tokens. |
+| Org Admin | Org | Same minus billing and ownership transfer. |
+| Project Admin | Project | Full CRUD on resources; manage project members and tokens. |
+| Project Editor | Project | CRUD on Advertisers/Campaigns/Flights/Ads/Creatives/Templates/Sites/Zones. The integration role. |
+| Project Reader | Project | `GET` everything in the project, including issuing decisions. |
+
+Org tokens carry a project-level role applied to every project they
+address (typically `org-admin` ⇒ Project Admin, or `org-editor` ⇒
+Project Editor).
+
+Token format: `kvl_<env>_<scope>_<random>` (e.g.
+`kvl_prod_org_AbCd_8f2a...`). Stored argon2id-hashed; never recoverable
+after creation. Revocable. Last-used timestamp tracked.
+
+### 4.4 Site Group scoping (roadmap)
+
+A future Site Group entity will let Project members and tokens be scoped
+to a subset of Sites within a Project — for cases where multiple
+sub-tenants share a Project but should be admin-isolated from each
+other. Not v0; called out so the data model leaves room for it.
 
 ## 5. Domain Model
 
-Borrowed from Kevel because the hierarchy is sound:
-
 ```
-Network
-  └── Advertiser
-        └── Campaign
-              └── Flight              (date-bounded delivery rules)
-                    └── Ad            (flight-to-creative binding + weight)
-                          └── Creative
-
-Network
-  ├── Channel ── Site ── Zone
-  ├── Priority                         (waterfall tier)
-  └── AdType                           (format/size identifier)
+Organization                                  ← billing, users
+  └── Project                                  ← isolated workspace
+        ├── Advertiser → Campaign → Flight → Ad → Creative
+        ├── Channel → Site → Zone              ← inventory
+        ├── Priority                           ← waterfall tier
+        ├── AdType                             ← format/size identifier
+        └── CreativeTemplate                   ← native-ad value schema
 ```
 
-Every entity carries an `externalId` (string, unique within network) so
-RX's syncer can drive knievel from its own `KevelAd` records without
-maintaining an ID mapping table.
+The inventory chain (Channel → Site → Zone) and demand chain (Advertiser →
+Campaign → Flight → Ad → Creative) are unchanged from Kevel; only the
+top-level grouping is renamed (Project) and bumped under an Org.
+
+Every persistable entity carries:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Server-assigned, project-scoped (or org-scoped for orgs/projects). |
+| `externalId` | string \| null | Caller-assigned, unique within `(project, resource)`. |
+| `etag` | string | Opaque concurrency token for `If-Match`. |
+| `createdAt` | RFC 3339 | |
+| `updatedAt` | RFC 3339 | |
+| `isActive` | bool | Soft-delete via `isActive: false`; v0 has no hard delete. |
+
+Sites additionally carry:
+
+| Field | Type | Notes |
+|---|---|---|
+| `url` | string | Unique within the project (across `url` + `aliases`). |
+| `aliases` | string[] | Additional URLs that resolve to this site. |
+
+The Decision API can resolve a placement's site by `siteId`, `siteUrl`,
+or `siteExternalId`. URL lookup matches `url` and `aliases`.
 
 ## 6. API Surface (v0)
 
 OpenAPI 3.1, served at `/openapi.json`. Bearer auth. Cursor pagination.
-`Idempotency-Key` header documented as part of the spec.
+`Idempotency-Key` documented as part of the spec. Path-prefixed:
 
-### 6.1 Decision API
+- `/v1/orgs/{orgId}/...` — org-level operations (provisioning, tokens,
+  members).
+- `/v1/projects/{projectId}/...` — everything else (resources, decisions).
+- `/e/...` — public event tracking (HMAC-signed, no auth).
+- `/healthz`, `/readyz`, `/metrics`, `/openapi.json`, `/version` — system.
 
-`POST /v1/decisions`
+Full endpoint list, request/response shapes, and conventions live in
+`API.md`.
+
+### 6.1 Decision API summary
+
+`POST /v1/projects/{projectId}/decisions`
 
 ```json
 {
+  "context": {
+    "url":       "https://example.com/article/42",
+    "referrer":  "https://www.google.com/...",
+    "userAgent": "Mozilla/5.0 ..."
+  },
   "placements": [
     {
-      "id": "header",
-      "siteId": 12,
+      "id":      "header",
+      "siteUrl": "https://example.com",
       "zoneIds": [34],
       "adTypes": [16],
-      "count": 1,
-      "force": { "adId": null, "campaignId": null, "flightId": null }
+      "count":   1
     }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "decisions": {
-    "header": [
-      {
-        "adId": 9001,
-        "creativeId": 4242,
-        "flightId": 333,
-        "campaignId": 444,
-        "advertiserId": 555,
-        "priorityId": 1,
-        "externalId": "kevel_ad:7788",
-        "clickUrl": "https://ads.example.com/e/c/AbCd...",
-        "impressionUrl": "https://ads.example.com/e/i/EfGh...",
-        "creative": {
-          "type": "native",
-          "template": "sponsored_card_v1",
-          "values": {
-            "title": "...",
-            "body": "...",
-            "imageUrl": "...",
-            "ctaText": "..."
-          }
-        }
-      }
-    ]
+  ],
+  "block": {
+    "creativeIds":   [],
+    "advertiserIds": [],
+    "campaignIds":   []
   }
 }
 ```
 
-Notes:
-- `decisions[id]` is **always an array**, even when `count == 1`. Empty
-  array means no eligible ad. (Kevel's "object-or-array" quirk is gone.)
-- `creative` is a `oneOf` — `image`, `html`, `native` — typed, not a hash
-  blob.
-- `externalId` is echoed so the caller can correlate without a lookup.
-
 Selection algorithm:
+
 1. Filter to flights active at request time (date window).
 2. Filter to ads matching `siteId`/`zoneIds`/`adTypes`.
-3. Apply `force.*` overrides (debug / testing).
-4. Group by priority tier; highest non-empty tier wins.
-5. Within tier: weighted random by ad weight.
-6. Mint HMAC-signed click and impression URLs.
+3. Apply `force.*` overrides (debug only; not for production traffic).
+4. Apply `block.*` exclusions (caller-derived state).
+5. Group by priority tier; highest non-empty tier wins.
+6. Within tier: weighted random by ad weight.
+7. Mint HMAC-signed click and impression URLs.
 
-### 6.2 Management API
+`decisions[<id>]` is always an array. Empty = no eligible ad. `creative`
+is a typed `oneOf` (image / html / native).
 
-REST, JSON, Bearer auth, cursor pagination.
+`context` fields are informational: stored on event rows, available to
+future URL-pattern targeting; never used for tenant routing (the project
+ID in the path is the only authoritative tenant signal).
+
+`block` is the post-filter exclusion set. Knievel doesn't model the
+caller's domain (subscription state, archival, etc.); the caller computes
+the blocklist and passes it.
+
+### 6.2 Management API summary
+
+Full CRUD plus bulk-upsert for the demand and inventory chains:
 
 | Resource | Endpoints |
 |---|---|
-| Advertiser | `POST/GET/PATCH /v1/advertisers`, `GET /v1/advertisers/{id}`, `POST /v1/advertisers:batchUpsert` |
-| Campaign | `POST/GET/PATCH /v1/campaigns`, `GET /v1/campaigns/{id}` |
-| Flight | `POST/GET/PATCH /v1/flights`, `GET /v1/flights/{id}` |
-| Ad | `POST/GET/PATCH /v1/ads`, `GET /v1/ads/{id}`, `POST /v1/ads:batchUpsert` |
-| Creative | `POST/GET/PATCH /v1/creatives`, `GET /v1/creatives/{id}`, `POST /v1/creatives/{id}/image` (multipart) |
-| CreativeTemplate | `POST/GET/PATCH /v1/creative-templates`, `GET /v1/creative-templates/{id}` |
-| Site | `GET /v1/sites`, `GET /v1/sites/{id}` |
-| Zone | `GET /v1/zones`, `GET /v1/zones/{id}` |
-| Channel | `GET /v1/channels`, `GET /v1/channels/{id}` |
-| Priority | `GET /v1/priorities` |
-| AdType | `GET /v1/ad-types` |
+| Advertiser | CRUD + `:batchUpsert` |
+| Campaign | CRUD + `:batchUpsert` |
+| Flight | CRUD + `:batchUpsert` |
+| Ad | CRUD + `:batchUpsert` |
+| Creative | CRUD + image upload |
+| CreativeTemplate | CRUD |
+| Site | CRUD + `:batchUpsert` + `:upsertByUrl` |
+| Zone | CRUD + `:batchUpsert` |
 
-All write endpoints accept an optional `Idempotency-Key` header; replays
-within 24 h return the original response. Bulk upserts are atomic per
-batch and keyed on `externalId`.
+Read-only inventory taxonomy (per-project but rarely changed):
 
-Lookups by external ID: `GET /v1/ads?externalId=kevel_ad:7788` returns the
-canonical record. RX's syncer uses this rather than maintaining its own
-mapping table.
+| Resource | Endpoints |
+|---|---|
+| Channel | List, Get |
+| Priority | List, Get |
+| AdType | List, Get |
 
-### 6.3 Event Tracking
+All write endpoints accept `Idempotency-Key`. Bulk upserts are atomic
+per batch and keyed on `externalId`. Sites' `:upsertByUrl` is a
+first-class natural-key endpoint for URL-driven flows.
 
-- `GET /e/i/{signed}` — impression. Returns `204 No Content` (or 1×1 GIF
-  if `?fmt=gif`).
-- `GET /e/c/{signed}` — click. Returns `302` to the creative's click-through
-  URL.
+### 6.3 Event tracking
 
-Signed payloads are HMAC-SHA256 over `(network, ad, creative, placement,
-ts, nonce)` with a per-network secret. Replays past a configurable TTL
-(default 24 h) are accepted but flagged. Tampered signatures drop with a
-counter increment.
+- `GET /e/i/{signed}` — impression. `204 No Content` (or 1×1 GIF if
+  `?fmt=gif`).
+- `GET /e/c/{signed}` — click. `302` to the creative's
+  `clickThroughUrl`.
 
-### 6.4 Creative Templates (native ads)
-
-RX's `CreativeTemplate` + dynamic JSONB values pattern, modeled as typed
-OpenAPI variants:
-
-- A `CreativeTemplate` defines a name and a JSON Schema for `values`.
-- A `Creative` of type `native` references a template and supplies `values`
-  conforming to that schema.
-- The decision response returns the template name and validated `values`,
-  not a rendered string. Rendering stays client-side.
+HMAC-SHA256 signatures over `(project_id, ad_id, creative_id,
+placement_id_hash, issued_at, nonce)` with a per-project secret. TTL
+configurable per project (default 24 h).
 
 ## 7. Storage
 
 ### 7.1 Configuration
 
-Postgres. One schema per network (or a `network_id` column — TBD).
-Mutated only via the Management API. Acts as source of truth.
+Postgres. All entities carry `(org_id, project_id)` columns; isolation
+enforced at the query layer and via Postgres row-level security policies
+(defense in depth).
 
-Snapshot loader subscribes via `LISTEN/NOTIFY` to a `config_changed`
-channel. On notify, it pulls the diff and atomically swaps the in-memory
-snapshot. Cold-start hydration is a single query per table.
+Source of truth. Mutated only via the Management API. Snapshot loader
+subscribes via `LISTEN/NOTIFY` to a `config_changed` channel; pulls
+diffs and atomically swaps the in-memory snapshot. Cold-start hydration
+is one query per table.
+
+The in-memory snapshot is keyed by `(project_id, resource)` so a single
+process can serve thousands of small Projects efficiently.
 
 ### 7.2 Events
 
 Two tables:
 
 - **`events_raw`** — append-only, range-partitioned by day, managed with
-  `pg_partman`. Columns: `ts`, `network_id`, `kind` (`decision` |
-  `impression` | `click`), `placement_id`, `ad_id`, `creative_id`,
-  `flight_id`, `campaign_id`, `advertiser_id`, `signature_nonce`,
-  `dedup_key`. Retention 30–90 days; old partitions detached and dropped.
-- **`events_rollup`** — hourly aggregates by `(network_id, site_id,
+  `pg_partman`. Columns: `ts`, `org_id`, `project_id`, `kind`
+  (`decision` | `impression` | `click`), `placement_id`, `site_id`,
+  `zone_id`, `ad_id`, `creative_id`, `flight_id`, `campaign_id`,
+  `advertiser_id`, `url`, `referrer_host`, `user_agent_hash`,
+  `signature_nonce`, `dedup_key`. Retention 30–90 days; old partitions
+  detached and dropped.
+- **`events_rollup`** — hourly aggregates by `(project_id, site_id,
   zone_id, flight_id, ad_id, creative_id, kind)`. Computed by a periodic
   job before raw partitions age out. Indefinite retention.
 
 ### 7.3 Write path
 
 Per-request DB I/O is forbidden on the hot path. Events go to a bounded
-`tokio::sync::mpsc` channel. A flusher task drains every 1–2 s (or 5k
+`tokio::sync::mpsc` channel. A flusher task drains every 1–2 s (or 5 k
 events, whichever first) and `COPY`s into the current `events_raw`
 partition. Channel saturation surfaces as `503` on the decision endpoint
 rather than silent loss.
 
 ### 7.4 What's deferred
 
-- **Redis** — only needed for frequency capping and per-user pacing
-  counters, neither of which v0 supports. Add when needed.
+- **Redis** — only needed when frequency capping or per-user pacing
+  ships.
 - **TimescaleDB / ClickHouse** — escape hatches if/when partitioned
-  Postgres stops keeping up. RX's volume does not warrant either now.
+  Postgres stops keeping up.
 
 ## 8. Deliverables
 
@@ -278,34 +348,40 @@ rather than silent loss.
    migrations.
 2. **`openapi.yaml`** — generated from the binary by `cargo xtask
    openapi`, committed to the repo, served at `/openapi.json`.
-3. **`knievel-ruby`** gem — generated from the spec via
-   `openapi-generator-cli` in CI, published on tag.
-4. **Migration guide** — per-call-site mapping from RX's `Kevel::*`
-   classes to `Knievel::*`. One PR per call site.
+3. **Generated client libraries** — at minimum a Ruby gem
+   (`knievel-ruby`) generated via `openapi-generator-cli` in CI,
+   published on tag. Other languages on demand.
+4. **`knievel-cli`** — admin CLI for project provisioning, token
+   rotation, snapshot inspection, migration replay. Shares the OpenAPI
+   client.
 5. **Compose / Helm manifests** — knievel + Postgres for local dev and
    single-node deployment.
 
+Per-consumer migration guides (e.g., `MIGRATION_RX.md`) live alongside
+the spec but are not part of the v0 platform deliverable surface.
+
 ## 9. Performance Targets
 
-Single node, 4 vCPU / 8 GB RAM, 100k active flights:
+Single node, 4 vCPU / 8 GB RAM, 100 k active flights:
 
-- p50 decision latency ≤ **1 ms** (1 placement, no force overrides).
+- p50 decision latency ≤ **1 ms** (1 placement, no overrides).
 - p99 decision latency ≤ **10 ms** (4 placements).
 - Sustained throughput ≥ **20 000 decisions/sec** before saturating one
   core.
 - Cold-start to first decision served ≤ **2 s**.
 - Event flusher keeps end-to-end ingest lag ≤ **3 s** at peak.
 
-These are starting numbers; we measure and adjust.
+Starting numbers; we measure and adjust.
 
 ## 10. Operational
 
 - Config via env vars + optional TOML (`KNIEVEL_DATABASE_URL`,
-  `KNIEVEL_LISTEN_ADDR`, `KNIEVEL_HMAC_SECRET`, `KNIEVEL_API_KEYS`).
+  `KNIEVEL_LISTEN_ADDR`, `KNIEVEL_HMAC_DEFAULT_SECRET`,
+  `KNIEVEL_PUBLIC_BASE_URL`).
 - Structured JSON logs via `tracing`. Decision-endpoint sampling at 1%
   by default; full sample on errors.
-- Prometheus `/metrics`. Counters by `(network, site, zone, decision_outcome)`
-  and `(network, kind)` for events.
+- Prometheus `/metrics`. Counters by `(project, decision_outcome)` and
+  `(project, kind)` for events.
 - Health: `/healthz` (liveness), `/readyz` (snapshot loaded, DB
   reachable, flusher healthy).
 - Graceful shutdown: stop accepting requests, drain in-flight, flush
@@ -314,42 +390,46 @@ These are starting numbers; we measure and adjust.
 
 ## 11. Roadmap (post-v0)
 
-Order is rough. Each item is independently shippable.
+Order is rough; each item is independently shippable.
 
 1. **Frequency capping** — Redis joins the stack.
-2. **Custom-property targeting** — flight predicates over arbitrary key/
-   value pairs supplied in the decision request.
+2. **Custom-property targeting** — flight predicates over arbitrary
+   key/value pairs supplied in the decision request.
 3. **Geo / IP targeting** — MaxMind DB on the snapshot side.
 4. **Day-parting** — per-flight schedule.
 5. **eCPM auctions** — second-price clearing within auction priorities.
 6. **Reporting API** — query the rollup table; queue/poll model for
    heavy reports.
 7. **Browser-direct mode** — CORS, anonymous decision endpoint, bot
-   filtering.
+   filtering, rate limits.
 8. **UserDB-equivalent** — opaque user keys, interests, opt-out, GDPR
-   forget. Designed fresh, not copied.
+   forget. Designed fresh.
 9. **Webhooks** — flight exhausted, sync complete, etc.
-10. **Multi-network single-binary** — currently one process per network.
-11. **Decision Explainer** — return per-candidate reason codes for
-    debugging.
-12. **Custom events** — likes, shares, video quartiles beyond
-    impression/click.
+10. **Site Group scoping** — Project members/tokens scoped to a subset
+    of Sites for sub-tenant admin isolation.
+11. **Cross-project broadcast upsert** — for ads that span many Projects
+    in an Org.
+12. **Decision Explainer** — per-candidate reason codes for debugging.
+13. **Custom event types** beyond impression/click (likes, shares, video
+    quartiles).
+14. **Web admin UI**.
+15. **SSO / OIDC** for the admin UI.
+16. **Write endpoints for Channel / Priority / AdType**.
 
 ## 12. Open Questions
 
-- Network isolation: schema-per-network vs `network_id` column.
-  Schema-per-network gives cleaner blast radius and easier per-tenant
-  backups; column is simpler ops. Lean toward column for v0, schema for
-  multi-tenant later.
-- Snapshot refresh: pure `LISTEN/NOTIFY` vs notify-then-poll-with-version.
-  Notify alone is lossy under load; version polling as a backstop is
-  probably worth the complexity.
-- Image hosting for creatives: store in Postgres bytea, on local disk, in
-  S3? Defer to operator (configurable backend) but pick a default.
-- `CreativeTemplate` schema language: JSON Schema is the obvious answer;
-  confirm `poem-openapi` can express the cross-reference cleanly.
-- Migration cadence with RX: big-bang gem swap vs feature-flagged
-  per-placement rollout. Probably the latter, but RX team owns that call.
+- **Snapshot refresh strategy** — pure `LISTEN/NOTIFY` is lossy under
+  load; a notify-then-version-poll backstop is probably worth the
+  complexity.
+- **Image hosting backend** — operator-configurable (S3-compatible,
+  local disk, Postgres bytea), but pick a default. Lean S3 for the
+  reference deployment.
+- **CreativeTemplate schema language** — JSON Schema is the obvious
+  answer; verify `poem-openapi` expresses the cross-reference cleanly.
+- **Cross-project ads** — duplicate-on-write vs. broadcast endpoint vs.
+  an "ad library" abstraction. Defer until a real use case appears.
+- **User/auth backend for the admin UI** — local accounts vs. SSO-only.
+  Lean SSO-only when the UI ships.
 
 ## References
 
@@ -358,4 +438,4 @@ Order is rough. Each item is independently shippable.
 - [Understanding Kevel](https://dev.kevel.com/docs/understanding-kevel)
 - [`poem-openapi`](https://docs.rs/poem-openapi/)
 - [`pg_partman`](https://github.com/pgpartman/pg_partman)
-- [OpenAPI Generator (Ruby)](https://openapi-generator.tech/docs/generators/ruby)
+- [OpenAPI Generator](https://openapi-generator.tech)
