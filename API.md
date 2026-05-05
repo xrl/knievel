@@ -243,6 +243,68 @@ signal.
   - `{"type":"native","template":..,"values":{...},"clickThroughUrl":..}`
 - All URL fields are absolute.
 
+### `POST /v1/projects/{projectId}/decisions:explain`
+
+A debug companion to `decisions`. Accepts the **same request body**
+and returns the same `decisions` payload, plus a per-placement
+`explanation` array showing every candidate ad and the rules that
+were applied to it. No event is recorded; no impression / click URL
+is minted (the URLs returned are dummy placeholders, marked as such).
+
+Same auth as `decisions` (any role with read access to the project).
+Rate-limited more aggressively than production decisions (default
+60 req/min per token).
+
+**Response (200):**
+
+```json
+{
+  "decisions": { "header": [ ...same shape as /decisions... ] },
+  "explanation": {
+    "header": {
+      "priorityTier":  1,
+      "selectedAdId":  9001,
+      "candidates": [
+        {
+          "adId":         9001,
+          "creativeId":   4242,
+          "flightId":     333,
+          "campaignId":   444,
+          "advertiserId": 555,
+          "weight":       100,
+          "evaluation": [
+            { "rule": "flight_active",      "result": "pass" },
+            { "rule": "site_match",         "result": "pass" },
+            { "rule": "ad_type_match",      "result": "pass" },
+            { "rule": "block_creative_ids", "result": "pass" },
+            { "rule": "weighted_random",    "result": "selected" }
+          ]
+        },
+        {
+          "adId":         9002,
+          "creativeId":   4243,
+          "flightId":     333,
+          "campaignId":   444,
+          "advertiserId": 555,
+          "weight":       100,
+          "evaluation": [
+            { "rule": "flight_active", "result": "pass" },
+            { "rule": "site_match",    "result": "fail",
+              "detail": "site_id 12 not in flight.site_ids [99]" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+`evaluation` entries appear in evaluation order; `result` is one of
+`pass`, `fail`, `selected`, `not_selected`. `detail` is populated on
+fails and on rules that produced random outcomes. The shape is meant
+to be diff-friendly between two requests so traffickers can spot
+"what changed."
+
 ---
 
 ## 2. Org Operations
@@ -693,7 +755,6 @@ the roadmap items in `REQUIREMENTS.md` §11. Calls return `404` with
 `code: "not_implemented"`.
 
 - `POST /v1/projects/{projectId}/users/*` — UserDB.
-- `POST /v1/projects/{projectId}/decisions:explain` — Decision Explainer.
 - Frequency-cap configuration on flights.
 - Geo / IP / day-parting / keyword / custom-property targeting fields.
 - `POST /v1/projects/{projectId}/reports/*` — Reporting API.

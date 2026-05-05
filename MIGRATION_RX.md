@@ -69,6 +69,31 @@ checking with whoever owns the backup story.
 
 Same schema name in both; isolation comes from the cluster boundary.
 
+### dbt access
+
+The data science team's existing dbt pipeline reads from `public.*`
+tables in the same Aurora clusters. Knievel's tables become
+additional sources, joined freely with the existing models. Concrete
+sources YAML, bronze/silver/gold examples, and snapshot patterns
+live in `REPORTING.md`.
+
+Knievel ships with a `knievel_reader` role for this purpose:
+
+```sql
+CREATE ROLE knievel_reader;
+GRANT USAGE ON SCHEMA knievel TO knievel_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA knievel TO knievel_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE knievel_app IN SCHEMA knievel
+  GRANT SELECT ON TABLES TO knievel_reader;
+
+-- Grant to RX's existing dbt service account.
+GRANT knievel_reader TO dbt_service;
+```
+
+Point dbt at the Aurora **reader endpoint** for these queries —
+keeps the writer's I/O budget focused on knievel's hot path. (Knievel
+itself still uses the writer endpoint for `LISTEN/NOTIFY`.)
+
 ## Topology
 
 | RX environment | Knievel Org | Knievel Projects |

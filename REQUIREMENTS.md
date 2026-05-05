@@ -482,7 +482,40 @@ connection pool. Per knievel instance, default budget:
 Total ≈ **12** per instance. Operators with pgbouncer in front of
 Aurora should size accordingly.
 
-### 7.9 What's deferred
+### 7.9 Reporting and downstream analytics
+
+Reporting is a primary motivation for knievel, not an afterthought.
+The data model is shaped to be friendly to downstream warehousing
+and dbt-style transformations:
+
+- **Same database, different schema.** `knievel.events_raw`,
+  `knievel.events_rollup`, and the dimensional tables
+  (`knievel.advertisers`, `knievel.campaigns`, etc.) live in the
+  same Postgres cluster as the operator's existing analytics
+  tables. dbt models can `JOIN` across schemas freely; no ETL hop.
+- **Append-only events.** `events_raw` never updates rows in place;
+  bronze-layer materializations are simple incremental models
+  keyed on `ts`.
+- **Partition pruning is automatic.** Daily range partitions on
+  `ts` mean an `events_raw` query filtered to the last day touches
+  one partition; a 30-day query touches 30. No secondary indexes on
+  `events_raw` (would slow `COPY` ingest); partition pruning is
+  enough for dbt-scale workloads.
+- **Typed columns, no JSON.** Every event field is a typed column;
+  no JSON unpacking in dbt models.
+- **A read-only role for the warehouse.** `knievel_reader` (granted
+  to the dbt service account or analytics tooling) gets `SELECT` on
+  `knievel.*` and nothing else. Knievel never reads from this role;
+  it exists purely for downstream consumers.
+- **`events_rollup` is a starting point**, not the only path.
+  Knievel computes hourly rollups for self-contained reporting; dbt
+  pipelines may reuse them as a faster bronze layer or compute their
+  own gold tables directly from `events_raw`.
+
+Concrete dbt integration patterns, role grants, and sample models
+live in `REPORTING.md`.
+
+### 7.10 What's deferred
 
 - **Redis** — only needed when frequency capping or per-user pacing
   ships.
@@ -837,12 +870,11 @@ Order is rough; each item is independently shippable.
     of Sites for sub-tenant admin isolation.
 11. **Cross-project broadcast upsert** — for ads that span many Projects
     in an Org.
-12. **Decision Explainer** — per-candidate reason codes for debugging.
-13. **Custom event types** beyond impression/click (likes, shares, video
+12. **Custom event types** beyond impression/click (likes, shares, video
     quartiles).
-14. **Web admin UI**.
-15. **SSO / OIDC** for the admin UI.
-16. **Write endpoints for Channel / Priority / AdType**.
+13. **Web admin UI**.
+14. **SSO / OIDC** for the admin UI.
+15. **Write endpoints for Channel / Priority / AdType**.
 
 ## 12. Open Questions
 
