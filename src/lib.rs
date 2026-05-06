@@ -17,6 +17,7 @@ pub mod creative_templates;
 pub mod creatives;
 pub mod db;
 pub mod decisions;
+pub mod events;
 pub mod flights;
 pub mod handlers;
 pub mod hmac;

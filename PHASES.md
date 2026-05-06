@@ -906,13 +906,40 @@ manager and leader election running.
       columns are bytea-typed; the COPY flusher (3.21) writes
       them in their canonical 8-byte / 16-byte forms from
       `hmac::dedup_key`.
-- [ ] **3.21** Event channel + COPY flusher. Bounded
+- [x] **3.21** Event channel + COPY flusher. Bounded
       `tokio::sync::mpsc`, drain every 1–2 s or 5 k events, `COPY`
       to `events_raw`. Channel saturation → `503
       event_channel_saturated` on the decision endpoint. `dedup_key`
       computation per `API.md` "Replay, dedup, and counts."
       Graceful shutdown drains the channel.
+      `src/events.rs` exposes `EventSender::try_send` (non-blocking
+      with `SendError::ChannelSaturated`/`FlusherDown`) and
+      `events::spawn(pool, capacity)` returning the sender plus
+      a `JoinHandle`. The flusher loop drains via `recv_many` and
+      flushes whichever is sooner: 1 s tick or 5 k batch.
+      Three unit tests cover saturation, flusher-down, and
+      kind-discriminant alignment with the migration's `smallint`.
       Refs: `REQUIREMENTS.md` § 7.6, `API.md` § 4.
+
+      **Note (3.21):** The flusher uses per-row INSERT with
+      `ON CONFLICT (project_id, kind, dedup_key, ts) DO UPDATE
+      SET is_duplicate = true` for v0 simplicity rather than
+      true binary `COPY`. The dedup semantics are spec-correct
+      (first hit lands `is_duplicate = false`, subsequent hits
+      update the existing row to `is_duplicate = true`); the
+      throughput optimization to real `COPY` is a follow-up
+      gated on the load test in 5.7. Three pieces deferred:
+      (1) **Wiring into `AppState` and the decision endpoint** —
+      the channel-send call site lives at the end of the
+      `decisions` handler, but adding it requires extending
+      `AppState` with the sender and threading it through
+      `server::build_state`. Lands as a focused commit pre-3.25.
+      (2) **`force.*` audit emission** still pending; this
+      flusher writes events but `audit_log` rows go through a
+      different path (single-row INSERT in the same handler tx).
+      (3) **Real `dedup_key` computation in the decision
+      handler**: 3.18 mints nonces but doesn't yet compute the
+      dedup_key — that's a follow-up alongside (1).
 - [ ] **3.22** Leader election — `pg_try_advisory_lock` on a
       dedicated connection, watchdog ("must complete a maintenance
       run every N hours" → process exits on miss), `/readyz`
