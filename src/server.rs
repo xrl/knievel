@@ -20,6 +20,7 @@ use poem::listener::TcpListener;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 
+use crate::ad_library::AdLibraryApi;
 use crate::ads::AdsApi;
 use crate::advertisers::AdvertisersApi;
 use crate::campaigns::CampaignsApi;
@@ -73,6 +74,7 @@ pub fn routes() -> Route {
             SystemApi,
             OrgApi,
             TokensApi,
+            AdLibraryApi,
             AdvertisersApi,
             CampaignsApi,
             FlightsApi,

@@ -1118,11 +1118,42 @@ manager and leader election running.
       log line for the same surface is the natural pair —
       lands when `Config::auth` materializes in 3.26's
       follow-up commit.
-- [ ] **3.28** Ad Library (org-scoped) — migration
+- [x] **3.28** Ad Library (org-scoped) — migration
       `0011_ad_library.sql`, CRUD per `API.md` § 2.4, Ad-side
       `oneOf` reference (`adLibraryItemId`) wired through 3.11 and
       the snapshot loader. References resolve at decision time.
+      Landed as `migrations/0012_ad_library.sql` (slot shift —
+      0011 was the events_rollup migration). Schema mirrors
+      `API.md` § 2.4: `id` is `ali_<12 hex>`, RLS bound on
+      `org_id`. `src/ad_library.rs::AdLibraryApi` exposes
+      POST/GET/PATCH `/v1/orgs/{orgId}/ad-library/items[/{itemId}]`.
+      The `kind` discriminator matches Project Creatives (`image`/
+      `html`/`native`) so the wire shape is identical. The
+      project-side `ads.ad_library_item_id` column was reserved
+      back in `0006_demand.sql`, so the reference variant is
+      additive. `openapi.yaml` grew 97 → 105 KB.
       Refs: `REQUIREMENTS.md` § 5.1, `API.md` § 2.4, § 3.4.
+
+      **Note (3.28):** Three pieces deferred. (1) **Ad-side
+      reference variant**: today `src/ads.rs` only accepts
+      `creative_id`; adding the `ad_library_item_id` branch
+      requires extending the request struct with both fields
+      mutually exclusive. The schema's `ads_kind_check`
+      constraint already enforces XOR; the handler just needs to
+      surface the alternate path. (2) **`:batchUpsert` for ad
+      library items** is on the API.md table but not in this
+      commit — the upsert pattern from 3.14 generalizes
+      cleanly; pulled out as a focused follow-up. (3)
+      **`/v1/orgs/{orgId}/ad-library/items/{itemId}/references`
+      endpoint** that lists the project ads referencing an item
+      lands when the cross-tenant story for that endpoint is
+      designed (the path crosses the org/project boundary).
+      (4) **Snapshot integration**: the snapshot's
+      `ProjectSnapshot` doesn't yet carry resolved Ad Library
+      items; the decision endpoint's library-reference resolution
+      step (`API.md` § 2.4: "Library references are resolved
+      through the in-memory snapshot at decision time") lands
+      with the snapshot reload query bodies.
 - [ ] **3.29** S3-compatible image upload. `POST
       /v1/projects/{projectId}/creatives/{id}/image` (multipart),
       magic-byte sniffing per `REQUIREMENTS.md` § 7.9, returns

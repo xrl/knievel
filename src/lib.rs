@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+pub mod ad_library;
 pub mod ads;
 pub mod advertisers;
 pub mod auth;
@@ -49,6 +50,7 @@ pub fn openapi_spec_yaml() -> String {
             system::SystemApi,
             orgs::OrgApi,
             tokens::TokensApi,
+            ad_library::AdLibraryApi,
             advertisers::AdvertisersApi,
             campaigns::CampaignsApi,
             flights::FlightsApi,

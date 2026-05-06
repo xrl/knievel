@@ -287,6 +287,182 @@ paths:
       security:
       - BearerAuth: []
       operationId: revokeToken
+  /v1/orgs/{org_id}/ad-library/items:
+    post:
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateAdLibraryItemRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/AdLibraryItem'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createAdLibraryItem
+    get:
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/AdLibraryItemList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listAdLibraryItems
+  /v1/orgs/{org_id}/ad-library/items/{item_id}:
+    get:
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: item_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/AdLibraryItem'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getAdLibraryItem
+    patch:
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: item_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateAdLibraryItemRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/AdLibraryItem'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateAdLibraryItem
   /v1/projects/{project_id}/advertisers:
     post:
       parameters:
@@ -2340,6 +2516,64 @@ components:
           type: string
         updated_at:
           type: string
+    AdLibraryItem:
+      type: object
+      title: AdLibraryItem
+      required:
+      - id
+      - name
+      - kind
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        external_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        image_url:
+          type: string
+        width:
+          type: integer
+          format: int32
+        height:
+          type: integer
+          format: int32
+        alt:
+          type: string
+        body:
+          type: string
+        template_id:
+          type: integer
+          format: int64
+        values: {}
+        click_through_url:
+          type: string
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    AdLibraryItemList:
+      type: object
+      title: AdLibraryItemList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdLibraryItem'
+        next_cursor:
+          type: string
     AdList:
       type: object
       title: AdList
@@ -2812,6 +3046,39 @@ components:
             $ref: '#/components/schemas/Channel'
         next_cursor:
           type: string
+    CreateAdLibraryItemRequest:
+      type: object
+      title: CreateAdLibraryItemRequest
+      required:
+      - name
+      - kind
+      properties:
+        external_id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        image_url:
+          type: string
+        width:
+          type: integer
+          format: int32
+        height:
+          type: integer
+          format: int32
+        alt:
+          type: string
+        body:
+          type: string
+        template_id:
+          type: integer
+          format: int64
+        values: {}
+        click_through_url:
+          type: string
+        is_active:
+          type: boolean
     CreateAdRequest:
       type: object
       title: CreateAdRequest
@@ -3649,6 +3916,28 @@ components:
           type: string
         expires_at:
           type: string
+    UpdateAdLibraryItemRequest:
+      type: object
+      title: UpdateAdLibraryItemRequest
+      properties:
+        name:
+          type: string
+        image_url:
+          type: string
+        width:
+          type: integer
+          format: int32
+        height:
+          type: integer
+          format: int32
+        alt:
+          type: string
+        body:
+          type: string
+        click_through_url:
+          type: string
+        is_active:
+          type: boolean
     UpdateAdRequest:
       type: object
       title: UpdateAdRequest
