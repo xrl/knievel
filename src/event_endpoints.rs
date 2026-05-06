@@ -12,6 +12,13 @@
 //!     redirect target only if signed into the payload (open-
 //!     redirect block).
 //!
+//! Phase 3.30: each successful verify pushes one Impression /
+//! Click row into the events flusher (`AppState::events`).
+//! Saturation **does not** fail the request here — the spec
+//! says pings still succeed at signature-verify level even when
+//! the channel is wedged (`REQUIREMENTS.md` § 7.6 row "Event
+//! channel saturation").
+//!
 //! Spec refs: `API.md` § 4, `REQUIREMENTS.md` § 6.3.
 
 #![allow(dead_code)]
@@ -22,7 +29,9 @@ use poem::http::{header, StatusCode};
 use poem::web::{Data, Path as PoemPath, Query};
 use poem::{handler, Response};
 
+use crate::events::{self, Event, EventKind as ChannelEventKind};
 use crate::hmac::{self, EventKind, VerifyError, DEFAULT_TTL_SECS};
+use crate::snapshot::Snapshot;
 use crate::state::AppState;
 
 /// 1x1 transparent GIF, 43 bytes (`API.md` § 4 specifies the
@@ -45,10 +54,22 @@ pub async fn impression(
     query: Query<ImpressionQuery>,
 ) -> Response {
     let want_gif = query.0.fmt.as_deref() == Some("gif");
+    let snap = state.0.snapshot.read();
     // Per spec: impression endpoint always returns 204 (or GIF)
     // — tampered/expired → still 204 (silent), counter ticks.
     // We classify but don't surface the failure to the caller.
-    let _ = verify_against_snapshot(&state, &signed, EventKind::Impression);
+    if let Ok((payload, project_id, org_id)) =
+        verify_against_snapshot(&snap, &signed, EventKind::Impression)
+    {
+        emit_event(
+            state.0,
+            ChannelEventKind::Impression,
+            &org_id,
+            &project_id,
+            &payload,
+            snap.config_version,
+        );
+    }
     if want_gif {
         Response::builder()
             .status(StatusCode::OK)
@@ -72,14 +93,25 @@ pub async fn click(
     PoemPath(signed): PoemPath<String>,
     query: Query<ClickQuery>,
 ) -> Response {
-    let payload = match verify_against_snapshot(&state, &signed, EventKind::Click) {
-        Ok(p) => p,
-        Err(_) => {
-            return Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body("bad_signature")
-        }
-    };
+    let snap = state.0.snapshot.read();
+    let (payload, project_id, org_id) =
+        match verify_against_snapshot(&snap, &signed, EventKind::Click) {
+            Ok(t) => t,
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body("bad_signature")
+            }
+        };
+
+    emit_event(
+        state.0,
+        ChannelEventKind::Click,
+        &org_id,
+        &project_id,
+        &payload,
+        snap.config_version,
+    );
 
     // Resolve the redirect target from the snapshot's
     // creative entry. The snapshot's `Ad` doesn't carry
@@ -92,7 +124,6 @@ pub async fn click(
         .as_deref()
         .filter(|_| false) // open-redirect block until ?u= signing lands
         .unwrap_or("/");
-    let _ = payload;
 
     Response::builder()
         .status(StatusCode::FOUND)
@@ -100,12 +131,67 @@ pub async fn click(
         .finish()
 }
 
-fn verify_against_snapshot(
+fn emit_event(
     state: &AppState,
+    kind: ChannelEventKind,
+    org_id: &str,
+    project_id: &str,
+    payload: &hmac::SignaturePayload,
+    snapshot_version: i64,
+) {
+    let Some(sender) = state.events.as_ref() else {
+        return;
+    };
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    // `emit_event` is only called for Impression/Click hits;
+    // Decision rows skip dedup and aren't routed through here.
+    let dedup_kind = match kind {
+        ChannelEventKind::Impression => hmac::EventKind::Impression,
+        ChannelEventKind::Click => hmac::EventKind::Click,
+        ChannelEventKind::Decision => return,
+    };
+    let dedup = hmac::dedup_key(project_id, dedup_kind, &payload.nonce);
+    let event = Event {
+        ts_ms: now_ms,
+        org_id: org_id.to_string(),
+        project_id: project_id.to_string(),
+        kind,
+        placement_id: None, // we only have the hashed form on the wire
+        site_id: None,
+        zone_id: None,
+        ad_id: Some(payload.ad_id),
+        creative_id: if payload.creative_id == 0 {
+            None
+        } else {
+            Some(payload.creative_id)
+        },
+        flight_id: None,
+        campaign_id: None,
+        advertiser_id: None,
+        url: None,
+        referrer_host: None,
+        user_agent_hash: None,
+        signature_nonce: Some(payload.nonce.to_vec()),
+        dedup_key: Some(dedup.to_vec()),
+        snapshot_version: Some(snapshot_version),
+    };
+    // Pings tolerate saturation per spec — log and drop. The
+    // dedup_key keeps the eventual replay path correct.
+    if let Err(events::SendError::ChannelSaturated | events::SendError::FlusherDown) =
+        sender.try_send(event)
+    {
+        tracing::debug!(?kind, "event channel saturated; dropping ping");
+    }
+}
+
+fn verify_against_snapshot(
+    snap: &Snapshot,
     signed: &str,
     kind: EventKind,
-) -> Result<hmac::SignaturePayload, VerifyError> {
-    let snap = state.snapshot.read();
+) -> Result<(hmac::SignaturePayload, String, String), VerifyError> {
     // Without parsing the project_id out of the signed payload
     // first, we'd have to try every project's secret — that's
     // O(N projects). The wire layout puts project_id at the head
@@ -127,8 +213,8 @@ fn verify_against_snapshot(
         now,
         DEFAULT_TTL_SECS,
     )?;
-    let _ = kind; // dedup_key wiring lands with the events flusher integration
-    Ok(payload)
+    let _ = kind; // dedup_kind is derived in `emit_event`
+    Ok((payload, project_id, project.org_id_for_event.clone()))
 }
 
 /// Peek `project_id` out of the signed blob without verifying.

@@ -28,10 +28,14 @@ use crate::config::Config;
 use crate::creative_templates::CreativeTemplatesApi;
 use crate::creatives::CreativesApi;
 use crate::decisions::{DecisionsApi, ExplainApi};
+use crate::events;
 use crate::flights::FlightsApi;
+use crate::leader::{self, LeaderHandle};
 use crate::orgs::OrgApi;
+use crate::partitions;
+use crate::rollup;
 use crate::sites::SitesApi;
-use crate::state::AppState;
+use crate::state::{AppState, DecisionFlags};
 use crate::system::SystemApi;
 use crate::taxonomy::TaxonomyApi;
 use crate::tokens::TokensApi;
@@ -103,25 +107,51 @@ pub fn routes() -> Route {
 }
 
 async fn build_state(cfg: &Config) -> AppState {
-    let mut state = AppState::new();
+    let mut state = AppState::new().with_decisions(DecisionFlags {
+        force_overrides_enabled: cfg.decisions.force_overrides_enabled,
+    });
 
-    if let Some(url) = &cfg.database.url {
-        match sqlx::PgPool::connect(url).await {
-            Ok(pool) => {
-                tracing::info!("connected to Postgres");
-                state = state.with_db(pool);
-            }
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    "DB connection failed at boot; /readyz will report 503"
-                );
-            }
-        }
-    } else {
+    let Some(url) = &cfg.database.url else {
         tracing::info!("no database.url configured; /readyz will report ok: no_db_configured");
-    }
+        return state;
+    };
 
+    let pool = match sqlx::PgPool::connect(url).await {
+        Ok(p) => {
+            tracing::info!("connected to Postgres");
+            p
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "DB connection failed at boot; /readyz will report 503"
+            );
+            return state;
+        }
+    };
+
+    // Events flusher — bounded mpsc + COPY drain
+    // (Phase 3.21).
+    let (sender, _flusher) = events::spawn(pool.clone(), cfg.events.channel_capacity);
+
+    // Leader election + leader-gated maintenance loops
+    // (Phases 3.22 / 3.23 / 3.24). The handles loop forever; we
+    // hold them via `tokio::spawn` so the runtime keeps them
+    // alive for the process lifetime, dropping them on shutdown
+    // is harmless since each spawned future logs and exits.
+    let leader_handle = LeaderHandle::new();
+    let _leader_task = leader::spawn(pool.clone(), leader_handle.clone());
+    let _partition_task = partitions::spawn(
+        pool.clone(),
+        leader_handle.clone(),
+        cfg.partitions.retention_days,
+    );
+    let _rollup_task = rollup::spawn(pool.clone(), leader_handle.clone());
+
+    state = state
+        .with_db(pool)
+        .with_events(sender)
+        .with_leader(leader_handle);
     state
 }
 

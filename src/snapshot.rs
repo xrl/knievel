@@ -47,6 +47,10 @@ pub struct Snapshot {
 #[derive(Debug, Default)]
 pub struct ProjectSnapshot {
     pub project_id: String,
+    /// Owning org. Carried in-snapshot so the events flusher can
+    /// attach `org_id` to ping rows without a per-request DB
+    /// round-trip (`REQUIREMENTS.md` § 7.3 RLS-by-org).
+    pub org_id_for_event: String,
     pub flights: Vec<Flight>,
     pub ads: Vec<Ad>,
     pub sites: Vec<SnapshotSite>,
@@ -240,6 +244,7 @@ mod tests {
         assert!(p.zones.is_empty());
         assert!(p.hmac_secret.is_empty());
         assert!(p.hmac_secret_previous.is_none());
+        assert!(p.org_id_for_event.is_empty());
         assert!(!p.allow_force_decision);
     }
 }

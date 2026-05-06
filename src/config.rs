@@ -40,6 +40,12 @@ pub struct Config {
     pub tracing: TracingConfig,
     #[serde(default)]
     pub errors: ErrorsConfig,
+    #[serde(default)]
+    pub events: EventsConfig,
+    #[serde(default)]
+    pub decisions: DecisionsConfig,
+    #[serde(default)]
+    pub partitions: PartitionsConfig,
     // Sections not yet typed are tolerated by serde via the
     // `default` attribute on the top-level struct; deeper typing
     // lands per-feature.
@@ -165,6 +171,71 @@ pub struct SentryConfig {
     pub dsn: Option<String>,
     #[serde(default)]
     pub environment: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct EventsConfig {
+    /// Bounded mpsc capacity for the events channel. Saturation
+    /// surfaces as `503 event_channel_saturated` on the decision
+    /// endpoint (`API.md` § 4).
+    #[serde(default = "default_events_capacity")]
+    pub channel_capacity: usize,
+}
+
+impl Default for EventsConfig {
+    fn default() -> Self {
+        Self {
+            channel_capacity: default_events_capacity(),
+        }
+    }
+}
+
+fn default_events_capacity() -> usize {
+    crate::events::DEFAULT_CAPACITY
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DecisionsConfig {
+    /// Global kill switch for `force.*` debug overrides
+    /// (`API.md` § 1). When false, every `force.*` request is
+    /// rejected with `403 force_disabled` regardless of the
+    /// per-project flag or the principal's role. Defaults to
+    /// true so the per-project flag stays the authoritative
+    /// gate.
+    #[serde(default = "default_force_overrides_enabled")]
+    pub force_overrides_enabled: bool,
+}
+
+impl Default for DecisionsConfig {
+    fn default() -> Self {
+        Self {
+            force_overrides_enabled: default_force_overrides_enabled(),
+        }
+    }
+}
+
+fn default_force_overrides_enabled() -> bool {
+    true
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct PartitionsConfig {
+    /// `events_raw` retention window in days
+    /// (`REQUIREMENTS.md` § 7.4). Spec default is 30.
+    #[serde(default = "default_retention_days")]
+    pub retention_days: i64,
+}
+
+impl Default for PartitionsConfig {
+    fn default() -> Self {
+        Self {
+            retention_days: default_retention_days(),
+        }
+    }
+}
+
+fn default_retention_days() -> i64 {
+    crate::partitions::RETENTION_DAYS_DEFAULT
 }
 
 /// Load layered configuration. Resolves `${VAR}` interpolation in

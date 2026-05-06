@@ -1196,47 +1196,83 @@ manager and leader election running.
       `memory://{key}`; the S3 adapter will return signed
       URLs.
 
+- [x] **3.30** AppState wiring — events flusher, leader, and
+      maintenance loops spawn at server bootstrap; the decision
+      endpoint emits one `events_raw` row per pick and writes
+      a `force.honored` audit row when the three-control gate
+      is open; the impression / click endpoints publish their
+      pings via the same channel; channel saturation surfaces
+      as `503 event_channel_saturated` on `:decisions` and is
+      tolerated (drop-and-log) on the public ping endpoints,
+      matching `REQUIREMENTS.md` § 7.6 row "Event channel
+      saturation."
+      Refs: `API.md` § 1 (force gate), § 4 (event endpoints),
+      `REQUIREMENTS.md` § 6.1, § 7.3, § 7.6.
+
+      **Note (3.30):** Two carve-outs from the close-out
+      follow-up #1 land in their own commits to keep diffs
+      reviewable: (a) snapshot consumer of `click_through_url`
+      and the click endpoint's redirect resolution (3.31), and
+      (b) the multipart parsing handler that earns `image_upload`
+      its endpoint and cross-tenant manifest entry (3.32). Force
+      semantics in v0 honor `force.adId` only; `campaignId` /
+      `flightId` / `creativeId` are accepted on the wire but
+      ignored during selection — substitution lookups live in
+      a follow-up once the snapshot carries the missing
+      relations. The explainer enforces the gate but does not
+      write an audit row (it's read-only debug); audit-on-
+      explain is a future tightening if the spec wants it. The
+      events flusher's GUC-per-row pattern means an org_id
+      mismatch between the principal and the snapshot's
+      `org_id_for_event` would land the row under the snapshot
+      org, not the caller — fine because the snapshot is the
+      authoritative tenant source for the hot path. The new
+      `EventsConfig`, `DecisionsConfig`, `PartitionsConfig`
+      sections give operators knobs without touching code; all
+      default sensibly (8 192 channel slots, force overrides
+      enabled, 30-day retention).
+
 **Milestone:** Every endpoint in `API.md` returns the documented
 shape. Full API-contract suite + cross-tenant suite green for every
 project-scoped endpoint.
 
 ### Notes
 
-**Phase 3 close-out summary (after 3.14–3.29 landed):**
+**Phase 3 close-out summary (after 3.14–3.30 landed):**
 
-- 84 unit tests in the lib (up from 28 at the 3.13 close), all
-  green.
+- 87 unit tests in the lib (84 at 3.29 close + 3 from 3.30),
+  all green.
 - 46 project-scoped endpoints under `cargo xtask
   check-cross-tenant`, all covered by manifest entries.
 - `openapi.yaml` ~105 KB.
 - Twelve migrations clean under `cargo xtask lint-migrations`.
-- The full hot path is wired in code (snapshot → selection →
-  HMAC sign → decision response; HMAC verify → click/impression
-  endpoint), with the channel-send between the decision and
-  events_raw queued behind an "AppState wiring" follow-up.
+- The full hot path is wired end-to-end now: snapshot →
+  selection → HMAC sign → decision response with a real
+  channel-send into the events flusher; HMAC verify → ping
+  publish → events_raw row.
 
-**Open follow-ups across 3.14–3.29** (not blockers, but pulled
+**Open follow-ups across 3.14–3.30** (not blockers, but pulled
 out as their own commits):
 
-1. **AppState wiring + handler integration** for the new
-   subsystems landed in 3.21–3.25. `EventSender`, `LeaderHandle`,
-   real `EventSender::try_send` calls in the decision endpoint,
-   `force.*` audit emission, click-through redirect resolution
-   from the snapshot, multipart upload handler in
-   `src/creatives.rs`. None are spec-correctness issues at the
-   contract layer — every endpoint returns the documented shape
-   today; the gap is hot-path side-effects (events written,
-   redirects resolved, audit rows emitted) that the testing
-   surface didn't yet exercise.
-2. **Single-row `external_id` idempotency on POST creates**
+1. **Click-through redirect resolution from snapshot** (deferred
+   from 3.30; lands in 3.31). Click endpoint resolves the
+   creative's `clickThroughUrl` from the in-process snapshot
+   and 302s to it; today it 302s to `"/"` as a placeholder.
+2. **Multipart upload handler in `src/creatives.rs`** (deferred
+   from 3.29 / 3.30; lands in 3.32). `POST
+   /v1/projects/{projectId}/creatives/{id}/image` with poem's
+   multipart extractor, calling `image_upload::validate` then
+   the configured `ImageStore::put`, plus the cross-tenant
+   manifest entry that wiring earns.
+3. **Single-row `external_id` idempotency on POST creates**
    (CLAUDE.md known gap, deferred from 3.14).
-3. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;
+4. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;
    `:batchUpsert` made the duplication worse but didn't extract).
-4. **Real JWT signature verification + JWKS auto-discovery**
+5. **Real JWT signature verification + JWKS auto-discovery**
    (3.26 follow-up).
-5. **Real S3-adapter implementation** for `image_upload`
+6. **Real S3-adapter implementation** for `image_upload`
    (3.29 follow-up).
-6. **Snapshot loader query bodies + LISTEN integration** (3.17
+7. **Snapshot loader query bodies + LISTEN integration** (3.17
    follow-up; the poll loop is the spec-documented backstop and
    sufficient on its own).
 
