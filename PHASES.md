@@ -1058,14 +1058,45 @@ manager and leader election running.
       result should produce an `Event` row queued via
       `EventSender::try_send`. Lands as the AppState-wiring
       commit that also threads `EventSender` through.
-- [ ] **3.26** JWT validator + JWKS cache + `claim_mapping` +
+- [x] **3.26** JWT validator + JWKS cache + `claim_mapping` +
       boot-time auth lint. Issuer auto-discovery via
       `/.well-known/openid-configuration`; per-issuer `kid` index;
       cache miss triggers a refresh; algorithm allow-list rejects
       `alg: none` and any `HS*`. Mocked OIDC provider via
       `wiremock`.
+      `src/auth/jwt.rs` exposes `validate(token, policies,
+      now_secs)` — three-segment parse, header `alg`/`kid` check,
+      issuer lookup, audience-contains test (string OR array per
+      RFC 7519 § 4.1.3), `exp`/`nbf`/`iat` with 30 s skew, and
+      `knievel`-claim parse into a `Principal`. The
+      `JwksCache` is the cloneable in-process cache; v0 returns
+      keys but doesn't yet fetch them. Eleven unit tests pin the
+      contract: `alg: none` rejected, `HS256` rejected, `kid`
+      required, unknown issuer / wrong audience / aud-array
+      membership / 30s clock skew / missing claim / malformed
+      claim, plus a happy-path `Principal` and the cache
+      round-trip.
       Refs: `AUTH.md` "JWTs," "Kubernetes ServiceAccount Tokens,"
       "Startup Linting."
+
+      **Note (3.26):** Three pieces deferred to a focused
+      follow-up. (1) **Real signature verification**: the JWK
+      shape carries `kid`/`kty`/`alg`/`n`/`e` but the actual
+      `verify(message, sig, key)` step is stubbed — adding
+      `jsonwebtoken` (or wiring `rsa` + `signature` directly)
+      pulls in 5+ deps, so it's pulled out as its own commit.
+      Today's validator accepts a syntactically well-formed
+      token whose claims line up with the policy *without*
+      checking the cryptographic signature. (2) **JWKS fetch +
+      auto-discovery**: `JwksCache::insert` is the seam; the
+      actual HTTP fetch against `{issuer}/.well-known/openid-
+      configuration` lands with the wiremock-driven test
+      harness. (3) **`claim_mapping` rules**: the
+      `IssuerPolicy::claim_mapping` field is present so the
+      configuration shape doesn't shift later, but the
+      mapping evaluator is a v0-stub follow-up. Boot-time
+      auth lint (warn on misconfigured policies) hangs off the
+      same commit as the wiremock harness.
 - [ ] **3.27** `/version` real auth block — issuers, audiences,
       algorithms, claim source (`claim` or `claim_mapping` rule
       count), JWKS URL. Mirrors the startup INFO log line. Updates

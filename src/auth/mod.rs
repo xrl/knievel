@@ -13,6 +13,7 @@
 // extractor. Drop the attribute once consumers land.
 #![allow(dead_code)]
 
+pub mod jwt;
 pub mod opaque;
 pub mod principal;
 pub mod role;
