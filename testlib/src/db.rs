@@ -52,8 +52,22 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
     drop(admin);
 
     let url = replace_dbname_in_url(&admin_url, &name)?;
+    // `after_connect` runs on every connection the pool hands out,
+    // so sqlx's migrator (which creates `_sqlx_migrations` on its
+    // first connection) sees `search_path = knievel, public` and
+    // lands the tracking table in the knievel schema rather than
+    // public. Mirrors the production `ALTER ROLE knievel_app SET
+    // search_path = ...` recipe in MIGRATION_RX.md.
     let pool = PgPoolOptions::new()
         .max_connections(4)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET search_path TO knievel, public")
+                    .execute(conn)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(&url)
         .await
         .context("connecting to ephemeral DB")?;
