@@ -1392,6 +1392,14 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: |-
+            Liquid parse failure or `template`/`template_engine`
+            validation per `API.md` § 3.6.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: ''
           content:
@@ -1520,6 +1528,14 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: |-
+            Liquid parse failure or `template`/`template_engine`
+            validation per `API.md` § 3.6.
           content:
             application/json; charset=utf-8:
               schema:
@@ -3263,6 +3279,17 @@ components:
           type: string
         schema:
           description: Arbitrary JSON Schema document; not parsed by knievel.
+        template:
+          type: string
+          description: |-
+            Optional renderer source (today: Liquid). When present,
+            `template_engine` MUST also be present and equal to
+            `"liquid"`. Parsed at write time; malformed source returns
+            `422 / template_parse_error`. Templates without a source
+            are input-validation-only — only `native` creatives can
+            reference them.
+        template_engine:
+          type: string
     CreateFlightRequest:
       type: object
       title: CreateFlightRequest
@@ -3485,6 +3512,10 @@ components:
         name:
           type: string
         schema: {}
+        template:
+          type: string
+        template_engine:
+          type: string
         version:
           type: integer
           format: int32
@@ -4059,6 +4090,10 @@ components:
         name:
           type: string
         schema: {}
+        template:
+          type: string
+        template_engine:
+          type: string
     UpdateFlightRequest:
       type: object
       title: UpdateFlightRequest

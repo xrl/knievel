@@ -1483,7 +1483,7 @@ flows from a working binary in a real container.
       `peter-evans/create-issue-from-file` per
       `TESTING.md` § 12.8 (advisory, doesn't block tags).
       Refs: `TESTING.md` § 9.
-- [ ] **4.8** Server-side ad-template rendering (`templated`
+- [x] **4.8** Server-side ad-template rendering (`templated`
       creative variant). Adds the fourth `creative` `oneOf` arm
       defined in `API.md` § 1 / § 3.5, and extends
       `CreativeTemplate` (`API.md` § 3.6) with optional `template`
@@ -1689,6 +1689,69 @@ wired (one-line PR change). The compose harness with the
 the `wiremock` JWKS service is documented in
 `tests/chaos/README.md` but not yet checked in — the first
 scenario activation lands the harness alongside its body.
+
+**Note (4.8):** What landed:
+
+- **Migration `0013_templated_creatives.sql`**: adds optional
+  `creative_templates.template` + `template_engine` columns
+  with a CHECK constraint enforcing the `(NULL, NULL)` or
+  `(some, 'liquid')` pair. Drops + re-adds
+  `creatives_kind_check` to admit `'templated'` as a fourth
+  value. Purely additive — no backfill, existing rows stay
+  valid. RLS unchanged (creative_templates already
+  project-bound). Migration linter clean.
+- **CreativeTemplate handler** (`src/creative_templates.rs`):
+  POST + PATCH accept `template` + `template_engine`. Liquid
+  source parses on write via the `liquid` crate
+  (`ParserBuilder::with_stdlib().build().parse(&src)`); a bad
+  source returns `422 / template_parse_error`. Shape errors
+  (`template_engine_required`, `template_engine_unsupported`)
+  also return 422. PATCH with explicit nulls clears the pair.
+  Schema-or-template content change bumps `version`.
+- **Creatives handler** (`src/creatives.rs`): `'templated'`
+  joins `image | html | native` on the kind check, sharing
+  validation with `native` (both require `template_id` +
+  `values`). For `templated` writes the handler additionally
+  verifies the referenced template carries a non-null
+  `template` column — `422 / template_missing_body` when not.
+  Unknown / wrong-tenant template ids return
+  `422 / template_not_found`.
+- **Tests** (`tests/api_templated.rs`): 6 `#[tokio::test]`
+  cover the round-trip + every 422 case
+  (`template_parse_error`, `template_engine_required`,
+  `template_engine_unsupported`, `template_missing_body`).
+- **OpenAPI** regenerated (`108653 bytes`); spec drift gate
+  clean.
+
+What's deferred (open follow-ups under 4.8):
+
+- **Decision-time rendering.** The `templated` creative variant
+  is admitted at the write side, but the decisions handler
+  doesn't render the `body` field yet — the snapshot needs to
+  carry parsed Liquid templates per `(template_id, version)`,
+  and the snapshot loader function is itself unwired (cross-
+  cutting blocker for ACC-02 too). Once the snapshot ships, the
+  decisions handler grows a `render_templated_body` step that
+  pulls the parsed template, renders against `values + ad.* +
+  placement.id + decision.snapshotVersion`, and emits the
+  rendered string in the typed `creative` `oneOf` arm.
+- **Sandbox limits.** The render-time-ms cap and output-bytes
+  cap (per the Phase 4.8 task body's "front-load these risks")
+  land with the rendering step — they only matter when render
+  actually runs.
+- **Audit / observability surface.** `decisions:explain` will
+  grow a `templated_render` rule per candidate
+  (`{result: "rendered" | "skipped" | "timeout" | "oversize"}`)
+  alongside the rendering step.
+
+The `liquid` crate (DotLiquid-compatible) was picked for Kevel
+parity per `MIGRATION_RX.md` — RX engineers can lift their
+existing `Ad Template` source verbatim. `minijinja` remains a
+viable swap if Kevel parity becomes a non-goal (the
+`template_engine` column was designed for exactly that — admit
+new engines additively). Phase 4.7's chaos rig fixture will
+gain a `templated_sandbox_escape` scenario once the renderer
+ships.
 
 ---
 

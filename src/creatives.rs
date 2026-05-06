@@ -189,7 +189,10 @@ impl CreativesApi {
 
         // Validate kind + per-kind required fields. Spec § 3.5:
         // image needs imageUrl; html needs body; native needs
-        // template_id + values.
+        // template_id + values; templated needs template_id +
+        // values, AND the referenced template must carry a non-null
+        // `template` column (validated in-tx after the transaction
+        // is open).
         let kind_err = match req.kind.as_str() {
             "image" => req
                 .image_url
@@ -199,14 +202,14 @@ impl CreativesApi {
                 .body
                 .as_ref()
                 .map_or(Some("html creatives require body"), |_| None),
-            "native" => {
+            "native" | "templated" => {
                 if req.template_id.is_none() || req.values.is_none() {
-                    Some("native creatives require template_id and values")
+                    Some("native and templated creatives require template_id and values")
                 } else {
                     None
                 }
             }
-            _ => Some("kind must be one of image, html, native"),
+            _ => Some("kind must be one of image, html, native, templated"),
         };
         if let Some(msg) = kind_err {
             return CreateResp::BadRequest(Json(err("invalid_creative", msg)));
@@ -220,6 +223,37 @@ impl CreativesApi {
             Ok(t) => t,
             Err(e) => return forbid(CreateResp::Forbidden, e),
         };
+
+        // For `templated` writes, ensure the referenced template
+        // carries a renderer source. `native` references can point
+        // at validation-only templates (template = NULL), but
+        // `templated` must have a Liquid source to render at
+        // decision time.
+        if req.kind == "templated" {
+            let template_id = req.template_id.expect("checked above");
+            let has_source: Option<bool> = sqlx::query_scalar(
+                "SELECT (template IS NOT NULL) FROM knievel.creative_templates WHERE id = $1",
+            )
+            .bind(template_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .unwrap_or(None);
+            match has_source {
+                Some(true) => {}
+                Some(false) => {
+                    return CreateResp::Unprocessable(Json(err(
+                        "template_missing_body",
+                        "templated creatives require a CreativeTemplate with a non-null template",
+                    )));
+                }
+                None => {
+                    return CreateResp::Unprocessable(Json(err(
+                        "template_not_found",
+                        "referenced template_id does not exist in this project",
+                    )));
+                }
+            }
+        }
 
         let sql = format!(
             "INSERT INTO knievel.creatives

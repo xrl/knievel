@@ -60,6 +60,11 @@ clap         = { version = "4", features = ["derive", "env"] }
 figment      = { workspace = true }
 hex          = { workspace = true }
 hmac         = { workspace = true }
+# Liquid templating engine — Phase 4.8 server-side ad rendering.
+# DotLiquid-compatible per `API.md` § 3.6, matches Kevel's existing
+# `Ad Template` semantics so RX-style migrations can lift their
+# template source verbatim.
+liquid       = "0.26"
 poem         = { workspace = true }
 poem-openapi = { workspace = true }
 rand         = { workspace = true }

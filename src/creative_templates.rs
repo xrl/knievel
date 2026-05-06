@@ -30,12 +30,22 @@ pub struct CreateCreativeTemplateRequest {
     pub name: String,
     /// Arbitrary JSON Schema document; not parsed by knievel.
     pub schema: serde_json::Value,
+    /// Optional renderer source (today: Liquid). When present,
+    /// `template_engine` MUST also be present and equal to
+    /// `"liquid"`. Parsed at write time; malformed source returns
+    /// `422 / template_parse_error`. Templates without a source
+    /// are input-validation-only — only `native` creatives can
+    /// reference them.
+    pub template: Option<String>,
+    pub template_engine: Option<String>,
 }
 
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCreativeTemplateRequest {
     pub name: Option<String>,
     pub schema: Option<serde_json::Value>,
+    pub template: Option<String>,
+    pub template_engine: Option<String>,
 }
 
 #[derive(Object, Clone, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
@@ -44,6 +54,8 @@ pub struct CreativeTemplate {
     pub external_id: Option<String>,
     pub name: String,
     pub schema: serde_json::Value,
+    pub template: Option<String>,
+    pub template_engine: Option<String>,
     pub version: i32,
     pub etag: String,
     pub created_at: String,
@@ -57,12 +69,50 @@ pub struct CreativeTemplateList {
 }
 
 const COLS: &str = r#"
-    id, external_id, name, schema, version, etag,
+    id, external_id, name, schema, template, template_engine, version, etag,
     to_char(created_at AT TIME ZONE 'UTC',
             'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
     to_char(updated_at AT TIME ZONE 'UTC',
             'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at
 "#;
+
+/// Validate `template` + `template_engine` per `API.md` § 3.6
+/// rules: when `template` is present, `template_engine` must be
+/// `"liquid"`, and the source must parse. Returns the canonical
+/// engine string on success, or an error envelope ready to ship.
+pub(crate) fn validate_template_pair(
+    template: Option<&str>,
+    template_engine: Option<&str>,
+) -> Result<Option<String>, ErrorEnvelope> {
+    match (template, template_engine) {
+        (None, None) => Ok(None),
+        (None, Some(_)) => Err(err(
+            "template_engine_without_template",
+            "template_engine must be omitted when template is unset",
+        )),
+        (Some(_), None) => Err(err(
+            "template_engine_required",
+            "template_engine must be 'liquid' when template is set",
+        )),
+        (Some(_), Some(eng)) if eng != "liquid" => Err(err(
+            "template_engine_unsupported",
+            "only template_engine='liquid' is supported in v0",
+        )),
+        (Some(src), Some(eng)) => {
+            // Parse-on-write so a bad source can't sneak through to
+            // decision time. We don't render here — that happens
+            // per-decision, post-snapshot.
+            let parser = liquid::ParserBuilder::with_stdlib()
+                .build()
+                .expect("liquid stdlib parser construction");
+            if let Err(e) = parser.parse(src) {
+                let msg = format!("template parse error: {e}");
+                return Err(err("template_parse_error", &msg));
+            }
+            Ok(Some(eng.to_string()))
+        }
+    }
+}
 
 #[derive(ApiResponse)]
 pub enum CreateResp {
@@ -72,6 +122,10 @@ pub enum CreateResp {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 409)]
     Conflict(Json<ErrorEnvelope>),
+    /// Liquid parse failure or `template`/`template_engine`
+    /// validation per `API.md` § 3.6.
+    #[oai(status = 422)]
+    Unprocessable(Json<ErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -103,6 +157,10 @@ pub enum UpdateResp {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
     NotFound(Json<ErrorEnvelope>),
+    /// Liquid parse failure or `template`/`template_engine`
+    /// validation per `API.md` § 3.6.
+    #[oai(status = 422)]
+    Unprocessable(Json<ErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -144,10 +202,16 @@ impl CreativeTemplatesApi {
             Ok(t) => t,
             Err(e) => return forbid(CreateResp::Forbidden, e),
         };
+        let engine =
+            match validate_template_pair(req.template.as_deref(), req.template_engine.as_deref()) {
+                Ok(e) => e,
+                Err(env) => return CreateResp::Unprocessable(Json(env)),
+            };
         let sql = format!(
             "INSERT INTO knievel.creative_templates
-                 (org_id, project_id, external_id, name, schema)
-             VALUES ($1, $2, $3, $4, $5)
+                 (org_id, project_id, external_id, name, schema,
+                  template, template_engine)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING {COLS}"
         );
         let row: Result<CreativeTemplate, _> = sqlx::query_as(&sql)
@@ -156,6 +220,8 @@ impl CreativeTemplatesApi {
             .bind(req.external_id.as_deref())
             .bind(&req.name)
             .bind(&req.schema)
+            .bind(req.template.as_deref())
+            .bind(engine.as_deref())
             .fetch_one(&mut *tx)
             .await;
         match row {
@@ -285,21 +351,46 @@ impl CreativeTemplatesApi {
             Ok(t) => t,
             Err(e) => return forbid(UpdateResp::Forbidden, e),
         };
-        let bump = req.schema.is_some();
+        // Validate the (template, template_engine) pair when
+        // either is provided. PATCH semantics: omitted fields keep
+        // existing values; explicitly setting `template = null`
+        // (with `template_engine = null`) clears the renderer.
+        let engine_to_set = match (req.template.as_deref(), req.template_engine.as_deref()) {
+            (None, None) => None, // no change
+            _ => match validate_template_pair(
+                req.template.as_deref(),
+                req.template_engine.as_deref(),
+            ) {
+                Ok(e) => Some(e),
+                Err(env) => return UpdateResp::Unprocessable(Json(env)),
+            },
+        };
+        let template_changed = req.template.is_some() || req.template_engine.is_some();
+        // `bump` triggers when `schema` OR `template` content
+        // changes — both affect what `templated`/`native`
+        // creatives observe at decision time.
+        let bump = req.schema.is_some() || template_changed;
         let sql = format!(
             "UPDATE knievel.creative_templates
              SET name = COALESCE($2, name),
                  schema = COALESCE($3, schema),
-                 version = version + CASE WHEN $4 THEN 1 ELSE 0 END,
+                 template        = CASE WHEN $4 THEN $5 ELSE template END,
+                 template_engine = CASE WHEN $4 THEN $6 ELSE template_engine END,
+                 version = version + CASE WHEN $7 THEN 1 ELSE 0 END,
                  etag = encode(gen_random_bytes(8), 'hex'),
                  updated_at = now()
              WHERE id = $1
              RETURNING {COLS}"
         );
+        let new_template = req.template.as_deref();
+        let new_engine = engine_to_set.as_ref().and_then(|e| e.as_deref());
         match sqlx::query_as::<_, CreativeTemplate>(&sql)
             .bind(id)
             .bind(req.name.as_deref())
             .bind(req.schema.as_ref())
+            .bind(template_changed)
+            .bind(new_template)
+            .bind(new_engine)
             .bind(bump)
             .fetch_optional(&mut *tx)
             .await
