@@ -1313,41 +1313,75 @@ prelude.
 ## Phase 4 — Make it deployable
 
 **Goal:** Anyone can `docker compose up` and get a working knievel
-or `helm install` it into a real cluster. Acceptance suite running
-in CI. Generated Ruby gem published from the OpenAPI spec.
+or `helm install` it into a real cluster. Container image
+published to `ghcr.io/xrl/knievel`, multi-arch, signed.
+Acceptance suite running in CI. Generated client libraries
+follow once the runtime substrate is real.
 
 **Spec references:**
 
 - `REQUIREMENTS.md` § 8 (Deliverables), § 8.1 (Helm chart).
-- `TESTING.md` § 7 (E2E Acceptance).
+- `MIGRATION_RX.md` "Local Development for RX Engineers"
+  (compose layout pinned to `ghcr.io/xrl/knievel:latest`).
+- `TESTING.md` § 7 (E2E Acceptance), § 11.1 (`seed-demo`).
 - `DOCUMENTATION_PLAN.md` § 6 (DEPLOYMENT.md).
+
+**Order of operations.** The substrate (compose, container,
+Helm) lands first so every later task — acceptance suites,
+chaos rigs, even the Ruby gem's smoke test — has a real
+deployable to point at. Ruby-gem generation moves to the end
+because the OpenAPI spec is the contract; everything else
+flows from a working binary in a real container.
 
 **Tasks (broad strokes):**
 
-- [ ] **4.1** `examples/compose/` reference stack — `knievel-cli
-      seed-demo` is the canonical fixture.
-      Refs: `MIGRATION_RX.md` "Local Development for RX Engineers,"
-      `TESTING.md` § 11.1.
-- [ ] **4.2** `knievel-cli seed-demo` implementation.
+- [ ] **4.1** `examples/compose/` reference stack — `docker
+      compose up` boots Postgres + knievel against a locally-
+      built image. Pinned to `ghcr.io/xrl/knievel:latest` once
+      4.3 publishes; until then the compose file uses a `build:`
+      directive against the in-tree `Dockerfile`. `knievel-cli
+      seed-demo` runs as a one-shot sidecar (stubbed until 4.2
+      lands).
+      Refs: `MIGRATION_RX.md` "Local Development for RX
+      Engineers," `TESTING.md` § 11.1.
+- [ ] **4.2** `knievel-cli seed-demo` implementation. Admin
+      CLI binary alongside the server binary; `seed-demo`
+      populates org/project/advertisers/flights/ads/creatives
+      via the OpenAPI client so a contributor can issue
+      meaningful decisions against the compose stack.
       Refs: `REQUIREMENTS.md` § 8 item 4, `AUTH.md` "Local
       Development."
-- [ ] **4.3** Acceptance scenarios ACC-01..30.
-      Refs: `TESTING.md` § 7.1.
-- [ ] **4.4** Acceptance sharding in CI (4-way nextest partition).
-      Refs: `TESTING.md` § 12.6.
-- [ ] **4.5** `charts/knievel` Helm chart; `helm lint` +
-      `kubeconform` gate.
+- [ ] **4.3** Multi-arch container image build, **published
+      to `ghcr.io/xrl/knievel`**. `docker buildx` for
+      `linux/amd64` + `linux/arm64`, distroless base
+      (`gcr.io/distroless/cc:nonroot`). Tag policy:
+      `ghcr.io/xrl/knievel:latest` from `main`,
+      `ghcr.io/xrl/knievel:vX.Y.Z` from semver tags,
+      `ghcr.io/xrl/knievel:sha-<short>` for every push to
+      `main` (immutable digest pin for compose / Helm
+      pre-release pinning). `cosign` keyless signing via
+      Sigstore Fulcio; provenance attestation included.
+      Build runs in `.github/workflows/release.yml` (already
+      stubbed) for tags and `.github/workflows/main-image.yml`
+      (new) for `main`. The compose file in 4.1 and the Helm
+      chart in 4.4 reference this image directly.
+      Refs: `REQUIREMENTS.md` § 8 item 5, `MIGRATION_RX.md`
+      compose example, `TESTING.md` § 12.9.
+- [ ] **4.4** `charts/knievel` Helm chart; `helm lint` +
+      `kubeconform` gate. Default `values.yaml` pins
+      `image.repository: ghcr.io/xrl/knievel` and `image.tag:
+      latest` (operator overrides per environment).
       Refs: `REQUIREMENTS.md` § 8.1.
-- [ ] **4.6** Multi-arch container image build (`docker buildx`,
-      amd64 + arm64); `cosign` signing.
-      Refs: `REQUIREMENTS.md` § 8 item 5.
+- [ ] **4.5** Acceptance scenarios ACC-01..30, run against
+      the compose stack from 4.1.
+      Refs: `TESTING.md` § 7.1.
+- [ ] **4.6** Acceptance sharding in CI (4-way nextest
+      partition).
+      Refs: `TESTING.md` § 12.6.
 - [ ] **4.7** Chaos suite skeleton paired 1:1 with
       `REQUIREMENTS.md` § 10.9.
       Refs: `TESTING.md` § 9.
-- [ ] **4.8** `openapi-generator-cli` wired into CI; Ruby gem with
-      `Resource` wrappers + `Enumerable` pagination; gem-smoke job.
-      Refs: `REQUIREMENTS.md` § 8 item 3, `API.md` "Pagination."
-- [ ] **4.9** Server-side ad-template rendering (`templated`
+- [ ] **4.8** Server-side ad-template rendering (`templated`
       creative variant). Adds the fourth `creative` `oneOf` arm
       defined in `API.md` § 1 / § 3.5, and extends
       `CreativeTemplate` (`API.md` § 3.6) with optional `template`
@@ -1358,7 +1392,7 @@ in CI. Generated Ruby gem published from the OpenAPI spec.
         `422 / template_parse_error`.
       - Pick the rendering crate (`liquid` recommended — Kevel
         parity for RX migration; `minijinja` is the Rust-native
-        alternative). Capture the choice as a `**Note (4.9):**`
+        alternative). Capture the choice as a `**Note (4.8):**`
         block before the task closes.
       - Add the `templated` arm to the creative `oneOf` write
         contract; wire `templateId` validation
@@ -1385,7 +1419,7 @@ in CI. Generated Ruby gem published from the OpenAPI spec.
         never observe project B's `values` even if both projects
         reference templates with the same `name`.
       - Acceptance scenario `ACC-XX templated_creative_renders`
-        added to the suite started in 4.3.
+        added to the suite started in 4.5.
       Risks to front-load:
         - **Sandbox escape.** Add to `TESTING.md` § 10.3 release
           security checklist; fuzz the engine in nightly.
@@ -1399,14 +1433,29 @@ in CI. Generated Ruby gem published from the OpenAPI spec.
       (creative `oneOf`), § 3.6 (CreativeTemplate `template` /
       `templateEngine`); `REQUIREMENTS.md` § 7.1.1 (RLS rules),
       § 10 (release security).
+- [ ] **4.9** `openapi-generator-cli` wired into CI; Ruby gem
+      with `Resource` wrappers + `Enumerable` pagination;
+      gem-smoke job runs against the compose stack from 4.1.
+      Refs: `REQUIREMENTS.md` § 8 item 3, `API.md` "Pagination."
 
 **Milestone:** `docker compose up` boots a working knievel against
-Postgres + MinIO + wiremock; a third party can integrate from the
-gem alone.
+Postgres + MinIO + wiremock; `helm install` against a real
+cluster pulls the published `ghcr.io/xrl/knievel` image; the
+acceptance suite + chaos rig run against the same image; a
+third party can integrate from the gem alone once 4.9 lands.
 
 ### Notes
 
-(none yet)
+**Phase 4.0 (reorder):** Tasks were renumbered to put the Docker
+substrate first (compose → image+ghcr → Helm) so every later
+deliverable points at a real image. Ruby-gem generation moved
+from old-4.8 to new-4.9 (last) because the gem's smoke test
+needs a deployable to integration-test against. `ghcr.io/xrl/
+knievel` is now the explicit image registry per
+`REQUIREMENTS.md` § 8 and `MIGRATION_RX.md`'s compose example;
+4.3's task description pins tag policy
+(`latest` / `vX.Y.Z` / `sha-<short>`) and the cosign signing
+mechanism.
 
 ---
 
