@@ -698,32 +698,16 @@ manager and leader election running.
       grew 74 → 89 KB.
       Refs: `API.md` "Write contract," `TESTING.md` § 6.4.
 
-      **Note (3.14):** Two follow-ups still open from this task.
-      (1) **Single-row external_id idempotency on POST creates.**
-      `API.md` § 2.1/§ 3.x says POST is "Idempotent on
-      `externalId`" — today the single-row POST handlers still
-      return `409 external_id_conflict` on a re-POST of the same
-      `externalId`. The :batchUpsert path is the canonical
-      idempotent surface; fixing the single-row POSTs requires
-      changing every `Created(201)` ApiResponse variant to add an
-      `Existing(200)` flavor and rewriting the existing 409 tests
-      across `api_advertisers.rs`/`api_campaigns.rs`/etc. Punted to
-      a follow-up commit so 3.14 ships the batch surface first.
-      (2) **`crud_contract!` macro extraction.** Deferred from
-      3.8/3.9; the per-resource handlers still duplicate ~80% of
-      their bodies. With six `:batchUpsert` endpoints landed in
-      this commit the duplication is now severe enough to warrant
-      a focused refactor — natural to land alongside the POST
-      idempotency fix above.
-
-      Diagnostics on multi-row failures stop at the first failing
-      row by design — once a Postgres tx aborts on one statement,
-      every subsequent statement returns the same "current
-      transaction is aborted" error, so collecting "details for
-      every bad row" inside one tx isn't free. A two-pass
-      validate-then-execute pattern would surface every offending
-      row at the cost of doubled DB round-trips; revisit if the
-      gem-side bulk-sync flow asks for it.
+      **Note (3.14):** Three follow-ups deferred to **Phase 6**
+      (post-v0 polish; v0 ships with batch as-is).
+      (1) Single-row `external_id` idempotency on POST creates →
+      Phase 6.1.
+      (2) `crud_contract!` macro extraction →  Phase 6.2.
+      (3) Two-pass validate-then-execute for batch errors —
+      today diagnostics stop at the first failing row by design
+      (Postgres aborts the tx on the first bad statement); a
+      two-pass pattern would surface every offending row at the
+      cost of doubled DB round-trips → Phase 6.3.
 - [x] **3.15** Selection algorithm — `selection::filter` (site /
       zone / ad_type / date), `selection::priority` (highest
       non-empty tier wins), `selection::weighted_random` (seeded
@@ -1142,8 +1126,8 @@ manager and leader election running.
       constraint already enforces XOR; the handler just needs to
       surface the alternate path. (2) **`:batchUpsert` for ad
       library items** is on the API.md table but not in this
-      commit — the upsert pattern from 3.14 generalizes
-      cleanly; pulled out as a focused follow-up. (3)
+      commit — moved to **Phase 6.4** (post-v0; the upsert
+      pattern from 3.14 generalizes cleanly). (3)
       **`/v1/orgs/{orgId}/ad-library/items/{itemId}/references`
       endpoint** that lists the project ads referencing an item
       lands when the cross-tenant story for that endpoint is
@@ -1290,10 +1274,10 @@ out as their own commits):
    override (3.31 follow-up). Until the wire format gains the
    field, the click endpoint ignores `?u=` (open-redirect
    block) and serves the snapshot's `clickThroughUrl`.
-2. **Single-row `external_id` idempotency on POST creates**
-   (CLAUDE.md known gap, deferred from 3.14).
-3. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;
-   `:batchUpsert` made the duplication worse but didn't extract).
+2. ~~Single-row `external_id` idempotency on POST creates~~ →
+   moved to **Phase 6.1**.
+3. ~~`crud_contract!` macro extraction~~ → moved to
+   **Phase 6.2**.
 4. **Real JWT signature verification + JWKS auto-discovery**
    (3.26 follow-up).
 5. **Real S3-adapter implementation** for `image_upload`
@@ -1922,6 +1906,90 @@ checklist green.
 
 **Milestone:** `v0.1.0` tagged. Container image, Helm chart, and
 gem published.
+
+### Notes
+
+(none yet)
+
+---
+
+## Phase 6 — Bulk operations & API idempotency follow-ups
+
+**Goal:** Round out the write-side surface that was scoped out
+of v0. The `:batchUpsert` implementation shipped in 3.14 stays
+in place; this phase carries the deferred polish around it
+(POST idempotency parity, macro extraction to kill the
+duplication batch made worse, two-pass batch diagnostics, and
+the one resource that didn't get the batch surface in 3.14).
+
+Treated as post-v0 because v0 ships with per-row CRUD +
+`:batchUpsert` working, and the items below are quality / ergonomics
+on top — none block a deployable. Real consumer demand should
+re-prioritize within the phase.
+
+**Spec references:**
+
+- `API.md` § 2.1, § 2.2 ("Write contract"), § 3.x POST rows
+  ("Idempotent on externalId").
+- `REQUIREMENTS.md` § 4 ("Generated client compatibility").
+- 3.14 `:batchUpsert` follow-up notes.
+
+**Tasks:**
+
+- [ ] **6.1** Single-row `external_id` idempotency on POST
+      creates. Today every POST handler returns
+      `409 external_id_conflict` on a re-POST of the same
+      `externalId`, contradicting the API.md POST rows that
+      label them "Idempotent on externalId" and inconsistent
+      with the `:batchUpsert` path that already round-trips
+      cleanly. Adds an `Existing(200)` flavor to every
+      `ApiResponse` enum that today only carries `Created(201)`,
+      and rewrites the existing 409 tests across
+      `api_advertisers.rs`/`api_campaigns.rs`/etc. accordingly.
+      `crud_contract!` (6.2) should land on top of this, not
+      under it — the macro needs to bake in the new shape.
+      Refs: `API.md` § 3.x, CLAUDE.md "Open known gaps,"
+      3.14 follow-up note (1).
+- [ ] **6.2** `crud_contract!` macro extraction. Deferred from
+      3.8 / 3.9 / 3.14. Per-resource handlers (`advertisers`,
+      `campaigns`, `flights`, `ads`, `sites`, `zones`,
+      `creatives`, `creative_templates`, `taxonomy`) currently
+      duplicate ~80% of body — the standard prologue
+      (`open_project_tx`, `Idempotency-Key` wrapper, etag
+      bump, error envelope mapping) is identical and the
+      `:batchUpsert` arrival made it worse. Extracts the shared
+      shape into a macro stamped from per-resource type lists.
+      Lands after 6.1 so the macro encodes the new
+      POST/200/`Existing` flavor.
+      Refs: 3.8 / 3.9 notes, 3.14 follow-up note (2),
+      cross-cutting open follow-up #3 (now superseded by this
+      phase).
+- [ ] **6.3** Two-pass validate-then-execute for batch errors.
+      Today `:batchUpsert` stops at the first failing row by
+      design — once a Postgres tx aborts on one statement,
+      every subsequent statement returns the same
+      "transaction is aborted" error. A two-pass pattern
+      (cheap validation pass under the same tx with savepoints,
+      OR a dry-run REST surface, OR client-side row partitioning)
+      would surface every offending row at the cost of doubled
+      DB round-trips or extra transaction complexity. Pick a
+      shape only when a real bulk-sync consumer asks for it.
+      Refs: 3.14 final note ("revisit if the gem-side
+      bulk-sync flow asks for it").
+- [ ] **6.4** `:batchUpsert` for ad-library items. The 3.7
+      ad-library commit deferred this — the upsert pattern from
+      3.14 generalizes cleanly but the endpoint wasn't on
+      3.14's resource list. Single tx with per-row diagnostics
+      matching the established shape; FK semantics differ
+      slightly because ad-library is org-scoped, not
+      project-scoped (so `open_project_tx` is the wrong
+      prologue — `db::begin_bound` on the org id with role
+      check inline).
+      Refs: `API.md` § 3.7 ("Ad library"), 3.7 commit note.
+
+**Milestone:** `:batchUpsert` is consistent across every
+resource that declares it; POST creates are truly idempotent;
+handler bodies are short again.
 
 ### Notes
 

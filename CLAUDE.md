@@ -408,8 +408,8 @@ the corresponding handler feature lands):
 - **External-id idempotency on POST creates.** `API.md` says
   POST `/projects` is "idempotent on externalId" — the existing
   row should come back at 200, not 409. Today the handler
-  returns 409 `external_id_conflict`. Lands with 3.14
-  `:batchUpsert` (the upsert path is shared).
+  returns 409 `external_id_conflict`. Moved to **Phase 6.1**
+  (post-v0); `:batchUpsert` already round-trips cleanly.
 - **Cursor pagination.** Every list endpoint returns
   `next_cursor: null`; the envelope shape is ready. Real cursor
   encoding is a follow-up.
