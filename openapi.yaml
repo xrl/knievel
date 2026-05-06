@@ -1130,8 +1130,234 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateCreativeTemplate
+  /v1/projects/{project_id}/ads:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateAdRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Ad'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createAd
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/AdList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listAds
+  /v1/projects/{project_id}/ads/{id}:
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Ad'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getAd
+    patch:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateAdRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Ad'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateAd
 components:
   schemas:
+    Ad:
+      type: object
+      title: Ad
+      required:
+      - id
+      - flight_id
+      - weight
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        external_id:
+          type: string
+        flight_id:
+          type: integer
+          format: int64
+        creative_id:
+          type: integer
+          format: int64
+        ad_library_item_id:
+          type: string
+        weight:
+          type: integer
+          format: int32
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    AdList:
+      type: object
+      title: AdList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ad'
+        next_cursor:
+          type: string
     Advertiser:
       type: object
       title: Advertiser
@@ -1227,6 +1453,26 @@ components:
             $ref: '#/components/schemas/Campaign'
         next_cursor:
           type: string
+    CreateAdRequest:
+      type: object
+      title: CreateAdRequest
+      required:
+      - flight_id
+      - creative_id
+      properties:
+        external_id:
+          type: string
+        flight_id:
+          type: integer
+          format: int64
+        creative_id:
+          type: integer
+          format: int64
+        weight:
+          type: integer
+          format: int32
+        is_active:
+          type: boolean
     CreateAdvertiserRequest:
       type: object
       title: CreateAdvertiserRequest
@@ -1677,6 +1923,18 @@ components:
           type: string
         expires_at:
           type: string
+    UpdateAdRequest:
+      type: object
+      title: UpdateAdRequest
+      properties:
+        creative_id:
+          type: integer
+          format: int64
+        weight:
+          type: integer
+          format: int32
+        is_active:
+          type: boolean
     UpdateAdvertiserRequest:
       type: object
       title: UpdateAdvertiserRequest

@@ -627,9 +627,16 @@ manager and leader election running.
       (`API.md` follow-up). This is invisible to the integration
       story but documented so a future schema-aware client can
       narrow the type at the consumer side.
-- [ ] **3.11** Ad CRUD — inline-creative variant only; library
-      reference deferred to 3.28 once the Ad Library lands. Schema
-      reserves the `oneOf` shape so 3.28 is additive.
+- [x] **3.11** Ad CRUD — inline-creative variant only.
+      `src/ads.rs::AdsApi` accepts `creative_id` in the request
+      body and rejects bodies that try to set
+      `ad_library_item_id` (column nullable in schema; the
+      handler simply doesn't expose it on writes — additive in
+      3.28). PATCH allows updating creative_id, weight,
+      is_active. 422 fk_not_found on missing flight or creative.
+      One test covers happy + PATCH weight + cross-tenant 403 +
+      bad FK 422. Manifest gains 4 entries; gate now reports
+      `23 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.4.
 - [ ] **3.12** Site + Zone CRUD; `:upsertByUrl` natural-key
       endpoint for sites. Site URL/aliases uniqueness enforced at

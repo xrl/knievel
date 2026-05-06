@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+pub mod ads;
 pub mod advertisers;
 pub mod auth;
 pub mod campaigns;
@@ -40,6 +41,7 @@ pub fn openapi_spec_yaml() -> String {
             flights::FlightsApi,
             creatives::CreativesApi,
             creative_templates::CreativeTemplatesApi,
+            ads::AdsApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

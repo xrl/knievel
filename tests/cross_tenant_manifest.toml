@@ -119,3 +119,25 @@ test   = "cross_tenant_creative_templates_get"
 path   = "/v1/projects/{project_id}/creative-templates/{id}"
 method = "PATCH"
 test   = "cross_tenant_creative_templates_patch"
+
+# Ads — Phase 3.11. Inline-creative variant only; library
+# reference (POST with adLibraryItemId) lands additively in 3.28.
+[[entry]]
+path   = "/v1/projects/{project_id}/ads"
+method = "POST"
+test   = "cross_tenant_ads_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/ads"
+method = "GET"
+test   = "cross_tenant_ads_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/ads/{id}"
+method = "GET"
+test   = "cross_tenant_ads_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/ads/{id}"
+method = "PATCH"
+test   = "cross_tenant_ads_patch"

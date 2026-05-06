@@ -19,6 +19,7 @@ use poem::listener::TcpListener;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 
+use crate::ads::AdsApi;
 use crate::advertisers::AdvertisersApi;
 use crate::campaigns::CampaignsApi;
 use crate::config::Config;
@@ -72,6 +73,7 @@ pub fn routes() -> Route {
             FlightsApi,
             CreativesApi,
             CreativeTemplatesApi,
+            AdsApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),
