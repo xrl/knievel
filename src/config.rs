@@ -62,6 +62,15 @@ pub struct ApiConfig {
     pub shutdown_drain_timeout_secs: u64,
     #[serde(default = "default_shutdown_total")]
     pub shutdown_total_timeout_secs: u64,
+    /// Origins permitted to make cross-origin requests against the
+    /// API. Empty (default) disables the CORS middleware entirely —
+    /// same-origin only. Each entry is a literal origin like
+    /// `https://admin.example.com`; wildcards are not supported.
+    /// Consumed by the CORS layer landing in Phase 7 (`UI.md`,
+    /// "CORS"); parsed today so dev configs can declare
+    /// `http://localhost:5173` ahead of the middleware install.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for ApiConfig {
@@ -71,6 +80,7 @@ impl Default for ApiConfig {
             public_base_url: "http://localhost:8080".into(),
             shutdown_drain_timeout_secs: default_shutdown_drain(),
             shutdown_total_timeout_secs: default_shutdown_total(),
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -350,11 +360,32 @@ mod tests {
         std::env::set_var("KNIEVEL_CONFIG", "/nonexistent/path/knievel.yaml");
         let cfg = load().unwrap();
         assert_eq!(cfg.api.bind_addr, "0.0.0.0:8080");
+        assert!(cfg.api.allowed_origins.is_empty());
         assert_eq!(cfg.logging.level, "info");
         assert_eq!(cfg.logging.format, "json");
         assert_eq!(cfg.database.schema, "knievel");
         assert_eq!(cfg.database.max_connections, 8);
         assert!(cfg.database.url.is_none());
         std::env::remove_var("KNIEVEL_CONFIG");
+    }
+
+    #[test]
+    fn allowed_origins_parses_from_yaml() {
+        let yaml = r#"
+api:
+  bind_addr: 0.0.0.0:9000
+  public_base_url: http://localhost:9000
+  allowed_origins:
+    - http://localhost:5173
+    - https://admin.example.com
+"#;
+        let cfg: Config = Figment::new().merge(Yaml::string(yaml)).extract().unwrap();
+        assert_eq!(
+            cfg.api.allowed_origins,
+            vec![
+                "http://localhost:5173".to_string(),
+                "https://admin.example.com".to_string(),
+            ],
+        );
     }
 }

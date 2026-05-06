@@ -13,6 +13,17 @@ api:
   bind_addr: 0.0.0.0:8080
   # Used to mint absolute impression/click URLs in decision responses.
   public_base_url: ${KNIEVEL_PUBLIC_BASE_URL}
+  # Origins permitted to make cross-origin requests. Empty disables
+  # the CORS layer entirely (same-origin only — fine when the admin
+  # UI is served from this same hostname). List literal origins
+  # explicitly when the admin UI is served from a different origin;
+  # wildcards are not supported. Consumed by the Phase 7 CORS
+  # middleware (see UI.md, "CORS").
+  allowed_origins: []
+  # Example for local dev with the Vite dev server on :5173:
+  # allowed_origins:
+  #   - http://localhost:5173
+  #   - http://127.0.0.1:5173
 
 database:
   # Cluster writer endpoint. LISTEN/NOTIFY does NOT propagate to readers,

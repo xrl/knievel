@@ -2014,6 +2014,120 @@ handler bodies are short again.
 
 ---
 
+## Phase 7 — Admin audit UI
+
+**Goal:** Operator-facing browser console for auditing the state
+of the ad server. SPA built on the same OpenAPI surface every
+other client uses; no admin-only side channels. Read-only audit
+views first, editing later. See `UI.md` for the full plan
+(stack, repo layout, codegen, auth, CORS, deploy).
+
+Treated as a standalone post-Phase-3 workstream because the UI
+is gated on a stable OpenAPI surface — most of Phase 3's task
+list churns it. Phases 7.x can run in parallel with Phase 4
+(deployable) and Phase 6 (bulk follow-ups) once Phase 3 closes.
+
+**Spec references:**
+
+- `UI.md` (entire document — the canonical plan).
+- `API.md` — endpoints the UI consumes; no new shapes.
+- `AUTH.md` § 2 — bearer-token semantics; UI honors them
+  unchanged.
+
+**Pre-staged in advance of this phase:**
+
+- `ApiConfig.allowed_origins` (`src/config.rs`) and the
+  matching example in `config.example.yaml`. Default empty;
+  consumed by 7.2 below. Landed early so dev configs can
+  declare the Vite origin before the middleware install.
+
+**Tasks:**
+
+- [ ] **7.1** Repo skeleton: `web/admin/` with Vite + React +
+      TypeScript, ESLint + Prettier, vitest harness, Mantine v7
+      installed, TanStack Router + Query wired with a
+      placeholder route. No real views yet; this commit just
+      proves `pnpm install && pnpm dev && pnpm test && pnpm
+      build` work clean. Include a README pointing at `UI.md`.
+      Refs: `UI.md` "Stack," "Repo layout."
+- [ ] **7.2** CORS middleware install. Wraps the poem route
+      with `poem::middleware::Cors` when
+      `cfg.api.allowed_origins` is non-empty: methods `GET,
+      POST, PATCH, DELETE, OPTIONS`; allow-headers
+      `Authorization, Content-Type, Idempotency-Key, If-Match,
+      X-Request-Id`; expose-headers `ETag, Location,
+      X-Request-Id, X-Idempotency-Replayed`;
+      `allow_credentials: false` (bearer tokens only);
+      `max_age: 600`. New `tests/api_cors.rs` slice covers
+      empty-config / matching-origin / non-matching-origin /
+      preflight. Add the slice's binary to `cargo xtask
+      test-shape`. Empty-default behavior must not install the
+      middleware at all (no preflight overhead, no
+      `Access-Control-Allow-Origin` on responses).
+      Refs: `UI.md` "CORS"; pre-staged config field.
+- [ ] **7.3** OpenAPI codegen rail. New
+      `xtask/src/ui_client.rs` shelling out to `pnpm --dir
+      web/admin exec openapi-typescript ../../openapi.yaml -o
+      src/api/generated.ts`; `--check` mirrors
+      `xtask/src/openapi.rs` exactly. New
+      `.github/actions/node-setup/` composite (pnpm + Node
+      pinned) mirroring `rust-setup`. CI gains `ui-client-drift`
+      peer of `openapi-drift`. The generated file is checked
+      in, not gitignored.
+      Refs: `UI.md` "OpenAPI codegen"; `xtask/src/openapi.rs`.
+- [ ] **7.4** Auth in the UI. Login screen accepting a pasted
+      bearer token; validation against the smallest "who am I"
+      endpoint (whichever exists when this lands — likely a
+      lightweight `GET /v1/orgs/me` we add here if it doesn't
+      exist yet). `sessionStorage`-backed session, fetch
+      wrapper that injects `Authorization`, 401 → redirect to
+      login. `RequireAuth` route guard.
+      Refs: `UI.md` "Auth"; `AUTH.md` § 2.
+- [ ] **7.5** Org/project browser. List + detail for `/v1/orgs`
+      and `/v1/projects/{project_id}`. First end-to-end slice
+      that exercises the typed client + Query + Router stack.
+      Cursor pagination wired even though `next_cursor` is
+      still `null` server-side (envelope is real today).
+- [ ] **7.6** Resource audit views (read-only). Tables for
+      advertisers, campaigns, flights, ads, creatives, sites,
+      zones, taxonomy, creative templates, ad library. Server-
+      side pagination/sort/filter against the cursor envelope.
+      Detail panes inspect raw JSON for fields the table
+      doesn't surface.
+- [ ] **7.7** Editing surface. PATCH/POST forms with
+      react-hook-form + zod, idempotency-key handling
+      (UUIDv4 minted client-side per submit), optimistic
+      invalidation. Roll out per resource behind a feature
+      flag so each surface gets a real review.
+- [ ] **7.8** Reporting + event-flow inspector. Charts on
+      rollups, a tail view over `/events` (poll-based for v0;
+      revisit if/when push lands). Time-bucket controls match
+      `REPORTING.md`.
+- [ ] **7.9** Admin-session endpoint. New
+      `POST /v1/admin/sessions` backed by argon2id-hashed user
+      credentials, returning a short-lived bearer + refresh
+      semantics. Retire the paste-a-token login from 7.4.
+      Refs: `AUTH.md` (extension); `UI.md` "Auth" roadmap.
+- [ ] **7.10** Polish: Playwright e2e in `nightly.yml`,
+      bundle-size budgets, accessibility sweep (axe in CI for
+      the main routes). Decision on prod static hosting —
+      either mount a `StaticFilesEndpoint` at `/admin/`
+      (same-origin, drops the CORS layer) or stand up a
+      separate static deploy. Default lean is same-origin;
+      revisit if the deploy cadence diverges.
+
+**Milestone:** Operators can log in, browse every project-
+scoped resource, edit the editable ones, and inspect rollups
++ event flow — all over the public OpenAPI surface, no admin
+side channels. UI deploys cleanly from CI; codegen drift fails
+PRs the same way `openapi.yaml` does.
+
+### Notes
+
+(none yet)
+
+---
+
 ## Cross-cutting risks (front-load these)
 
 Carried over from the conversational plan; revisit at the start of
