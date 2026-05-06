@@ -44,7 +44,11 @@ pub fn init(cfg: &Config) -> Result<()> {
                 .try_init()
                 .map_err(|e| anyhow!("tracing init failed: {e}"))?;
         }
-        other => return Err(anyhow!("unsupported logging.format: '{other}' (expected json | compact | text)")),
+        other => {
+            return Err(anyhow!(
+                "unsupported logging.format: '{other}' (expected json | compact | text)"
+            ))
+        }
     }
 
     if cfg.tracing.otel.enabled {
@@ -60,7 +64,12 @@ pub fn init(cfg: &Config) -> Result<()> {
         // Phase 3+ wires sentry crate + sentry-tower middleware
         // (REQUIREMENTS.md § 10.4).
         tracing::info!(
-            environment = cfg.errors.sentry.environment.as_deref().unwrap_or("<unset>"),
+            environment = cfg
+                .errors
+                .sentry
+                .environment
+                .as_deref()
+                .unwrap_or("<unset>"),
             "Sentry enabled in config; SDK init deferred to Phase 3+"
         );
     }

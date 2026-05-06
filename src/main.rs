@@ -1,8 +1,4 @@
-mod config;
-mod observability;
-mod server;
-mod state;
-mod system;
+use knievel::{config, observability, server};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

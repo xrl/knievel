@@ -258,11 +258,20 @@ once 2.3 lands.
       `.spec_endpoint()`. The fourth test asserts the served spec
       lists all three system paths.
       Refs: `REQUIREMENTS.md` § 3, `API.md` "Path Structure."
-- [ ] **2.8** `xtask openapi --check` — generates the spec from
-      the binary, diffs against committed `openapi.yaml`, fails on
-      mismatch. Wire into CI. Initial commit also adds the
-      generated `openapi.yaml`.
+- [x] **2.8** `xtask openapi` and `xtask openapi --check` are real.
+      Knievel root crate gained an `src/lib.rs` exposing
+      `openapi_spec_yaml()` so xtask can build the spec without
+      spawning a server. Initial `openapi.yaml` (2.5 KB) committed.
+      `cargo xtask check-cross-tenant` is no longer skipping —
+      with the spec present it walks paths and reports
+      `0 project-scoped endpoint(s), all covered`.
       Refs: `TESTING.md` § 6.3, § 12.7.
+
+      **Note (2.8):** `poem-openapi` 5 emits OpenAPI **3.0.0**
+      while `REQUIREMENTS.md` § 6 specifies 3.1. v0 ships 3.0
+      since that's what the library supports; revisit when
+      `poem-openapi` adds 3.1 emission, or wrap the spec in a
+      post-processing step.
 - [ ] **2.9** Phase milestone: confirm full CI DAG green; update
       this file's Phase 2 status; refine any tasks/notes for
       Phase 3 based on what we learned.

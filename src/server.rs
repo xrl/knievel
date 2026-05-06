@@ -55,16 +55,10 @@ pub async fn run(cfg: Config) -> Result<()> {
 /// management + decision OpenAPI services as additional
 /// `OpenApiService` mounts.
 pub(crate) fn routes() -> Route {
-    let api = OpenApiService::new(
-        SystemApi,
-        "knievel",
-        env!("CARGO_PKG_VERSION"),
-    );
+    let api = OpenApiService::new(SystemApi, "knievel", env!("CARGO_PKG_VERSION"));
     let spec = api.spec_endpoint();
 
-    Route::new()
-        .nest("/", api)
-        .at("/openapi.json", spec)
+    Route::new().nest("/", api).at("/openapi.json", spec)
 }
 
 async fn build_state(cfg: &Config) -> AppState {
@@ -84,9 +78,7 @@ async fn build_state(cfg: &Config) -> AppState {
             }
         }
     } else {
-        tracing::info!(
-            "no database.url configured; /readyz will report ok: no_db_configured"
-        );
+        tracing::info!("no database.url configured; /readyz will report ok: no_db_configured");
     }
 
     state

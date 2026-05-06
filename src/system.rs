@@ -86,9 +86,7 @@ impl SystemApi {
                 Ok(_) => ReadyzResponse::Ok(PlainText("ok\n".into())),
                 Err(e) => {
                     tracing::warn!(error = %e, "readyz: DB unreachable");
-                    ReadyzResponse::NotReady(PlainText(
-                        "not_ready: db_unreachable\n".into(),
-                    ))
+                    ReadyzResponse::NotReady(PlainText("not_ready: db_unreachable\n".into()))
                 }
             },
         }

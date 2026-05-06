@@ -16,23 +16,18 @@ fn main() {
         .unwrap_or(false);
     let sha = if dirty { format!("{sha}-dirty") } else { sha };
 
-    let timestamp =
-        run("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"]).unwrap_or_else(|| "unknown".into());
+    let timestamp = run("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"]).unwrap_or_else(|| "unknown".into());
 
     println!("cargo:rustc-env=KNIEVEL_GIT_SHA={sha}");
     println!("cargo:rustc-env=KNIEVEL_BUILD_TIMESTAMP={timestamp}");
 }
 
 fn run(cmd: &str, args: &[&str]) -> Option<String> {
-    Command::new(cmd)
-        .args(args)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+    Command::new(cmd).args(args).output().ok().and_then(|o| {
+        if o.status.success() {
+            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+        } else {
+            None
+        }
+    })
 }

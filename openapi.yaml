@@ -1,0 +1,101 @@
+openapi: 3.0.0
+info:
+  title: knievel
+  version: 0.1.0
+servers: []
+tags: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness — k8s liveness probe key.
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      operationId: healthz
+  /readyz:
+    get:
+      summary: |-
+        Readiness — only 200 when knievel can serve. Per
+        `REQUIREMENTS.md` § 10.6, the full check has four
+        criteria; today only the DB-reachability one is real.
+      responses:
+        '200':
+          description: Process up + DB reachable (or no DB configured).
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        '503':
+          description: DB writer unreachable; pods should be removed from the LB.
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      operationId: readyz
+  /version:
+    get:
+      summary: Build metadata + effective auth policy.
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+      operationId: version
+components:
+  schemas:
+    AuthBlock:
+      type: object
+      title: AuthBlock
+      required:
+      - modes
+      - issuers
+      properties:
+        modes:
+          type: array
+          items:
+            type: string
+        issuers:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssuerSummary'
+    IssuerSummary:
+      type: object
+      title: IssuerSummary
+      required:
+      - issuer
+      - audience
+      properties:
+        issuer:
+          type: string
+        audience:
+          type: string
+    VersionResponse:
+      type: object
+      title: VersionResponse
+      description: |-
+        Build metadata + effective auth policy. Per `API.md` § 5 and
+        `AUTH.md` "Effective-policy visibility." `auth.modes` and
+        `auth.issuers` are empty until Phase 3.16 lands real auth.
+      required:
+      - knievel
+      - schema
+      - git_sha
+      - build_timestamp
+      - auth
+      properties:
+        knievel:
+          type: string
+        schema:
+          type: string
+        git_sha:
+          type: string
+        build_timestamp:
+          type: string
+        auth:
+          $ref: '#/components/schemas/AuthBlock'

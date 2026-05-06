@@ -10,6 +10,7 @@ publish     = false
 [dependencies]
 anyhow     = { workspace = true }
 clap       = { version = "4", features = ["derive"] }
+knievel    = { path = ".." }
 regex      = "1"
 serde      = { workspace = true }
 serde_yaml = { workspace = true }
