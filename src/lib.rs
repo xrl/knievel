@@ -22,6 +22,7 @@ pub mod flights;
 pub mod handlers;
 pub mod hmac;
 pub mod idempotency;
+pub mod leader;
 pub mod observability;
 pub mod orgs;
 pub mod selection;

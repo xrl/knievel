@@ -940,12 +940,35 @@ manager and leader election running.
       (3) **Real `dedup_key` computation in the decision
       handler**: 3.18 mints nonces but doesn't yet compute the
       dedup_key — that's a follow-up alongside (1).
-- [ ] **3.22** Leader election — `pg_try_advisory_lock` on a
+- [x] **3.22** Leader election — `pg_try_advisory_lock` on a
       dedicated connection, watchdog ("must complete a maintenance
       run every N hours" → process exits on miss), `/readyz`
       reflects leader/follower state. Idempotency-key reaper
       (3.5 follow-up) hangs off the leader.
+      `src/leader.rs::LeaderHandle` is the cheap cloneable
+      `is_leader()` accessor; the actual lock lives on a
+      dedicated session inside `leader::spawn`. Watchdog budget
+      defaults to 4 h via `WATCHDOG_BUDGET`. Three unit tests
+      cover the handle defaults, record_tick state, and the
+      stable lock id constant.
       Refs: `REQUIREMENTS.md` § 7.5.
+
+      **Note (3.22):** Two pieces deferred. (1) **`/readyz`
+      integration** — adding a follower→reader status code
+      change to `system::readyz` requires a focused commit
+      that also threads the `LeaderHandle` through
+      `AppState`; lands alongside the AppState-wiring commit
+      that also picks up the `EventSender` from 3.21.
+      (2) **`AppState::leader: LeaderHandle`** field is the
+      next piece of glue. Idempotency-key reaper, partition
+      manager (3.23), and rollup compute (3.24) all read
+      `handle.is_leader()` to gate their work — they're spec'd
+      to land in those tasks, not here. The watchdog is
+      conservative on purpose: if a leader is hung but the
+      Postgres session is alive, the lock won't be released
+      automatically. The deadline forces the process to exit,
+      letting orchestration (kubelet, systemd) restart and
+      re-elect.
 - [ ] **3.23** Partition manager — premake 4 days of
       `events_raw_p<YYYY_MM_DD>` partitions, retention drop with
       `DETACH PARTITION CONCURRENTLY`. Runs hourly off the 3.22
