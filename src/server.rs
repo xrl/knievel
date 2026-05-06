@@ -22,6 +22,8 @@ use poem_openapi::OpenApiService;
 use crate::advertisers::AdvertisersApi;
 use crate::campaigns::CampaignsApi;
 use crate::config::Config;
+use crate::creative_templates::CreativeTemplatesApi;
+use crate::creatives::CreativesApi;
 use crate::flights::FlightsApi;
 use crate::orgs::OrgApi;
 use crate::state::AppState;
@@ -68,6 +70,8 @@ pub fn routes() -> Route {
             AdvertisersApi,
             CampaignsApi,
             FlightsApi,
+            CreativesApi,
+            CreativeTemplatesApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

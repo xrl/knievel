@@ -81,3 +81,41 @@ test   = "cross_tenant_flights_get"
 path   = "/v1/projects/{project_id}/flights/{id}"
 method = "PATCH"
 test   = "cross_tenant_flights_patch"
+
+# Creatives — Phase 3.10. Image upload (POST .../{id}/image)
+# lands in 3.29.
+[[entry]]
+path   = "/v1/projects/{project_id}/creatives"
+method = "POST"
+test   = "cross_tenant_creatives_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/creatives"
+method = "GET"
+test   = "cross_tenant_creatives_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/creatives/{id}"
+method = "GET"
+test   = "cross_tenant_creatives_get"
+
+# Creative Templates — Phase 3.10.
+[[entry]]
+path   = "/v1/projects/{project_id}/creative-templates"
+method = "POST"
+test   = "cross_tenant_creative_templates_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/creative-templates"
+method = "GET"
+test   = "cross_tenant_creative_templates_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/creative-templates/{id}"
+method = "GET"
+test   = "cross_tenant_creative_templates_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/creative-templates/{id}"
+method = "PATCH"
+test   = "cross_tenant_creative_templates_patch"

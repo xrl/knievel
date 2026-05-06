@@ -600,12 +600,33 @@ manager and leader election running.
       refactor commit can extract it then. The Phase 3.5 note
       about external_id idempotency remains: today external_id
       reuse returns 409, not 200-replay.
-- [ ] **3.10** Creative + CreativeTemplate CRUD. CreativeTemplate
-      requires the `poem-openapi` JSON-Schema round-trip spike
-      called out in cross-cutting risk (1) — runs as a
-      proof-of-concept test before the handler lands. Image upload
-      stays deferred to 3.29.
-      Refs: `API.md` § 3.5, § 3.6, cross-cutting risk (1).
+- [x] **3.10** Creative + CreativeTemplate CRUD.
+      `creative_templates` stores the JSON Schema document as
+      `serde_json::Value` — poem-openapi treats this as a
+      free-form JSON `Any` schema in the generated OpenAPI, and
+      the spike test
+      `creative_template_json_schema_round_trips` confirms a
+      representative schema body survives create → GET → patch
+      bit-for-bit. Cross-cutting risk #1 closes positively. The
+      `creatives` handler accepts the union of all kind-specific
+      fields and validates per-kind requirements at the handler
+      boundary (image needs image_url; html needs body; native
+      needs template_id + values); 422 fk_not_found surfaces FK
+      violations against advertiser_id or template_id. Image
+      upload (`POST .../{id}/image`) stays deferred to 3.29.
+      Cross-tenant manifest gains 7 entries (3 creatives + 4
+      templates); gate now reports
+      `19 project-scoped endpoint(s), all covered`.
+      Refs: `API.md` § 3.5, § 3.6, `REQUIREMENTS.md` § 12 risk
+      (1).
+
+      **Note (3.10):** `Creative` is the union of all kind shapes,
+      not a typed `oneOf`. Per `API.md` § 3.5 the response is a
+      typed `oneOf` keyed on `type`; the v0 wire shape uses a
+      single `kind` discriminator and per-kind nullable fields
+      (`API.md` follow-up). This is invisible to the integration
+      story but documented so a future schema-aware client can
+      narrow the type at the consumer side.
 - [ ] **3.11** Ad CRUD — inline-creative variant only; library
       reference deferred to 3.28 once the Ad Library lands. Schema
       reserves the `oneOf` shape so 3.28 is additive.

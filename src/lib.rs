@@ -11,6 +11,8 @@ pub mod advertisers;
 pub mod auth;
 pub mod campaigns;
 pub mod config;
+pub mod creative_templates;
+pub mod creatives;
 pub mod db;
 pub mod flights;
 pub mod handlers;
@@ -36,6 +38,8 @@ pub fn openapi_spec_yaml() -> String {
             advertisers::AdvertisersApi,
             campaigns::CampaignsApi,
             flights::FlightsApi,
+            creatives::CreativesApi,
+            creative_templates::CreativeTemplatesApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),
