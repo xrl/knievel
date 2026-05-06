@@ -459,6 +459,368 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateAdvertiser
+  /v1/projects/{project_id}/campaigns:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createCampaign
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/CampaignList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listCampaigns
+  /v1/projects/{project_id}/campaigns/{id}:
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getCampaign
+    patch:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateCampaignRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateCampaign
+  /v1/projects/{project_id}/flights:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateFlightRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Flight'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createFlight
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/FlightList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listFlights
+  /v1/projects/{project_id}/flights/{id}:
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Flight'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getFlight
+    patch:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateFlightRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Flight'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateFlight
 components:
   schemas:
     Advertiser:
@@ -514,6 +876,48 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IssuerSummary'
+    Campaign:
+      type: object
+      title: Campaign
+      required:
+      - id
+      - advertiser_id
+      - name
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        external_id:
+          type: string
+        advertiser_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    CampaignList:
+      type: object
+      title: CampaignList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Campaign'
+        next_cursor:
+          type: string
     CreateAdvertiserRequest:
       type: object
       title: CreateAdvertiserRequest
@@ -524,6 +928,62 @@ components:
           type: string
         name:
           type: string
+        is_active:
+          type: boolean
+    CreateCampaignRequest:
+      type: object
+      title: CreateCampaignRequest
+      required:
+      - advertiser_id
+      - name
+      properties:
+        external_id:
+          type: string
+        advertiser_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        is_active:
+          type: boolean
+    CreateFlightRequest:
+      type: object
+      title: CreateFlightRequest
+      required:
+      - campaign_id
+      - name
+      - priority_id
+      - ad_types
+      properties:
+        external_id:
+          type: string
+        campaign_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        priority_id:
+          type: integer
+          format: int64
+        start_date:
+          type: string
+        end_date:
+          type: string
+        site_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        zone_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        ad_types:
+          type: array
+          items:
+            type: integer
+            format: int64
         is_active:
           type: boolean
     CreateProjectRequest:
@@ -607,6 +1067,74 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorBody'
+    Flight:
+      type: object
+      title: Flight
+      required:
+      - id
+      - campaign_id
+      - name
+      - priority_id
+      - site_ids
+      - zone_ids
+      - ad_types
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        external_id:
+          type: string
+        campaign_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        priority_id:
+          type: integer
+          format: int64
+        start_date:
+          type: string
+        end_date:
+          type: string
+        site_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        zone_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        ad_types:
+          type: array
+          items:
+            type: integer
+            format: int64
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    FlightList:
+      type: object
+      title: FlightList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flight'
+        next_cursor:
+          type: string
     IssuerSummary:
       type: object
       title: IssuerSummary
@@ -693,6 +1221,44 @@ components:
       properties:
         name:
           type: string
+        is_active:
+          type: boolean
+    UpdateCampaignRequest:
+      type: object
+      title: UpdateCampaignRequest
+      properties:
+        name:
+          type: string
+        is_active:
+          type: boolean
+    UpdateFlightRequest:
+      type: object
+      title: UpdateFlightRequest
+      properties:
+        name:
+          type: string
+        priority_id:
+          type: integer
+          format: int64
+        start_date:
+          type: string
+        end_date:
+          type: string
+        site_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        zone_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        ad_types:
+          type: array
+          items:
+            type: integer
+            format: int64
         is_active:
           type: boolean
     VersionResponse:

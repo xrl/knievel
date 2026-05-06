@@ -581,11 +581,25 @@ manager and leader election running.
       pagination / batch tests come online with their handler
       features (3.5 partial-replay applies; full external_id
       idempotency lands with 3.14 `:batchUpsert`).
-- [ ] **3.9** Demand-chain CRUD (advertisers, campaigns, flights).
-      Each resource gets its `crud_contract!` invocation, handler
-      module, and cross-tenant manifest entry per project-scoped
-      operation.
-      Refs: `API.md` §§ 3.1–3.3.
+- [x] **3.9** Demand-chain CRUD — campaigns + flights handlers
+      (advertisers landed in 3.8). `src/campaigns.rs` adds the
+      advertiser-FK pattern with a 422 `fk_not_found` branch when
+      the FK insert violates the constraint. `src/flights.rs`
+      adds the array-column shape (`site_ids`, `zone_ids`,
+      `ad_types`) plus an explicit 400 `ad_types_required` since
+      `API.md` § 3.3 requires non-empty `ad_types`. Two API tests
+      cover the new ground (campaign FK 422, flight arrays + 400
+      validation). Cross-tenant manifest gets 8 new entries; gate
+      now reports `12 project-scoped endpoint(s), all covered`.
+      Refs: `API.md` §§ 3.2–3.3.
+
+      **Note (3.9):** The `crud_contract!` macro stays deferred.
+      With three resources the duplication is real (~80% of the
+      handler bodies are identical); the right shape becomes
+      clearer once 3.10–3.13 land their resources, and a focused
+      refactor commit can extract it then. The Phase 3.5 note
+      about external_id idempotency remains: today external_id
+      reuse returns 409, not 200-replay.
 - [ ] **3.10** Creative + CreativeTemplate CRUD. CreativeTemplate
       requires the `poem-openapi` JSON-Schema round-trip spike
       called out in cross-cutting risk (1) — runs as a

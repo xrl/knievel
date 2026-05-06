@@ -39,3 +39,45 @@ test   = "cross_tenant_advertisers_get"
 path   = "/v1/projects/{project_id}/advertisers/{id}"
 method = "PATCH"
 test   = "cross_tenant_advertisers_patch"
+
+# Campaigns — Phase 3.9.
+[[entry]]
+path   = "/v1/projects/{project_id}/campaigns"
+method = "POST"
+test   = "cross_tenant_campaigns_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/campaigns"
+method = "GET"
+test   = "cross_tenant_campaigns_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/campaigns/{id}"
+method = "GET"
+test   = "cross_tenant_campaigns_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/campaigns/{id}"
+method = "PATCH"
+test   = "cross_tenant_campaigns_patch"
+
+# Flights — Phase 3.9.
+[[entry]]
+path   = "/v1/projects/{project_id}/flights"
+method = "POST"
+test   = "cross_tenant_flights_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/flights"
+method = "GET"
+test   = "cross_tenant_flights_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/flights/{id}"
+method = "GET"
+test   = "cross_tenant_flights_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/flights/{id}"
+method = "PATCH"
+test   = "cross_tenant_flights_patch"
