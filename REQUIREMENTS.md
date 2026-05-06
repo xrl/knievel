@@ -434,7 +434,8 @@ Two tables:
   `kind` (`decision` | `impression` | `click`), `placement_id`,
   `site_id`, `zone_id`, `ad_id`, `creative_id`, `flight_id`,
   `campaign_id`, `advertiser_id`, `url`, `referrer_host`,
-  `user_agent_hash`, `signature_nonce`, `dedup_key`. **Default
+  `user_agent_hash`, `signature_nonce`, `dedup_key`, `snapshot_version`.
+  **Default
   retention 30 days** (conservative because backups are the operator's
   responsibility in shared-DB deployments); operator-configurable.
 - **`events_rollup`** — hourly aggregates by `(project_id, site_id,
@@ -844,7 +845,7 @@ Per-context fields attached at request entry:
 
 - `org_id`, `project_id`, `route`, `method`, `status`, `duration_ms`
 - For decision requests: `placement_count`, `decision_outcome` (hit /
-  miss / blocked / forced)
+  miss / blocked / forced), `snapshot_version`
 - For management writes: `resource`, `external_id`, `idempotent_replay`
 
 Decision endpoint logs are sampled at `decisions_sample_rate` (default

@@ -204,6 +204,7 @@ signal.
 
 ```json
 {
+  "snapshotVersion": 1234567,
   "decisions": {
     "header": [
       {
@@ -233,6 +234,11 @@ signal.
 }
 ```
 
+- `snapshotVersion` is the monotonic configuration version that
+  served this request. Stamped on the corresponding `events_raw`
+  rows and emitted on per-request log lines so an operator can
+  reproduce a decision deterministically: same input + same
+  `snapshotVersion` → same output.
 - `decisions[<id>]` is **always an array**, even when `count == 1`.
   Empty array = no eligible ad.
 - `siteId` is the resolved site (useful when caller passed `siteUrl` or
@@ -259,7 +265,8 @@ Rate-limited more aggressively than production decisions (default
 
 ```json
 {
-  "decisions": { "header": [ ...same shape as /decisions... ] },
+  "snapshotVersion": 1234567,
+  "decisions":       { "header": [ ...same shape as /decisions... ] },
   "explanation": {
     "header": {
       "priorityTier":  1,

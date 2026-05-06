@@ -115,6 +115,7 @@ kind.
 | `user_agent_hash` | `bytea` | Hash, not raw UA. |
 | `signature_nonce` | `bytea` | Per-event nonce; useful as a unique key. |
 | `dedup_key` | `bytea` | Stable per (event, signature) for impression-replay dedup. |
+| `snapshot_version` | `bigint` | Monotonic config version that produced the decision; lets you reproduce a decision deterministically. |
 
 **Default retention:** 30 days. Rolling reports older than that
 must materialize their own retention in dbt.
