@@ -272,18 +272,47 @@ once 2.3 lands.
       since that's what the library supports; revisit when
       `poem-openapi` adds 3.1 emission, or wrap the spec in a
       post-processing step.
-- [ ] **2.9** Phase milestone: confirm full CI DAG green; update
-      this file's Phase 2 status; refine any tasks/notes for
-      Phase 3 based on what we learned.
+- [x] **2.9** Phase milestone confirmed locally. Every per-PR
+      gate from `TESTING.md` § 12.7 runs green:
+      - `cargo fmt --check` — clean.
+      - `cargo clippy --workspace --all-targets --locked -- -D warnings` — clean.
+      - `cargo test --workspace` — 23 tests passing across the
+        binary, lib, xtask, testlib, and integration crates.
+      - `cargo xtask lint-migrations` — 1 file clean
+        (`migrations/0001_init.sql`).
+      - `cargo xtask check-cross-tenant` — 0 project-scoped
+        endpoints, all covered (will be real once Phase 3 starts
+        adding endpoints).
+      - `cargo xtask test-shape` — stub (Phase 5.6 will implement).
+      - `cargo xtask openapi --check` — `openapi.yaml` matches
+        binary spec (2508 bytes).
 
-**Milestone:** A `cargo run` starts a server that responds to
+      The integration test that needs real Postgres
+      (`tests/integration_migrations.rs`) self-skips locally
+      without `DATABASE_URL` and will run against the CI Postgres
+      service container in the `db-integ` job.
+
+**Milestone:** met. `cargo run` starts a server that responds to
 `/healthz`, `/readyz`, `/version`, and `/openapi.json` with honest
-values. CI is fully green: `cargo fmt`, `clippy`, the test suite,
-all four `xtask` linters, and the OpenAPI drift check.
+values; the OpenAPI spec is the contract; the migration linter
+and cross-tenant gate guard the very first migrations and
+endpoints; the CI pipeline is in place to keep them honest. Rails
+are real before any train rides them.
 
 ### Notes
 
-(none yet)
+- **Phase 1.5 → Phase 4:** several CI jobs (helm-lint,
+  build-image, acceptance, gem-smoke, every job in nightly.yml,
+  most of release.yml) carry `if: false` with a comment naming
+  the phase that flips them on. Phase 4 owns most of the flips.
+- **Phase 1.6 spec follow-up:** `REQUIREMENTS.md` § 7.2 calls
+  `config_version` a "row in a bookkeeping table" but it's a
+  SEQUENCE in the implementation (see Phase 1.6 note). Update the
+  spec wording the next time § 7.2 changes.
+- **Phase 2.8 spec follow-up:** `poem-openapi` 5 emits OpenAPI
+  3.0.0 while `REQUIREMENTS.md` § 6 specifies 3.1. Decide whether
+  to wait for `poem-openapi` to add 3.1 emission or post-process
+  the spec.
 
 ---
 
