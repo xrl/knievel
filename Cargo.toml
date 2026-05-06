@@ -14,6 +14,7 @@ version    = "0.1.0"
 # adds entries as needed; PHASES.md tracks what landed when.
 [workspace.dependencies]
 anyhow      = "1"
+argon2      = "0.5"
 thiserror   = "2"
 regex       = "1"
 serde       = { version = "1", features = ["derive"] }
@@ -38,6 +39,7 @@ version.workspace    = true
 
 [dependencies]
 anyhow       = { workspace = true }
+argon2       = { workspace = true }
 figment      = { workspace = true }
 poem         = { workspace = true }
 poem-openapi = { workspace = true }

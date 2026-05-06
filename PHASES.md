@@ -402,14 +402,30 @@ manager and leader election running.
       The `real_migrations_are_clean` sanity test was generalized
       to lint every file in `migrations/` so future migrations
       get auto-checked.
-- [ ] **3.2** Opaque-token foundation: `auth::opaque` parse +
-      argon2id hash/verify, `auth::role` enum + ordering,
-      migration `0003_api_tokens.sql` (tokens table with RLS by
-      `org_id`), `Principal` poem-openapi extractor (opaque path
-      only — JWT lands in 3.26). Unit tests per `TESTING.md` § 4.1
-      for `auth::opaque::parse`, `auth::opaque::hash`, `auth::role`.
+- [x] **3.2** Opaque-token foundation. `src/auth/` module with
+      three children: `opaque` (token-format parse + argon2id
+      hash/verify), `role` (Role enum, ordered by privilege,
+      kebab-case wire), `principal` (`Principal` struct + scope /
+      token-type enums). Migration `0003_api_tokens.sql` —
+      `api_tokens` table with RLS bound on `org_id` plus a
+      single-row auth-bootstrap bypass via the
+      `knievel.auth_lookup_id` GUC (the chicken-and-egg fix —
+      auth has to read `secret_hash` before any `org_id` is
+      known). 11 unit tests cover the parse / hash / role /
+      ordering / serde paths.
       Refs: `AUTH.md` "Opaque Tokens," "Authorization,"
       `REQUIREMENTS.md` § 4.3.
+
+      **Note (3.2):** Wire format is fixed to four
+      underscore-separated post-prefix segments —
+      `kvl_<env>_<scope>_<id_short>_<secret>` —  with `splitn(4,
+      '_')` so the random tail can itself contain `_`.
+      `id_short` is the public id segment that, prefixed with
+      `tok_`, matches `api_tokens.id`. The Principal extractor
+      (Phase 3.3) is the only consumer of the auth-bootstrap
+      bypass: it `set_config('knievel.auth_lookup_id', $id, true)`
+      on its lookup transaction, queries by primary key, and
+      lets the transaction roll back when verification fails.
 - [ ] **3.3** First handler — `POST /v1/orgs/{orgId}/projects` and
       `GET /v1/orgs/{orgId}/projects/{projectId}`. `OrgApi`
       `OpenApiService` mounted alongside `SystemApi`. Insta-snapshot
