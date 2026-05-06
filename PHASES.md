@@ -218,8 +218,12 @@ once 2.3 lands.
       budget 60 s). Empty `Route::new()` today — handlers wired
       in 2.4–2.7.
       Refs: `REQUIREMENTS.md` § 10.7.
-- [ ] **2.4** `/healthz` handler. `200` if process is up. No
-      authentication. Integration test via `poem::test::TestClient`.
+- [x] **2.4** `src/system.rs::healthz` returns `200 ok\n`. Wired
+      into `server::routes()`. Two `poem::test::TestClient` tests:
+      one against the handler in isolation, one through the
+      production routes table to catch wiring regressions. Server
+      `Route` is a single `at("/healthz", get(...))` today;
+      subsequent endpoints chain on as they land.
       Refs: `API.md` § 5, `REQUIREMENTS.md` § 10.6.
 - [ ] **2.5** `/readyz` handler. `200` only if DB is reachable
       (snapshot/flusher/leader checks land in later phases as TODOs

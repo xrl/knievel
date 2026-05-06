@@ -1,6 +1,7 @@
 mod config;
 mod observability;
 mod server;
+mod system;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

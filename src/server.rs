@@ -16,9 +16,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use poem::listener::TcpListener;
-use poem::{Route, Server};
+use poem::{get, Route, Server};
 
 use crate::config::Config;
+use crate::system;
 
 pub async fn run(cfg: Config) -> Result<()> {
     let addr = SocketAddr::from_str(&cfg.api.bind_addr)
@@ -46,9 +47,10 @@ pub async fn run(cfg: Config) -> Result<()> {
     Ok(())
 }
 
-/// Empty router. Endpoints are added in Phase 2.4–2.7.
+/// Routes wired so far. Each Phase 2.x task touches this single
+/// helper as its endpoint lands.
 pub(crate) fn routes() -> Route {
-    Route::new()
+    Route::new().at("/healthz", get(system::healthz))
 }
 
 async fn shutdown_signal() {

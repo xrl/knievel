@@ -46,6 +46,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 anyhow  = { workspace = true }
+poem    = { workspace = true, features = ["test"] }
 sqlx    = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
 testlib = { path = "testlib" }
 tokio   = { workspace = true }
