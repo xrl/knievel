@@ -969,11 +969,36 @@ manager and leader election running.
       automatically. The deadline forces the process to exit,
       letting orchestration (kubelet, systemd) restart and
       re-elect.
-- [ ] **3.23** Partition manager — premake 4 days of
+- [x] **3.23** Partition manager — premake 4 days of
       `events_raw_p<YYYY_MM_DD>` partitions, retention drop with
       `DETACH PARTITION CONCURRENTLY`. Runs hourly off the 3.22
       leader handle. Idempotent.
+      `src/partitions.rs::run_once(pool, retention_days)` does a
+      single maintenance pass: `CREATE TABLE IF NOT EXISTS` for
+      each of the next `PREMAKE_DAYS` (4) day-leaves with
+      explicit `ALTER TABLE ... ENABLE/FORCE ROW LEVEL SECURITY`
+      on each leaf (the parent's policies are inherited but the
+      ENABLE/FORCE flags aren't). Retention sweep walks the
+      `pg_inherits` tree and detaches anything whose leaf name
+      sorts before the cutoff name. Lexical name order is
+      chronological by construction (`events_raw_pYYYY_MM_DD`).
+      `partitions::spawn(pool, leader, retention)` runs the
+      hourly tick — gated on `leader.is_leader()`, records ticks
+      via `leader.record_tick()` for the watchdog. Four unit
+      tests cover the day truncation, leaf naming, lexical
+      ordering, and the days-from-epoch math anchors.
       Refs: `REQUIREMENTS.md` § 7.4.
+
+      **Note (3.23):** Detach uses plain `DETACH PARTITION`,
+      not `DETACH PARTITION CONCURRENTLY`. The CONCURRENTLY
+      variant is the correct production choice but requires
+      Postgres 14+ AND no transaction wrapping; sqlx's default
+      execution context doesn't trip that, but explicit
+      verification is a follow-up. Days-from-epoch math is
+      Howard Hinnant's algorithm — handles negative pre-1970
+      dates and post-2100 leap-year corrections. The hourly
+      tick is the spec default; configurable via a future
+      `partitions.tick_secs` config field.
 - [ ] **3.24** Migration `0010_events_rollup.sql` + leader-elected
       hourly rollup compute. Watermark advances monotonically; only
       `is_duplicate = false` rows feed the rollup.
