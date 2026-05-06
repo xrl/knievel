@@ -533,14 +533,28 @@ manager and leader election running.
       the spec just emits a single 201 entry now. The token env
       segment is hardcoded to `prod` for v0; future commits
       parameterize via config.
-- [ ] **3.7** Inventory + demand-chain migrations. Three migrations
-      sequenced: `0006_demand.sql` (advertisers, campaigns,
-      flights, ads, creatives, creative_templates),
-      `0007_inventory.sql` (sites with aliases, zones),
-      `0008_taxonomy.sql` (channels, priorities, ad_types — seeded
-      defaults). Every table RLS-bound; FK relationships match
-      `API.md` §§ 3.1–3.9.
+- [x] **3.7** Inventory + demand-chain migrations.
+      `0006_demand.sql` (advertisers, campaigns, flights, ads,
+      creatives, creative_templates), `0007_inventory.sql`
+      (sites with aliases array, zones), `0008_taxonomy.sql`
+      (channels, priorities, ad_types). Every table is project-
+      scoped (carries both `org_id` and `project_id`), RLS-bound
+      on `current_setting('knievel.project_id')`, with
+      `WITH CHECK` symmetrical to `USING`. `ads.kind_check`
+      enforces the API.md § 3.4 oneOf at the schema layer
+      (creative_id XOR ad_library_item_id). One integration test
+      `tests/integration_demand.rs` round-trips one row of each
+      of the 11 resources and asserts: pj_b sees zero rows of
+      every table after pj_a writes; WITH CHECK rejects a
+      wrong-project insert.
       Refs: `API.md` §§ 3.1–3.9, `REQUIREMENTS.md` § 5.
+
+      **Note (3.7):** Taxonomy seeding (default channels /
+      priorities / ad_types per project) lands in 3.13 alongside
+      the read endpoints. The `ad_library_item_id` column on
+      `ads` is reserved here so 3.28 (Ad Library) is purely
+      additive — no schema migration needed for the reference
+      variant.
 - [ ] **3.8** `crud_contract!` macro — emits the 11-test table from
       `TESTING.md` § 6.4 from a single invocation
       (`create_returns_201`, `create_idempotent_on_external_id`,
