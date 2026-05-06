@@ -49,6 +49,13 @@ pub struct Config {
 pub struct ApiConfig {
     pub bind_addr: String,
     pub public_base_url: String,
+    /// Graceful-shutdown drain budget. Per `REQUIREMENTS.md` § 10.7
+    /// the default is 30 s; the total budget (drain + transports
+    /// flush) is bounded by `shutdown_total_timeout_secs`.
+    #[serde(default = "default_shutdown_drain")]
+    pub shutdown_drain_timeout_secs: u64,
+    #[serde(default = "default_shutdown_total")]
+    pub shutdown_total_timeout_secs: u64,
 }
 
 impl Default for ApiConfig {
@@ -56,8 +63,17 @@ impl Default for ApiConfig {
         Self {
             bind_addr: "0.0.0.0:8080".into(),
             public_base_url: "http://localhost:8080".into(),
+            shutdown_drain_timeout_secs: default_shutdown_drain(),
+            shutdown_total_timeout_secs: default_shutdown_total(),
         }
     }
+}
+
+fn default_shutdown_drain() -> u64 {
+    30
+}
+fn default_shutdown_total() -> u64 {
+    60
 }
 
 #[derive(Deserialize, Debug, Clone)]

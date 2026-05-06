@@ -211,10 +211,12 @@ once 2.3 lands.
       error paths (invalid format, invalid level directive); the
       success path is exercised by the binary at runtime and
       eventually by the acceptance suite.
-- [ ] **2.3** `main.rs` binds `poem` at the configured `bind_addr`,
-      installs SIGTERM/SIGINT handlers, drains in-flight requests
-      with a bounded shutdown timeout. No handlers wired yet — bare
-      poem app with a single `not_found` route.
+- [x] **2.3** `src/server.rs` binds `poem` at `cfg.api.bind_addr`,
+      installs SIGTERM/SIGINT handlers, runs with poem's graceful
+      shutdown helper. Drain timeout from
+      `cfg.api.shutdown_drain_timeout_secs` (default 30 s; total
+      budget 60 s). Empty `Route::new()` today — handlers wired
+      in 2.4–2.7.
       Refs: `REQUIREMENTS.md` § 10.7.
 - [ ] **2.4** `/healthz` handler. `200` if process is up. No
       authentication. Integration test via `poem::test::TestClient`.
