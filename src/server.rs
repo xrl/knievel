@@ -125,7 +125,7 @@ async fn build_state(cfg: &Config) -> AppState {
         return state;
     };
 
-    let pool = match sqlx::PgPool::connect(url).await {
+    let pool = match connect_pool(url, cfg.database.max_connections).await {
         Ok(p) => {
             tracing::info!("connected to Postgres");
             p
@@ -138,6 +138,19 @@ async fn build_state(cfg: &Config) -> AppState {
             return state;
         }
     };
+
+    if cfg.database.auto_migrate {
+        match crate::migrate::run(&pool).await {
+            Ok(()) => tracing::info!("auto_migrate: migrations applied"),
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "auto_migrate failed; /readyz will report 503 until resolved"
+                );
+                return state;
+            }
+        }
+    }
 
     // Events flusher — bounded mpsc + COPY drain
     // (Phase 3.21).
@@ -162,6 +175,28 @@ async fn build_state(cfg: &Config) -> AppState {
         .with_events(sender)
         .with_leader(leader_handle);
     state
+}
+
+/// Connect with the same `after_connect` recipe `testlib` uses
+/// (`SET search_path TO knievel, public`) so the `_sqlx_migrations`
+/// tracking table lands inside the `knievel` schema rather than
+/// `public`. Mirrors MIGRATION_RX.md "One-time provisioning"'s
+/// `ALTER ROLE knievel_app SET search_path = ...`.
+async fn connect_pool(url: &str, max_connections: u32) -> Result<sqlx::PgPool> {
+    use sqlx::postgres::PgPoolOptions;
+    PgPoolOptions::new()
+        .max_connections(max_connections)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET search_path TO knievel, public")
+                    .execute(conn)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(url)
+        .await
+        .map_err(|e| anyhow!("connect: {e}"))
 }
 
 async fn shutdown_signal() {

@@ -1,0 +1,41 @@
+# Knievel config for the reference compose stack — Phase 4.1.
+#
+# Layered loader semantics (`REQUIREMENTS.md` § 10.1):
+#   1. Built-in defaults.
+#   2. This file (mounted at /etc/knievel/config.yaml).
+#   3. KNIEVEL_* env-var overrides.
+#
+# `${VAR}` interpolation runs against the process environment
+# before parse, so you can keep the password in compose's
+# environment block instead of rebaking the YAML.
+
+api:
+  bind_addr: 0.0.0.0:8080
+  public_base_url: http://localhost:8080
+
+database:
+  url: postgres://knievel_app:dev@knievel-postgres:5432/knievel?sslmode=disable
+  schema: knievel
+  auto_migrate: true
+  max_connections: 8
+
+logging:
+  level: info
+  format: json
+
+# Force-override kill switch (`API.md` § 1). Keep enabled in dev so
+# the per-project `allow_force_decision` flag stays the gate;
+# operators flip this to false in production for a process-wide
+# block.
+decisions:
+  force_overrides_enabled: true
+
+# Events flusher capacity (`REQUIREMENTS.md` § 7.6). Default sized
+# for ~5k events/s with a 1s drain.
+events:
+  channel_capacity: 8192
+
+# `events_raw` partition retention (`REQUIREMENTS.md` § 7.4).
+# Spec default; tune per environment.
+partitions:
+  retention_days: 30

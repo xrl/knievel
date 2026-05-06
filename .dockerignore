@@ -1,0 +1,11 @@
+# Keep the build context lean — only the workspace's source +
+# manifests + migrations are needed. Docker's cache stays warm
+# when README / docs / test fixtures change.
+target
+.git
+.github
+.vscode
+.idea
+.DS_Store
+*.swp
+examples

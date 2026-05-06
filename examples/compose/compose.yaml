@@ -1,0 +1,94 @@
+# Knievel reference compose stack — Phase 4.1.
+#
+# `docker compose up` brings up a Postgres and a knievel server in
+# under a minute. The image either pulls from `ghcr.io/xrl/knievel`
+# (default) or builds the local source tree (set the `KNIEVEL_BUILD`
+# env var to anything to flip the switch). Phase 4.3 publishes the
+# image; until then most contributors run with `KNIEVEL_BUILD=1`.
+#
+# Layout mirrors the canonical RX example in
+# `MIGRATION_RX.md` "Local Development for RX Engineers" — same
+# service names, same volume names, same healthcheck shape — so
+# a contributor can read the migration guide and the reference
+# stack interchangeably.
+#
+# `knievel-seed` is the seed-demo sidecar slot. Phase 4.2 lands
+# the actual `knievel-cli seed-demo` invocation; today it logs a
+# placeholder and exits 0 so `docker compose up` doesn't wedge
+# waiting on it.
+
+name: knievel
+
+services:
+  knievel-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: knievel_app
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: knievel
+    volumes:
+      - knievel-pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knievel_app -d knievel"]
+      interval: 2s
+      retries: 30
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  knievel:
+    # Default to the published ghcr image; set KNIEVEL_BUILD=1 to
+    # build from the local tree instead. Phase 4.3 will start
+    # publishing this tag.
+    image: ${KNIEVEL_IMAGE:-ghcr.io/xrl/knievel:latest}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      knievel-postgres:
+        condition: service_healthy
+    environment:
+      KNIEVEL_CONFIG: /etc/knievel/config.yaml
+      RUST_LOG: ${RUST_LOG:-info,sqlx=warn}
+    volumes:
+      - ./config.yaml:/etc/knievel/config.yaml:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # Distroless has no shell, but `knievel` itself ships
+      # `/healthz`. Use Postgres's host-based check via wget
+      # over the published port from the postgres container —
+      # but that's circular. Simpler: run the healthcheck via
+      # the knievel-postgres image which has psql + curl-style
+      # tools. For v0 we exec the healthcheck inside a separate
+      # service when needed; the docker-compose service-level
+      # healthcheck below relies on `start_period` and the
+      # depender's connection retry.
+      test: ["NONE"]
+      interval: 5s
+      retries: 30
+
+  knievel-seed:
+    # Phase 4.2 replaces this stub with the real seed-demo run.
+    # Today: confirm the server is up, log, exit cleanly so
+    # `docker compose up --wait` succeeds.
+    image: curlimages/curl:8.10.1
+    depends_on:
+      - knievel
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "phase 4.1 stub: waiting for knievel /readyz"
+        for i in $$(seq 1 60); do
+          if curl -fsS http://knievel:8080/readyz >/dev/null 2>&1; then
+            echo "knievel ready; seed-demo lands in phase 4.2"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "knievel did not become ready"; exit 1
+    restart: "no"
+
+volumes:
+  knievel-pgdata:

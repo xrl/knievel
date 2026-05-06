@@ -26,6 +26,7 @@ pub mod hmac;
 pub mod idempotency;
 pub mod image_upload;
 pub mod leader;
+pub mod migrate;
 pub mod observability;
 pub mod orgs;
 pub mod partitions;

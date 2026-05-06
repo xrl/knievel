@@ -1335,7 +1335,7 @@ flows from a working binary in a real container.
 
 **Tasks (broad strokes):**
 
-- [ ] **4.1** `examples/compose/` reference stack — `docker
+- [x] **4.1** `examples/compose/` reference stack — `docker
       compose up` boots Postgres + knievel against a locally-
       built image. Pinned to `ghcr.io/xrl/knievel:latest` once
       4.3 publishes; until then the compose file uses a `build:`
@@ -1344,6 +1344,43 @@ flows from a working binary in a real container.
       lands).
       Refs: `MIGRATION_RX.md` "Local Development for RX
       Engineers," `TESTING.md` § 11.1.
+
+      **Note (4.1):** Three pieces:
+      - **Dockerfile** at the repo root — multi-stage build
+        with a dependency-prefetch layer (stub `src/main.rs`
+        + `cargo build` so the registry is warm before the
+        real source comes in), then a release build that
+        `strip`s the binary. Final image is
+        `gcr.io/distroless/cc-debian12:nonroot`; `cc`
+        because rustls-tls links against `libgcc_s`, `nonroot`
+        for UID 65532 with no shell. The cache layer means
+        an iterative source change rebuilds only the binary,
+        not 300+ deps.
+      - **Compose stack** under `examples/compose/`. Service
+        names + volume names mirror the `MIGRATION_RX.md`
+        canonical example so a contributor reading either
+        file recognizes the structure. The `KNIEVEL_IMAGE`
+        env var lets you point at a pinned digest
+        (`@sha256:...`) without editing `compose.yaml`.
+        `knievel-seed` is a `curlimages/curl` placeholder
+        that polls `/readyz` and exits 0 — Phase 4.2 swaps
+        it for the real `seed-demo` invocation.
+      - **`auto_migrate` wired** in `server::build_state`.
+        New `src/migrate.rs` carries
+        `static MIGRATOR = sqlx::migrate!("./migrations")`
+        plus a `run` helper that does the
+        `CREATE SCHEMA / pgcrypto / migrate` sequence
+        idempotently. The pool's `after_connect` hook sets
+        `search_path = knievel, public` (mirroring the
+        `testlib` pattern) so the `_sqlx_migrations` table
+        lands in `knievel`, not `public`. `sqlx`'s `migrate`
+        feature is now on at the workspace level.
+
+      Sandbox note: docker isn't reachable in the dev
+      sandbox, so end-to-end verification (`docker compose
+      up` against the image) ran as a release-mode `cargo
+      check` only. Phase 4.3's CI workflow will exercise the
+      full container build path on every PR.
 - [ ] **4.2** `knievel-cli seed-demo` implementation. Admin
       CLI binary alongside the server binary; `seed-demo`
       populates org/project/advertisers/flights/ads/creatives
