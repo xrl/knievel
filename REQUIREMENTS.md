@@ -362,6 +362,49 @@ overlap, only the new secret is accepted. Documented in `AUTH.md`
 and surfaced as a one-line warning in the rotation endpoint's
 response.
 
+### 6.4 API compatibility policy
+
+The OpenAPI spec at `/openapi.json` is the contract. The policy is
+"additive forever" — new minor and patch versions never break old
+clients — with explicit rules:
+
+| Change | Allowed without major bump? |
+|---|---|
+| New endpoint | ✅ |
+| New optional request field, header, or query param | ✅ |
+| New response field | ✅ (clients must ignore unknown fields; the generated gem already does) |
+| Adding to a `oneOf` / discriminated union | ✅ (clients fall through on unknown variants; generated gem treats as `Unknown`) |
+| New error codes | ✅ (clients are advised to treat unknown codes the same as the next-broader category) |
+| New required request field | ❌ |
+| Changing the meaning or type of an existing field | ❌ |
+| Removing a field | ❌ until it's been marked deprecated for ≥ 6 months |
+| Removing or renaming an endpoint | ❌ until it's been marked deprecated for ≥ 6 months |
+| Changing default values | ❌ if it changes behavior; ✅ if it only fills in something that was previously required |
+| Changing HTTP status codes returned for an existing error category | ❌ |
+
+Deprecations carry HTTP `Deprecation: true` and `Sunset:
+<RFC-3339-date>` response headers, are listed in the OpenAPI spec
+as `deprecated: true`, and are called out in release notes.
+
+#### Generated client compatibility
+
+The Ruby gem's version mirrors the server's published spec
+version: gem `X.Y.Z` is generated from server spec `X.Y` and is
+**compatible with any server `>= X.Y`**. Patch versions are
+gem-internal (helper changes, dependency bumps).
+
+Compatibility matrix RX (and other consumers) can rely on:
+
+- gem `X.Y.*` ↔ server `X.Y`, `X.(Y+1)`, `X.(Y+2)`, … all work.
+- gem `X.Y.*` ↔ server `X.(Y-1)` does **not** work — the gem may
+  reference fields the older server didn't emit.
+- gem `X.0.*` ↔ server `(X-1).*` does **not** work — major bumps
+  imply removed or renamed surface.
+
+In practice major bumps are rare; `X` stays at `0` through v0 and
+moves to `1` when the surface stabilizes. Until then, every release
+is treated as a minor bump under the same additive rules.
+
 ## 7. Storage
 
 Knievel is Postgres-native and **vanilla**. It targets a single schema
@@ -1113,8 +1156,8 @@ folded into the spec. The remaining few:
   release notes for operator coordination.
 - Cold-start ordering: migrate → load snapshot → start partition
   election → accept requests, all reflected in `/readyz`.
-- API versioning: Stripe-style additive forever; OpenAPI is the
-  contract.
+- API versioning: additive-forever with explicit rules and
+  deprecation windows; OpenAPI is the contract. §6.4.
 - `ads:upsertWithFlightAndCreative` stays a self-healing gem helper
   (no wire-side transaction).
 - Empty decision arrays count toward request volume for billing /
