@@ -77,8 +77,14 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       knievel-ci`. Inputs allow per-job override of `shared-key`
       and `components` for the rare case a job needs them.
       Refs: `TESTING.md` § 12.2, § 12.10.
-- [ ] **1.5** `.github/workflows/ci.yml` + `nightly.yml` +
-      `release.yml` skeletons matching the per-PR DAG.
+- [x] **1.5** `.github/workflows/ci.yml` + `nightly.yml` +
+      `release.yml` skeletons matching the per-PR DAG. Active jobs:
+      `prime`, `unit-prop`, `db-integ`, `api-contract`,
+      `xtask-lints`, `openapi-drift`. Inactive jobs (`helm-lint`,
+      `build-image`, `acceptance`, `gem-smoke`, all of `nightly.yml`,
+      most of `release.yml`) carry `if: false` with a comment naming
+      the phase that flips it on. `ci.yml` exposes `workflow_call`
+      so `release.yml` reuses the DAG.
       Refs: `TESTING.md` § 12.4, § 12.7, § 12.8, § 12.9.
 - [ ] **1.6** First migration `0001_init.sql`: `knievel` schema
       ownership, `pgcrypto` extension, `config_version` bookkeeping

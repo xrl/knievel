@@ -1,0 +1,155 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+# DAG defined in TESTING.md §12.4. Many jobs carry `if: false` until
+# the phase that activates them lands; remove the guard in that
+# phase's commit.
+
+jobs:
+  prime:
+    name: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/rust-setup
+      - uses: taiki-e/install-action@nextest
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo nextest run --no-run --workspace --all-targets --locked
+
+  unit-prop:
+    name: unit + property
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/rust-setup
+      - uses: taiki-e/install-action@nextest
+      - run: |
+          cargo nextest run --workspace --locked \
+            -E 'kind(lib) + kind(bin)' \
+            --no-tests=pass
+
+  db-integ:
+    name: integration (Postgres)
+    needs: prime
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: knievel_app
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: knievel
+        options: >-
+          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://knievel_app:dev@localhost:5432/knievel
+    steps:
+      - uses: ./.github/actions/rust-setup
+      - uses: taiki-e/install-action@nextest
+      - run: |
+          cargo nextest run --workspace --locked \
+            -E 'kind(test) & binary(/^integration/)' \
+            --no-tests=pass
+
+  api-contract:
+    name: api / contract
+    needs: prime
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: knievel_app
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: knievel
+        options: >-
+          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://knievel_app:dev@localhost:5432/knievel
+    steps:
+      - uses: ./.github/actions/rust-setup
+      - uses: taiki-e/install-action@nextest
+      - run: |
+          cargo nextest run --workspace --locked \
+            -E 'kind(test) & binary(/^api/)' \
+            --no-tests=pass
+
+  xtask-lints:
+    name: xtask linters
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/rust-setup
+      - run: cargo xtask lint-migrations
+      - run: cargo xtask check-cross-tenant
+      - run: cargo xtask test-shape
+
+  openapi-drift:
+    name: openapi drift
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/rust-setup
+      - run: cargo xtask openapi --check
+
+  helm-lint:
+    name: helm lint + kubeconform
+    needs: prime
+    runs-on: ubuntu-latest
+    if: false   # Phase 4.5 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 4.5 — charts/knievel + helm lint + kubeconform"
+
+  build-image:
+    name: build container image
+    needs: [unit-prop, db-integ, api-contract, xtask-lints, openapi-drift]
+    runs-on: ubuntu-latest
+    if: false   # Phase 4.6 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 4.6 — Dockerfile + buildx + cosign"
+
+  acceptance:
+    name: acceptance shard ${{ matrix.shard }}/4
+    needs: build-image
+    runs-on: ubuntu-latest
+    if: false   # Phase 4.3 / 4.4 activates
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 4.3 / 4.4 — compose + ACC scenarios + sharding"
+
+  gem-smoke:
+    name: ruby gem smoke
+    needs: acceptance
+    runs-on: ubuntu-latest
+    if: false   # Phase 4.8 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 4.8 — knievel-ruby gem smoke pass"

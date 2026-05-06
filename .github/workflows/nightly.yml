@@ -1,0 +1,57 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '13 7 * * *'   # 07:13 UTC, post-US-PT, low-collision slot
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Advisory only. Failures open issues per TESTING.md §12.8 but do
+# not block tags. Each job activates in the phase that earns it.
+
+jobs:
+  chaos:
+    name: chaos suite
+    runs-on: ubuntu-latest
+    if: false   # Phase 4.7 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 4.7 — REQUIREMENTS.md §10.9 paired chaos tests"
+
+  fuzz:
+    name: cargo fuzz (60 min budget per target)
+    runs-on: ubuntu-latest
+    if: false   # Phases 3.9 (HMAC) / 3.15 (JWT) activate
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [hmac, jwt, decisions]
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phases 3.9 / 3.15 — cargo fuzz on ${{ matrix.target }}"
+
+  criterion:
+    name: criterion benchmarks vs main
+    runs-on: ubuntu-latest
+    if: false   # Phase 3.9 activates (first hot-path code)
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 3.9 — selection + HMAC benches"
+
+  pg-matrix:
+    name: postgres ${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    if: false   # Phase 1.9 activates (once integration suite has rows)
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ['14', '15', '16']
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 1.9 — multi-Postgres-version integration matrix"

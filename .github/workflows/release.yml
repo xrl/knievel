@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Per TESTING.md §12.9. Runs the per-PR DAG via workflow_call, then
+# the release-only steps (bench check, security checklist, image
+# build + sign, Helm package, gem publish, GitHub Release).
+# Real implementations land in Phase 5.8.
+
+jobs:
+  ci:
+    name: per-PR CI on tag
+    uses: ./.github/workflows/ci.yml
+
+  bench-regression:
+    name: bench regression vs previous tag
+    needs: ci
+    runs-on: ubuntu-latest
+    if: false   # Phase 5.7 / 5.8 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 5.7 — bench/results/<version>.md regression check"
+
+  release-checklist:
+    name: release security checklist enforcer
+    needs: ci
+    runs-on: ubuntu-latest
+    if: false   # Phase 5.5 activates (RELEASE_CHECKLIST.md must exist)
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 5.5 — REQUIREMENTS.md §7.1.1 gate (3) enforcer"
+
+  publish-image:
+    name: publish container image
+    needs: [bench-regression, release-checklist]
+    runs-on: ubuntu-latest
+    if: false   # Phase 5.8 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 5.8 — multi-arch buildx + cosign + ghcr push"
+
+  publish-helm:
+    name: publish helm chart
+    needs: [bench-regression, release-checklist]
+    runs-on: ubuntu-latest
+    if: false   # Phase 5.8 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 5.8 — helm package + chart index push"
+
+  publish-gem:
+    name: publish ruby gem
+    needs: [bench-regression, release-checklist]
+    runs-on: ubuntu-latest
+    if: false   # Phase 5.8 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 5.8 — knievel-ruby gem build + RubyGems push"
+
+  github-release:
+    name: github release
+    needs: [publish-image, publish-helm, publish-gem]
+    runs-on: ubuntu-latest
+    if: false   # Phase 5.8 activates
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "TODO — Phase 5.8 — gh release create with changelog + artifact links"
