@@ -1535,16 +1535,73 @@ flows from a working binary in a real container.
       (creative `oneOf`), § 3.6 (CreativeTemplate `template` /
       `templateEngine`); `REQUIREMENTS.md` § 7.1.1 (RLS rules),
       § 10 (release security).
-- [ ] **4.9** `openapi-generator-cli` wired into CI; Ruby gem
+- [ ] **4.9** Rehome the repo to the `knievel-ads` GitHub org.
+      Mechanical move + a sweep of the hardcoded paths the
+      `${{ github.repository_owner }}` workflow expressions
+      can't cover. Splits cleanly into three commits:
+
+      1. **Pre-transfer sweep.** `sed -i
+         's|xrl/knievel|knievel-ads/knievel|g;
+         s|ghcr.io/xrl|ghcr.io/knievel-ads|g'` across:
+         - `Cargo.toml` (`workspace.package.repository`,
+           `homepage`)
+         - `examples/compose/compose.yaml` (default image),
+           `examples/compose/README.md`
+         - `charts/knievel/{Chart.yaml,README.md,values.yaml}`
+           (`image.repository`, OCI install one-liners,
+           `home` / `sources`)
+         - `MIGRATION_RX.md` compose snippet,
+           `REQUIREMENTS.md` § 8.1 example, `TESTING.md`
+           § 12.9 example
+         - `PHASES.md` references (cosmetic but consistent
+           with the spec-is-the-contract principle)
+         Commit + push to `xrl/knievel/main` so the next
+         transfer-side push doesn't fight uncommitted state.
+      2. **GitHub transfer.** `Settings → Transfer ownership
+         → knievel-ads`. GitHub redirects URLs and webhooks;
+         existing `ghcr.io/xrl/knievel:*` tags keep resolving
+         until explicitly deleted, so cluster pulls don't
+         break mid-cutover. Update local remote:
+         `git remote set-url origin
+         git@github.com:knievel-ads/knievel.git`.
+      3. **Post-transfer rebuild.** First push from the new
+         org fires `main-image.yml` and republishes
+         `ghcr.io/knievel-ads/knievel:latest` +
+         `:sha-<short>`. Cosign cert-identity regex auto-
+         rehomes via the workflow's `${{ github.repository
+         }}` interpolation. The first `v*` tag publishes
+         `:vX.Y.Z` and the CLI release artifacts under the
+         new path. Document the cutover date in
+         `CHANGELOG.md` (Phase 5.4 lands the file; until
+         then a one-line `Note (4.9)` here suffices).
+
+      **Auto-adapts** (don't touch):
+      - `.github/workflows/release.yml` and `main-image.yml`
+        — both image name and cosign cert identity derive
+        from `${{ github.repository[_owner] }}`.
+      - The `Dockerfile` itself — image-tag-agnostic.
+
+      **Harness setup for the next session.** Whatever
+      Claude Code session opens after the transfer needs
+      `knievel-ads/knievel` in its GitHub-MCP repo
+      allowlist (the system-prompt "Repository Scope"
+      block); otherwise the GitHub tools refuse calls.
+      `CLAUDE.md` and `PHASES.md` carry every other piece
+      of project context across the transfer untouched.
+
+      Refs: `REQUIREMENTS.md` § 8 item 5 (image registry
+      pinning), `MIGRATION_RX.md` compose example.
+
+- [ ] **4.10** `openapi-generator-cli` wired into CI; Ruby gem
       with `Resource` wrappers + `Enumerable` pagination;
       gem-smoke job runs against the compose stack from 4.1.
       Refs: `REQUIREMENTS.md` § 8 item 3, `API.md` "Pagination."
 
 **Milestone:** `docker compose up` boots a working knievel against
 Postgres + MinIO + wiremock; `helm install` against a real
-cluster pulls the published `ghcr.io/xrl/knievel` image; the
-acceptance suite + chaos rig run against the same image; a
-third party can integrate from the gem alone once 4.9 lands.
+cluster pulls the published `ghcr.io/knievel-ads/knievel` image;
+the acceptance suite + chaos rig run against the same image; a
+third party can integrate from the gem alone once 4.10 lands.
 
 ### Notes
 
@@ -1558,6 +1615,18 @@ knievel` is now the explicit image registry per
 4.3's task description pins tag policy
 (`latest` / `vX.Y.Z` / `sha-<short>`) and the cosign signing
 mechanism.
+
+**Phase 4.0 follow-up (renumber, post-4.8):** Rehoming the repo
+to the `knievel-ads` GitHub org earned its own slot — landed as
+new-4.9 (the org migration), pushing the Ruby gem from old-4.9
+to new-4.10. The migration is mechanical and well-bounded but
+deserves a documented stage so the find/replace surface
+(`Cargo.toml`, `examples/compose/`, `charts/knievel/`, the spec
+docs) doesn't get reinvented. The gem's "third party can
+integrate" milestone language now references 4.10. The image
+registry path becomes `ghcr.io/knievel-ads/knievel` once 4.9
+lands; the `${{ github.repository[_owner] }}` workflow
+interpolations carry both halves automatically.
 
 **Phase 4.1 follow-up — RLS bypass via Postgres SUPERUSER.**
 The Phase 3.30+ wiring exposed a long-standing test-harness
