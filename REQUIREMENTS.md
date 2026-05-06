@@ -438,7 +438,54 @@ Aurora failovers.
 
 All entities carry `(org_id, project_id)` columns. Isolation is
 enforced at the query layer and via Postgres row-level security
-policies (defense in depth).
+policies (defense in depth). Both layers are **verified by tests
+and CI gates** — see §7.1.1.
+
+#### 7.1.1 Tenant isolation verification
+
+Three mandatory gates, treated as release-blocking:
+
+1. **Cross-tenant integration test suite.** For every project-scoped
+   endpoint, a test exercises the negative case: a token issued for
+   project A attempts to read or mutate project B and is asserted
+   to receive `403 forbidden / wrong_project` (or `403 / wrong_tenant`
+   when the org doesn't match). New project-scoped endpoints must
+   ship with the matching test fixture; the test framework's helper
+   makes adding one a one-liner per endpoint. CI fails if any
+   `/v1/projects/{p}/...` endpoint is added without a corresponding
+   cross-tenant test.
+
+2. **Migration linter.** A CI check that scans every migration in
+   `migrations/` and fails the build if it contains:
+   - `ALTER TABLE ... DISABLE ROW LEVEL SECURITY`
+   - `ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`
+   - Any `CREATE TABLE` in the `knievel` schema without a paired
+     `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` statement.
+   - Any `CREATE POLICY` whose `USING` clause doesn't reference
+     `current_setting('knievel.project_id')` (or equivalent
+     session-scoped tenant binding).
+   The linter is a small Rust binary in `xtask`, run by `cargo
+   xtask lint-migrations`, executed as a CI step.
+
+3. **Release security checklist.** Tagging a release requires a
+   maintainer to check off, in writing in the release PR:
+   - All cross-tenant integration tests pass.
+   - Migration linter passes.
+   - Manual review of any auth-config or RLS-policy changes since
+     the previous tag.
+   - No new endpoints accept tenant identity from the request body
+     (only path or token-derived).
+   - No new logging adds PII (no raw user-agent strings, no IP
+     addresses outside `events_raw`, no JWT contents in logs).
+
+   The checklist lives in `RELEASE_CHECKLIST.md` and is enforced as
+   a required PR comment on the release-tagging PR. Skipping any
+   item requires a brief written justification in the same PR.
+
+These three together turn "RLS as defense in depth" from intent into
+verifiable property. Catastrophic regressions (a migration that
+quietly drops RLS, an endpoint that takes `org_id` from the body) get
+caught in CI before reaching review.
 
 ### 7.2 Configuration store
 
