@@ -287,8 +287,218 @@ paths:
       security:
       - BearerAuth: []
       operationId: revokeToken
+  /v1/projects/{project_id}/advertisers:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateAdvertiserRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Advertiser'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createAdvertiser
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/AdvertiserList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listAdvertisers
+  /v1/projects/{project_id}/advertisers/{id}:
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Advertiser'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getAdvertiser
+    patch:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateAdvertiserRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Advertiser'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateAdvertiser
 components:
   schemas:
+    Advertiser:
+      type: object
+      title: Advertiser
+      required:
+      - id
+      - name
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        external_id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    AdvertiserList:
+      type: object
+      title: AdvertiserList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Advertiser'
+        next_cursor:
+          type: string
     AuthBlock:
       type: object
       title: AuthBlock
@@ -304,6 +514,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IssuerSummary'
+    CreateAdvertiserRequest:
+      type: object
+      title: CreateAdvertiserRequest
+      required:
+      - name
+      properties:
+        external_id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
     CreateProjectRequest:
       type: object
       title: CreateProjectRequest
@@ -465,6 +687,14 @@ components:
           type: string
         expires_at:
           type: string
+    UpdateAdvertiserRequest:
+      type: object
+      title: UpdateAdvertiserRequest
+      properties:
+        name:
+          type: string
+        is_active:
+          type: boolean
     VersionResponse:
       type: object
       title: VersionResponse

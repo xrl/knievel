@@ -7,9 +7,11 @@
 
 #![allow(dead_code)]
 
+pub mod advertisers;
 pub mod auth;
 pub mod config;
 pub mod db;
+pub mod handlers;
 pub mod idempotency;
 pub mod observability;
 pub mod orgs;
@@ -25,7 +27,12 @@ pub mod tokens;
 pub fn openapi_spec_yaml() -> String {
     use poem_openapi::OpenApiService;
     let svc = OpenApiService::new(
-        (system::SystemApi, orgs::OrgApi, tokens::TokensApi),
+        (
+            system::SystemApi,
+            orgs::OrgApi,
+            tokens::TokensApi,
+            advertisers::AdvertisersApi,
+        ),
         "knievel",
         env!("CARGO_PKG_VERSION"),
     );

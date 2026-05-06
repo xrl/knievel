@@ -19,6 +19,7 @@ use poem::listener::TcpListener;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 
+use crate::advertisers::AdvertisersApi;
 use crate::config::Config;
 use crate::orgs::OrgApi;
 use crate::state::AppState;
@@ -58,7 +59,7 @@ pub async fn run(cfg: Config) -> Result<()> {
 /// `OpenApiService` mounts.
 pub fn routes() -> Route {
     let api = OpenApiService::new(
-        (SystemApi, OrgApi, TokensApi),
+        (SystemApi, OrgApi, TokensApi, AdvertisersApi),
         "knievel",
         env!("CARGO_PKG_VERSION"),
     );

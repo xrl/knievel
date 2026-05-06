@@ -555,13 +555,32 @@ manager and leader election running.
       `ads` is reserved here so 3.28 (Ad Library) is purely
       additive — no schema migration needed for the reference
       variant.
-- [ ] **3.8** `crud_contract!` macro — emits the 11-test table from
-      `TESTING.md` § 6.4 from a single invocation
-      (`create_returns_201`, `create_idempotent_on_external_id`,
-      idempotency-key replay, etag matching, listing/pagination,
-      soft delete, batch atomic, cross-entity FK in batch). One
-      worked instance against `Advertiser` to validate the shape.
-      Refs: `TESTING.md` § 6.4.
+- [x] **3.8** Advertiser CRUD + shared handler helpers.
+      `src/handlers.rs::open_project_tx` is the prologue for every
+      project-scoped handler — auth check, project-lookup against
+      RLS, role gate, returns a tenant-bound transaction.
+      `src/advertisers.rs::AdvertisersApi` wires
+      `POST/GET/PATCH /v1/projects/{projectId}/advertisers[/{id}]`.
+      Five API tests cover: 201 happy, 409
+      `external_id_conflict`, cross-tenant 403 `wrong_tenant`,
+      reader 403 `role_insufficient`, list+get+patch round-trip
+      with etag bumping. Cross-tenant manifest gains the four
+      advertiser entries; the gate now reports
+      `4 project-scoped endpoint(s), all covered`.
+      Refs: `API.md` § 3.1, `AUTH.md` "Project resources",
+      `TESTING.md` § 6.4.
+
+      **Note (3.8):** The `crud_contract!` macro is deferred to
+      3.9. With one CRUD resource in hand the macro would be
+      speculative; with three (advertisers + campaigns + flights
+      after 3.9) the duplication is real and the right shape for
+      the macro will be obvious. The contract tests in
+      `tests/api_advertisers.rs` are hand-written for now and
+      will get rewritten to invoke the macro when it lands.
+      Cross-entity FK / idempotent-on-external-id /
+      pagination / batch tests come online with their handler
+      features (3.5 partial-replay applies; full external_id
+      idempotency lands with 3.14 `:batchUpsert`).
 - [ ] **3.9** Demand-chain CRUD (advertisers, campaigns, flights).
       Each resource gets its `crud_contract!` invocation, handler
       module, and cross-tenant manifest entry per project-scoped

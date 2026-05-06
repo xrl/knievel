@@ -19,5 +19,23 @@
 # `test` is diagnostic only — the gate doesn't run it. Add the
 # matching test in `tests/api/` or `tests/integration/`.
 #
-# This file is empty until Phase 3 lands the first project-scoped
-# endpoint.
+# Advertisers — Phase 3.8.
+[[entry]]
+path   = "/v1/projects/{project_id}/advertisers"
+method = "POST"
+test   = "cross_tenant_advertisers_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/advertisers"
+method = "GET"
+test   = "cross_tenant_advertisers_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/advertisers/{id}"
+method = "GET"
+test   = "cross_tenant_advertisers_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/advertisers/{id}"
+method = "PATCH"
+test   = "cross_tenant_advertisers_patch"
