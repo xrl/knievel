@@ -140,8 +140,78 @@ job before raw partitions age out. Indefinite retention.
 | `count` | `bigint` |
 
 Useful as a cheaper bronze input for dashboards that don't need raw
-event detail. Don't double-count by combining `events_rollup` with
-the same time range from `events_raw`.
+event detail.
+
+### `knievel.events_rollup_watermark` (completeness signal)
+
+A small system view that returns a single timestamp: the most
+recent hour for which `events_rollup` is **fully computed**. The
+rollup leader updates it after each successful aggregation pass.
+
+```sql
+SELECT watermark FROM knievel.events_rollup_watermark;
+-- watermark
+-- ----------------------
+-- 2026-05-05 14:00:00+00
+```
+
+Use this to combine the two tables without double-counting and
+without missing recent data:
+
+```sql
+-- Canonical impressions for the last 7 days, complete-and-fresh.
+WITH watermark AS (
+  SELECT watermark AS ts FROM knievel.events_rollup_watermark
+)
+SELECT date_trunc('hour', source.ts) AS hour, sum(c) AS impressions
+FROM (
+  -- Older data: pre-aggregated. count column is already non-duplicate.
+  SELECT hour AS ts, count AS c
+  FROM knievel.events_rollup, watermark
+  WHERE kind = 2  -- impression
+    AND hour < watermark.ts
+    AND hour >= now() - interval '7 days'
+
+  UNION ALL
+
+  -- Recent data: from raw, deduped on the fly.
+  SELECT ts, 1 AS c
+  FROM knievel.events_raw, watermark
+  WHERE kind = 2
+    AND ts >= watermark.ts
+    AND NOT is_duplicate
+) source
+GROUP BY 1
+ORDER BY 1;
+```
+
+The pattern:
+
+- Anything strictly older than `watermark` reads from `events_rollup`
+  (cheap, complete, and already deduplicated since rollup aggregates
+  non-duplicate rows only).
+- Anything at-or-after `watermark` reads from `events_raw WHERE NOT
+  is_duplicate` (slightly more expensive but accurate for the
+  tail).
+- The two ranges never overlap, so there's no double-count.
+
+Anti-patterns to call out:
+
+- **Querying both tables for the same range** without a watermark
+  cut. Don't.
+- **Treating `events_rollup` as eventually-consistent without
+  checking the watermark.** A dashboard that displays "last 24 h"
+  by always reading from `events_rollup` will under-report fresh
+  data because the rollup may be hours behind.
+- **Including `is_duplicate = true` rows when comparing to
+  `events_rollup`.** The rollup excludes them; comparing the two
+  will diverge.
+
+The watermark advances at a cadence equal to the rollup
+maintenance interval (default 1 h, leader-elected, see
+`REQUIREMENTS.md` §7.5). A stalled or wedged rollup leader is
+visible as the watermark falling behind `now() - 2h`; alert on
+`now() - watermark > 2 * rollup_interval`.
 
 ### Dimensional tables
 
