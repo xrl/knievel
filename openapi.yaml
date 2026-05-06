@@ -2214,6 +2214,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: getAdType
+  /v1/projects/{project_id}/decisions:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/DecisionsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/DecisionsResponse'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: decisions
 components:
   schemas:
     Ad:
@@ -3065,6 +3109,140 @@ components:
             $ref: '#/components/schemas/CreativeTemplate'
         next_cursor:
           type: string
+    DecisionAd:
+      type: object
+      title: DecisionAd
+      required:
+      - ad_id
+      - creative_id
+      - flight_id
+      - campaign_id
+      - advertiser_id
+      - priority_id
+      - site_id
+      - click_url
+      - impression_url
+      properties:
+        ad_id:
+          type: integer
+          format: int64
+        creative_id:
+          type: integer
+          format: int64
+        flight_id:
+          type: integer
+          format: int64
+        campaign_id:
+          type: integer
+          format: int64
+        advertiser_id:
+          type: integer
+          format: int64
+        priority_id:
+          type: integer
+          format: int64
+        site_id:
+          type: integer
+          format: int64
+        click_url:
+          type: string
+        impression_url:
+          type: string
+    DecisionBlock:
+      type: object
+      title: DecisionBlock
+      properties:
+        creative_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        advertiser_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        campaign_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+    DecisionContext:
+      type: object
+      title: DecisionContext
+      properties:
+        url:
+          type: string
+        referrer:
+          type: string
+        user_agent:
+          type: string
+    DecisionPlacement:
+      type: object
+      title: DecisionPlacement
+      required:
+      - id
+      - ad_types
+      properties:
+        id:
+          type: string
+        site_id:
+          type: integer
+          format: int64
+        site_url:
+          type: string
+        site_external_id:
+          type: string
+        zone_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        ad_types:
+          type: array
+          items:
+            type: integer
+            format: int64
+        count:
+          type: integer
+          format: int32
+        force:
+          $ref: '#/components/schemas/ForceOverride'
+    DecisionsRequest:
+      type: object
+      title: DecisionsRequest
+      required:
+      - placements
+      properties:
+        context:
+          $ref: '#/components/schemas/DecisionContext'
+        placements:
+          type: array
+          items:
+            $ref: '#/components/schemas/DecisionPlacement'
+        block:
+          $ref: '#/components/schemas/DecisionBlock'
+        force_reason:
+          type: string
+          description: |-
+            Optional reason string captured in audit_log when `force.*`
+            is honored (3.19 explainer-side audit pairs with this).
+    DecisionsResponse:
+      type: object
+      title: DecisionsResponse
+      required:
+      - snapshot_version
+      - decisions
+      properties:
+        snapshot_version:
+          type: integer
+          format: int64
+        decisions:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/DecisionAd'
     ErrorBody:
       type: object
       title: ErrorBody
@@ -3152,6 +3330,22 @@ components:
             $ref: '#/components/schemas/Flight'
         next_cursor:
           type: string
+    ForceOverride:
+      type: object
+      title: ForceOverride
+      properties:
+        ad_id:
+          type: integer
+          format: int64
+        campaign_id:
+          type: integer
+          format: int64
+        flight_id:
+          type: integer
+          format: int64
+        creative_id:
+          type: integer
+          format: int64
     IssuerSummary:
       type: object
       title: IssuerSummary

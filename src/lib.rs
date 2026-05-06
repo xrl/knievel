@@ -16,6 +16,7 @@ pub mod config;
 pub mod creative_templates;
 pub mod creatives;
 pub mod db;
+pub mod decisions;
 pub mod flights;
 pub mod handlers;
 pub mod hmac;
@@ -52,6 +53,7 @@ pub fn openapi_spec_yaml() -> String {
             sites::SitesApi,
             zones::ZonesApi,
             taxonomy::TaxonomyApi,
+            decisions::DecisionsApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

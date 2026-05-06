@@ -251,3 +251,9 @@ test   = "cross_tenant_sites_batch_upsert"
 path   = "/v1/projects/{project_id}/zones:batchUpsert"
 method = "POST"
 test   = "cross_tenant_zones_batch_upsert"
+
+# Decision API — Phase 3.18.
+[[entry]]
+path   = "/v1/projects/{project_id}/decisions"
+method = "POST"
+test   = "cross_tenant_decisions"

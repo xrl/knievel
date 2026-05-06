@@ -825,10 +825,40 @@ manager and leader election running.
       writing them in 3.17 without a consumer would be
       speculative. Aurora-failover testing remains
       cross-cutting risk #2; revisit before tagging.
-- [ ] **3.18** Decision API — `POST
+- [x] **3.18** Decision API — `POST
       /v1/projects/{projectId}/decisions`. Wires snapshot + 3.15 +
       3.16. HMAC-minted impression/click URLs in the response.
+      `src/decisions.rs::DecisionsApi` runs the prologue auth +
+      project lookup, then snaps the in-memory snapshot, runs
+      the selection pipeline (`filter` → `priority` →
+      `weighted_random`) per placement, and signs `/e/c/...` and
+      `/e/i/...` URLs with the project's `hmac_secret`. Returns
+      503 `snapshot_cold` when the snapshot hasn't loaded the
+      project yet. Cross-tenant manifest gains 1 entry; gate
+      now reports 45 covered. `openapi.yaml` grew 89 → 94 KB.
       Refs: `API.md` § 1.
+
+      **Note (3.18):** Several pieces marked deferred to align
+      with downstream phases. (1) **`creative_id` in the
+      response** is hard-coded to 0 today — the snapshot's `Ad`
+      shape carries flight_id but not creative_id (the `Ad` snap
+      type was minimized for selection). Lands when the
+      snapshot reload query bodies materialize the full ad row
+      in 3.21. (2) **Events emission** to `events_raw` (write
+      one decision row + one impression-pre-signal row) hangs
+      off the channel + COPY flusher (3.21). (3) **`force.*`
+      audit** — the three-control gate is in place
+      (`allow_force_decision` flag, role >= Admin, kill-switch
+      via config) but the audit_log row write hangs off 3.21;
+      until then `force.*` is silently honored without an audit
+      row, which is *not* spec-compliant. The 3.19 explainer
+      (which reads but doesn't mutate) is safe to land before
+      3.21 because it never honors `force.*` in selection. (4)
+      **Site `externalId` resolution** isn't carried in the
+      snapshot's `SnapshotSite` shape; lands with the snapshot
+      query bodies. (5) **`Principal` reference**: the
+      `Principal` import is present so the audit-emit follow-up
+      doesn't have to re-thread it.
 - [ ] **3.19** Decision explainer — `POST
       /v1/projects/{projectId}/decisions:explain`. Three-control
       gate for `force.*` (`allow_force_decision` project flag,
