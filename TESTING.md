@@ -826,7 +826,7 @@ green tests), then:
    notes.
 3. **Container image build.** Multi-arch `docker buildx` for
    `amd64` + `arm64`, signed with `cosign`, pushed to
-   `ghcr.io/xrl/knievel:<version>` and `:latest`.
+   `ghcr.io/knievel-ads/knievel:<version>` and `:latest`.
 4. **Helm chart packaged** and published to the chart's index.
 5. **Ruby gem rebuilt** from the released spec, version bumped to
    match the spec version, pushed to RubyGems.

@@ -3,7 +3,7 @@
 # a section of the rendered /etc/knievel/config.yaml.
 
 image:
-  repository: ghcr.io/xrl/knievel
+  repository: ghcr.io/knievel-ads/knievel
   # When empty, the chart uses .Chart.AppVersion. Override to pin
   # a specific tag (`vX.Y.Z`) or an immutable digest
   # (`sha256:...`); the rendered Deployment uses the digest form

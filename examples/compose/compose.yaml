@@ -1,7 +1,7 @@
 # Knievel reference compose stack — Phase 4.1.
 #
 # `docker compose up` brings up a Postgres and a knievel server in
-# under a minute. The image either pulls from `ghcr.io/xrl/knievel`
+# under a minute. The image either pulls from `ghcr.io/knievel-ads/knievel`
 # (default) or builds the local source tree (set the `KNIEVEL_BUILD`
 # env var to anything to flip the switch). Phase 4.3 publishes the
 # image; until then most contributors run with `KNIEVEL_BUILD=1`.
@@ -43,8 +43,8 @@ services:
     # build locally via `KNIEVEL_BUILD=1 docker compose build`.
     # `KNIEVEL_IMAGE` overrides the default; production
     # deployments should pin a digest:
-    #   KNIEVEL_IMAGE=ghcr.io/xrl/knievel@sha256:... docker compose up
-    image: ${KNIEVEL_IMAGE:-ghcr.io/xrl/knievel:latest}
+    #   KNIEVEL_IMAGE=ghcr.io/knievel-ads/knievel@sha256:... docker compose up
+    image: ${KNIEVEL_IMAGE:-ghcr.io/knievel-ads/knievel:latest}
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -80,7 +80,7 @@ services:
     # writes the bearer to ./tmp/knievel-dev-token on the host.
     # Idempotent — re-running compose up after data exists is a
     # no-op apart from a hash-rotation if --token is supplied.
-    image: ${KNIEVEL_IMAGE:-ghcr.io/xrl/knievel:latest}
+    image: ${KNIEVEL_IMAGE:-ghcr.io/knievel-ads/knievel:latest}
     depends_on:
       knievel-postgres:
         condition: service_healthy

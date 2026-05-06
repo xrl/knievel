@@ -768,7 +768,7 @@ Sketch of the values surface:
 
 ```yaml
 image:
-  repository: ghcr.io/xrl/knievel
+  repository: ghcr.io/knievel-ads/knievel
   tag: ""               # defaults to chart appVersion
   pullPolicy: IfNotPresent
 

@@ -2,13 +2,13 @@
 
 Knievel — fearlessly fast ad delivery that steals the show.
 
-This is the official Helm chart for [knievel](https://github.com/xrl/knievel),
+This is the official Helm chart for [knievel](https://github.com/knievel-ads/knievel),
 a Rust ad-serving platform inspired by Kevel's domain model.
 
 ## TL;DR
 
 ```bash
-helm install knievel oci://ghcr.io/xrl/charts/knievel \
+helm install knievel oci://ghcr.io/knievel-ads/charts/knievel \
   --set database.host=aurora-cluster.example.com \
   --set database.name=knievel \
   --set database.existingSecret=knievel-db
@@ -29,7 +29,7 @@ The full surface is documented in `values.yaml`. Highlights:
 
 | Path                       | Purpose                                                         |
 |----------------------------|-----------------------------------------------------------------|
-| `image.repository`         | Default `ghcr.io/xrl/knievel`. Pin a digest in `image.tag`.     |
+| `image.repository`         | Default `ghcr.io/knievel-ads/knievel`. Pin a digest in `image.tag`.     |
 | `replicaCount`             | Default 2. The platform is stateless, scale horizontally.       |
 | `database.host`            | Aurora cluster writer endpoint. Required.                       |
 | `database.existingSecret`  | Secret with `username` + `password` keys.                       |
@@ -77,7 +77,7 @@ deploys (the per-commit images are published by
 `.github/workflows/main-image.yml`):
 
 ```bash
-helm upgrade knievel oci://ghcr.io/xrl/charts/knievel \
+helm upgrade knievel oci://ghcr.io/knievel-ads/charts/knievel \
   --set image.tag=sha256:<digest>
 ```
 
@@ -90,8 +90,8 @@ The image is cosign-signed keyless via GitHub OIDC. Verify before
 pulling into a cluster:
 
 ```bash
-cosign verify ghcr.io/xrl/knievel@sha256:<digest> \
-  --certificate-identity-regexp 'https://github.com/xrl/knievel/.github/workflows/release.yml.*' \
+cosign verify ghcr.io/knievel-ads/knievel@sha256:<digest> \
+  --certificate-identity-regexp 'https://github.com/knievel-ads/knievel/.github/workflows/release.yml.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

@@ -1522,7 +1522,7 @@ flows from a working binary in a real container.
       (creative `oneOf`), § 3.6 (CreativeTemplate `template` /
       `templateEngine`); `REQUIREMENTS.md` § 7.1.1 (RLS rules),
       § 10 (release security).
-- [ ] **4.9** Rehome the repo to the `knievel-ads` GitHub org.
+- [x] **4.9** Rehome the repo to the `knievel-ads` GitHub org.
       Mechanical move + a sweep of the hardcoded paths the
       `${{ github.repository_owner }}` workflow expressions
       can't cover. Splits cleanly into three commits:
@@ -1597,6 +1597,23 @@ the acceptance suite + chaos rig run against the same image; a
 third party can integrate from the gem alone once 4.10 lands.
 
 ### Notes
+
+**Note (4.9):** Order-of-operations differed from the plan
+text. The GitHub `Settings → Transfer ownership` step (commit
+2) happened first — the repo was moved from `xrl/knievel` to
+`knievel-ads/knievel` ahead of any in-tree sweep, and the
+post-transfer rebuild (commit 3) was already implicit by the
+time `v0.1.x` releases started landing under the new org. This
+commit is the deferred sweep (commit 1): `Cargo.toml`
+`workspace.package.{repository,homepage}`, `REQUIREMENTS.md`
+§ 8.1 example, `TESTING.md` § 12.9 example, `MIGRATION_RX.md`
+compose snippet, `examples/compose/{compose.yaml,README.md}`,
+`charts/knievel/{Chart.yaml,values.yaml,README.md}` (image
+repository, OCI install one-liners, cosign cert-identity
+regex). Historical PHASES.md mentions of `xrl/knievel`
+deliberately left in place — the `[x]` lines are the audit
+trail and rewriting them would obscure when the move actually
+happened.
 
 **Phase 4.0 (reorder):** Tasks were renumbered to put the Docker
 substrate first (compose → image+ghcr → Helm) so every later

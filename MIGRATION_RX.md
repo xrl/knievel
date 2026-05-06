@@ -416,7 +416,7 @@ services:
       retries: 30
 
   knievel:
-    image: ghcr.io/xrl/knievel:latest
+    image: ghcr.io/knievel-ads/knievel:latest
     depends_on:
       knievel-postgres: { condition: service_healthy }
     environment:
@@ -433,7 +433,7 @@ services:
       retries: 30
 
   knievel-seed:
-    image: ghcr.io/xrl/knievel:latest
+    image: ghcr.io/knievel-ads/knievel:latest
     depends_on:
       knievel: { condition: service_healthy }
     entrypoint:

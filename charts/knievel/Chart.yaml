@@ -12,9 +12,9 @@ type: application
 # matching the binary version. Until then both are 0.1.0.
 version: 0.1.0
 appVersion: "0.1.0"
-home: https://github.com/xrl/knievel
+home: https://github.com/knievel-ads/knievel
 sources:
-  - https://github.com/xrl/knievel
+  - https://github.com/knievel-ads/knievel
 icon: https://avatars.githubusercontent.com/u/1
 keywords:
   - ad-server
@@ -22,4 +22,4 @@ keywords:
   - rust
 maintainers:
   - name: knievel maintainers
-    url: https://github.com/xrl/knievel
+    url: https://github.com/knievel-ads/knievel
