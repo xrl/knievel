@@ -578,40 +578,285 @@ declared schemas.
 
 ## 12. CI Pipeline and Gates
 
-### 12.1 Per-PR (required)
+The CI provider is **GitHub Actions**. Three workflow files:
 
-| Stage | Gate |
-|---|---|
-| `cargo fmt --check` | Required |
-| `cargo clippy -- -D warnings` | Required |
-| `cargo nextest run` (unit + integration + API) | Required, must be green |
-| `cargo xtask lint-migrations` | Required |
-| `cargo xtask check-cross-tenant` | Required |
-| `cargo xtask openapi --check` | Required (asserts `openapi.yaml` matches the binary) |
-| OpenAPI 3.1 schema validation | Required |
-| Acceptance suite (`tests/acceptance/`, compose-driven) | Required |
-| Generated-gem smoke pass | Required |
-| Helm chart `helm lint` + `kubeconform` | Required |
-| Release-checklist enforcer (only on release-tagging PRs) | Required |
+- `.github/workflows/ci.yml` — per-PR, required.
+- `.github/workflows/nightly.yml` — scheduled, advisory.
+- `.github/workflows/release.yml` — on `v*` tag, required.
 
-### 12.2 Nightly (advisory)
+Runners are GitHub-hosted `ubuntu-latest` by default. Self-hosted
+runners are an operator choice; jobs are written so a runner swap
+is a one-line `runs-on:` change. A composite action at
+`.github/actions/rust-setup/` handles the `checkout` + `toolchain`
++ `rust-cache` boilerplate so every job stays a few lines.
+
+### 12.1 Concurrency
+
+```yaml
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+Force-pushes and rapid re-pushes cancel in-flight runs. The release
+workflow opts out (`cancel-in-progress: false`) — a tag build, once
+started, runs to completion.
+
+### 12.2 Cargo caching
+
+A single shared cache slot per workflow, populated once by a primer
+job and read by every downstream job. The action of record is
+[`Swatinem/rust-cache@v2`](https://github.com/Swatinem/rust-cache):
+
+```yaml
+- uses: Swatinem/rust-cache@v2
+  with:
+    shared-key: knievel-ci
+    cache-on-failure: true
+```
+
+Caches `~/.cargo/registry`, `~/.cargo/git`, and `target/` keyed on
+`Cargo.lock` + `rustc -V` + the workflow file content. Across jobs
+in the same workflow run, downstream jobs restore from the GHA
+cache backend that `prime` populated rather than rebuilding.
+
+The **`prime` job** runs first and pays the compile cost once:
+
+```yaml
+prime:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: ./.github/actions/rust-setup
+    - run: cargo fmt --all --check
+    - run: cargo clippy --all-targets --locked -- -D warnings
+    - run: cargo nextest run --no-run --all-targets --locked
+```
+
+`fmt` and `clippy` ride along — they need the same dep graph and
+pay no extra wall-clock once `target/` is warm. Subsequent test
+jobs `needs: prime`, restore the same cache, and run only their
+slice.
+
+`sccache` is intentionally not used: with `rust-cache` plus a primer
+job, the marginal speedup doesn't justify the extra moving piece.
+
+The single shared cache slot means a `Cargo.toml` change invalidates
+everything at once — but that's correct, and `prime` absorbs the
+hit so test jobs stay fast. A per-job `target/` slot would
+parallelize the cold path but cost ~2 GB of cache per job, blowing
+past GitHub's 10 GB per-repo cache cap fast.
+
+### 12.3 Docker layer caching
+
+The acceptance suite needs the knievel container image. A
+`build-image` job builds once per workflow run with `docker/buildx`
+backed by the GitHub Actions layer-cache backend:
+
+```yaml
+- uses: docker/build-push-action@v5
+  with:
+    context: .
+    tags: knievel:ci
+    cache-from: type=gha,scope=knievel
+    cache-to:   type=gha,scope=knievel,mode=max
+    outputs:    type=docker,dest=/tmp/knievel-image.tar
+- uses: actions/upload-artifact@v4
+  with: { name: knievel-image, path: /tmp/knievel-image.tar }
+```
+
+Acceptance shards download the artifact and `docker load` it —
+no registry round-trip, no pull-rate-limit risk on `ubuntu-latest`,
+and the same image is exercised by every shard.
+
+### 12.4 Per-PR DAG
+
+```
+                              ┌─────────────────┐
+                              │ prime           │  cargo build, fmt, clippy
+                              │ (warm target/)  │  cache populated
+                              └────────┬────────┘
+                                       │
+        ┌──────────┬──────────┬────────┼────────┬──────────┬─────────────┐
+        ▼          ▼          ▼        ▼        ▼          ▼             ▼
+   unit-prop   db-integ   api-contract   xtask-lints   openapi-drift   helm-lint
+   (no DB)    (pg svc)    (pg svc)       (mig+xtenant) (spec match)    (kubeconform)
+        │          │          │            │            │                │
+        └──────────┴──────────┴────────────┴────────────┴────────────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │ build-image     │  buildx + GHA layer cache
+                              └────────┬────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │ acceptance      │  matrix: shard 1..4
+                              │ (compose)       │  ACC-01..30 partitioned
+                              └────────┬────────┘
+                                       │
+                              ┌────────▼────────┐
+                              │ gem-smoke       │  ruby + RSpec subset
+                              └─────────────────┘
+```
+
+The fan-out after `prime` is the wall-clock floor. With a warm
+cache, every middle-row job finishes in under 90 s. Cold cache
+(e.g. a `Cargo.lock` change) costs `prime` ~5 min and downstream
+jobs add another ~30 s on top.
+
+### 12.5 Test slicing
+
+Test files follow a naming convention so a single `nextest` filter
+expression maps cleanly to a CI shard:
+
+| Slice | nextest filter | Postgres service? |
+|---|---|---|
+| `unit-prop`     | `-E 'kind(lib) + kind(bin) + binary(unit)'`        | no |
+| `db-integ`      | `-E 'kind(test) & binary(integration)'`            | yes |
+| `api-contract`  | `-E 'kind(test) & binary(api)'`                    | yes |
+| `acceptance`    | `-E 'kind(test) & binary(acceptance)'`             | compose stack |
+
+A `cargo xtask test-shape` check fails CI if a test lands outside
+the expected naming. Slices stay stable as the suite grows — no
+editing the workflow when a new test file lands.
+
+The `db-integ` and `api-contract` jobs declare a Postgres service
+container:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    env:
+      POSTGRES_USER:     knievel_app
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB:       knievel
+    options: >-
+      --health-cmd pg_isready --health-interval 2s
+      --health-timeout 2s --health-retries 30
+```
+
+### 12.6 Acceptance sharding
+
+ACC-01..30 (§ 7) runs across an N=4 matrix, partitioned by nextest:
+
+```yaml
+acceptance:
+  needs: build-image
+  strategy:
+    fail-fast: false
+    matrix:
+      shard: [1, 2, 3, 4]
+  runs-on: ubuntu-latest
+  steps:
+    - uses: ./.github/actions/rust-setup
+    - uses: actions/download-artifact@v4
+      with: { name: knievel-image, path: /tmp }
+    - run:  docker load -i /tmp/knievel-image.tar
+    - run: |
+        docker compose -f tests/acceptance/compose.yaml \
+          -p knievel-acc-${{ matrix.shard }} \
+          up -d --wait
+    - run: |
+        cargo nextest run \
+          --partition count:${{ matrix.shard }}/4 \
+          -E 'kind(test) & binary(acceptance)'
+```
+
+Each shard runs under its own compose project name so docker
+network and port collisions are impossible. Total acceptance wall
+time drops from ~5 min single-threaded to ~90 s sharded.
+`fail-fast: false` keeps the diagnostic value of "shards 1 and 3
+failed" rather than cancelling on the first red.
+
+4 is the sweet spot on `ubuntu-latest`. Going higher spends more
+time on compose-up than on tests.
+
+### 12.7 Per-PR gates (required)
+
+| Stage | Gate | Job |
+|---|---|---|
+| `cargo fmt --check` | Required | `prime` |
+| `cargo clippy -- -D warnings` | Required | `prime` |
+| `cargo nextest run` (unit + integration + API) | Required | `unit-prop`, `db-integ`, `api-contract` |
+| `cargo xtask lint-migrations` | Required | `xtask-lints` |
+| `cargo xtask check-cross-tenant` | Required | `xtask-lints` |
+| `cargo xtask test-shape` | Required | `xtask-lints` |
+| `cargo xtask openapi --check` | Required (binary ↔ `openapi.yaml`) | `openapi-drift` |
+| OpenAPI 3.1 meta-schema validation | Required | `openapi-drift` |
+| Acceptance suite (4 shards) | Required, all shards green | `acceptance` |
+| Generated-gem smoke pass | Required | `gem-smoke` |
+| Helm chart `helm lint` + `kubeconform` | Required | `helm-lint` |
+| Release-checklist enforcer (release-tagging PRs only) | Required | `release.yml` |
+
+GitHub branch protection requires every required job. `prime` is
+not directly gated — its failures surface via the `fmt` / `clippy`
+/ build-failure rows downstream; making it required would
+double-count.
+
+### 12.8 Nightly (advisory)
+
+`.github/workflows/nightly.yml`, scheduled `cron: '13 7 * * *'`
+(low-collision time, post-US-PT). Reuses the same `prime` +
+`shared-key` cache strategy.
 
 | Stage | Behavior on failure |
 |---|---|
-| Chaos suite | Open issue, page #knievel-oncall |
-| Fuzz (1 h budget per target) | Open issue with the input |
-| `criterion` benchmark (regression vs. last main) | Open issue if > 30 % slower |
+| Chaos suite (`tests/chaos/`, § 9) | Open issue via `peter-evans/create-issue-from-file`; page `#knievel-oncall` |
+| `cargo fuzz` (60 min budget per target: hmac, jwt, decisions) | Open issue with the offending input |
+| `criterion` benchmark vs. last main | Open issue if any metric regresses > 30 % |
 | Multi-Postgres-version matrix (14, 15, 16) | Open issue |
 
-### 12.3 Pre-release (release-tagging PR only)
+A failed nightly does not block tags. § 8 and § 10.5 spell out
+which of these are tag prerequisites when the underlying code path
+changes.
 
-- `bench/results/<version>.md` updated for any release that touches
-  the hot path. § 8 regression policy applies.
-- Release security checklist filled in. § 10.3 enforcer applies.
-- Manual acceptance: a maintainer runs the compose stack against a
-  fresh dev DB, walks ACC-01 through ACC-30 visually. (Captured as a
-  short note in the PR; the green CI is what blocks merge, this is
-  belt-and-suspenders.)
+### 12.9 Release-tagging workflow
+
+`.github/workflows/release.yml`, triggered on `push` to tags
+matching `v*`. Runs the per-PR DAG (so a tag never goes out without
+green tests), then:
+
+1. **Bench regression check.** `bench/results/<version>.md` must be
+   present for any release that touches `selection::*` /
+   `snapshot::*` / `events::flusher::*`. Fails the workflow on a
+   missing artifact, or on a > 20 % regression vs. the previous
+   release on (p50, p99, sustained QPS), unless an explicit waiver
+   appears in the tag's release notes.
+2. **Release security checklist enforcer** (§ 10.3). Fails on any
+   unchecked item without a written justification in the release
+   notes.
+3. **Container image build.** Multi-arch `docker buildx` for
+   `amd64` + `arm64`, signed with `cosign`, pushed to
+   `ghcr.io/xrl/knievel:<version>` and `:latest`.
+4. **Helm chart packaged** and published to the chart's index.
+5. **Ruby gem rebuilt** from the released spec, version bumped to
+   match the spec version, pushed to RubyGems.
+6. **GitHub Release** created with the changelog and artifact links.
+
+Release jobs do not run with `cancel-in-progress`. A retried tag
+creates a new run; partial publishes are documented in
+`RELEASE_PLAYBOOK.md` (separate runbook, not part of this spec).
+
+Manual acceptance — a maintainer running the compose stack against
+a fresh dev DB and walking ACC-01..30 visually — is captured as a
+short note in the release-tagging PR. Green CI is what blocks
+merge; the manual pass is belt-and-suspenders.
+
+### 12.10 Workflow file layout
+
+```
+.github/
+├── workflows/
+│   ├── ci.yml         # per-PR (12.4 – 12.7)
+│   ├── nightly.yml    # 12.8
+│   └── release.yml    # 12.9
+└── actions/
+    └── rust-setup/    # composite: checkout + toolchain + rust-cache
+        └── action.yml
+```
+
+Keeping the composite action under `.github/actions/` (vs.
+publishing it) means CI doesn't depend on a `marketplace` dance for
+a repo-internal helper. Updates ride along with workflow PRs.
 
 ## 13. Coverage Policy
 
