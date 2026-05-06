@@ -865,7 +865,7 @@ secret the URL was signed under, so dedup spans rotation cleanly.
 | `GET` | `/healthz` | Liveness. `200` if process is up. |
 | `GET` | `/readyz` | Readiness. `200` only if snapshot loaded, DB reachable, flusher healthy. |
 | `GET` | `/metrics` | Prometheus exposition. |
-| `GET` | `/version` | Build metadata: git sha, build time, schema version. |
+| `GET` | `/version` | Build metadata (git sha, build time, schema version) plus the **effective auth policy** — enabled modes and per-issuer summary (issuer URL, audience, algorithms, claim source, JWKS URL). Secrets are never returned. See `AUTH.md` "Startup Linting and Effective-Policy Visibility". |
 
 ---
 

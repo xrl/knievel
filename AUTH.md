@@ -596,6 +596,94 @@ Every authz outcome is fed to the structured-log layer:
   read Advertisers tagged `region=eu`"). Out of scope until a real
   use case appears.
 
+## Startup Linting and Effective-Policy Visibility
+
+Auth misconfiguration is silent and catastrophic — a too-permissive
+algorithm allow-list, a missing audience, an issuer that maps every
+token to god-mode. Knievel boots fail-closed: if the auth config
+doesn't pass the lint pass, the process exits before serving a
+request.
+
+### Boot-time validation rules
+
+The following are checked at startup and produce a hard error
+(non-zero exit, structured log line with the offending config path):
+
+- **Algorithm allow-list.** Each issuer's `algorithms` list must
+  contain only asymmetric algorithms (`RS256`, `RS384`, `RS512`,
+  `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512`, `EdDSA`).
+  `none` and any HMAC algorithm (`HS*`) are rejected unconditionally.
+  An empty list is rejected.
+- **Issuer / audience completeness.** Every entry in
+  `auth.jwt.issuers[]` must have non-empty `issuer` and `audience`
+  fields. JWKS auto-discovery is verified at boot — knievel fetches
+  `{issuer}/.well-known/openid-configuration` once before declaring
+  itself ready, so a typo in the issuer URL fails at boot, not on
+  first request.
+- **Claim handling.** Each issuer must specify either `claim:
+  <name>` (single rich-claim mode) **or** `claim_mapping: {rules:
+  [...]}` (derived-principal mode), not both, not neither.
+- **`claim_mapping` schema.** Each rule must have a non-empty
+  `match` block (at least one claim to match on) and a complete
+  `principal` block (`scope`, `org_id`, plus `project_id` for
+  `scope: project`, plus `role`). Malformed rules fail the boot.
+- **`claim_mapping` coverage.** Issuers using `claim_mapping` must
+  have at least one rule. An issuer with `claim_mapping: { rules:
+  [] }` would silently pass through every JWT from that issuer with
+  no principal mapped — knievel rejects this configuration outright
+  to prevent the footgun.
+- **Mode coherence.** `auth.modes` must be a non-empty subset of
+  `[opaque, jwt]`. If `jwt` is listed, at least one issuer entry
+  must be present and pass the checks above. If `opaque` is the only
+  mode, the JWT block is permitted to be absent.
+
+Failures are surfaced as a single startup error block, listing
+every offending entry with its config path and the failure
+category. Operators see all problems at once instead of fixing
+them iteratively.
+
+### Effective-policy visibility
+
+Once boot passes the lint, knievel publishes the effective auth
+policy in two operator-visible places:
+
+- **Startup INFO log entry.** A single structured log line
+  enumerating: enabled modes; per-issuer issuer URL, audience,
+  algorithms, claim source (`claim` or `claim_mapping` with rule
+  count), and JWKS URL discovered. Secrets and signing keys are
+  never logged.
+- **`GET /version` response.** The `auth` block in the version
+  payload mirrors the startup log. Example:
+
+  ```json
+  {
+    "knievel": "0.4.2",
+    "schema": "0.4",
+    "auth": {
+      "modes": ["jwt"],
+      "issuers": [
+        {
+          "issuer": "https://keycloak.scientist.com/realms/scientist",
+          "audience": "knievel",
+          "algorithms": ["RS256"],
+          "claim_source": { "kind": "claim", "name": "knievel" },
+          "jwks_url": "https://keycloak.scientist.com/realms/scientist/protocol/openid-connect/certs"
+        },
+        {
+          "issuer": "https://kubernetes.default.svc.cluster.local",
+          "audience": "knievel",
+          "algorithms": ["RS256"],
+          "claim_source": { "kind": "claim_mapping", "rule_count": 2 }
+        }
+      ]
+    }
+  }
+  ```
+
+Operators inspecting `/version` can answer "what auth is this pod
+actually doing?" without reading config files or restarting in
+debug mode. Useful during incidents and routine audits alike.
+
 ## Trade-offs
 
 ### Revocation is by expiry
