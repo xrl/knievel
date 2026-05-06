@@ -22,6 +22,7 @@ jobs:
     name: prime
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
       - run: cargo fmt --all --check
@@ -33,6 +34,7 @@ jobs:
     needs: prime
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
       - run: |
@@ -61,6 +63,7 @@ jobs:
     env:
       DATABASE_URL: postgres://knievel_app:dev@localhost:5432/knievel
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
       - run: |
@@ -89,6 +92,7 @@ jobs:
     env:
       DATABASE_URL: postgres://knievel_app:dev@localhost:5432/knievel
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
       - run: |
@@ -101,6 +105,7 @@ jobs:
     needs: prime
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - run: cargo xtask lint-migrations
       - run: cargo xtask check-cross-tenant
@@ -111,6 +116,7 @@ jobs:
     needs: prime
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - run: cargo xtask openapi --check
 

@@ -1,8 +1,10 @@
 name: 'rust-setup'
 description: >-
-  Checkout, install the Rust toolchain pinned in rust-toolchain.toml,
-  and restore the shared cargo cache. Single source of truth for
-  every Rust job in the workflows.
+  Install the Rust toolchain pinned in rust-toolchain.toml and
+  restore the shared cargo cache. The CALLER must run
+  `actions/checkout@v4` before invoking this composite — local
+  composite actions (`./.github/actions/...`) can't be located
+  until the repo is on disk.
 
 inputs:
   shared-key:
@@ -17,8 +19,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
-
     - uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: '1.94'
@@ -28,3 +28,4 @@ runs:
       with:
         shared-key: ${{ inputs.shared-key }}
         cache-on-failure: 'true'
+
