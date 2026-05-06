@@ -578,6 +578,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -585,6 +600,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/AdvertiserList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -819,6 +840,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -826,6 +862,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/CampaignList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -1057,6 +1099,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -1064,6 +1121,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/FlightList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -1295,6 +1358,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -1302,6 +1380,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/CreativeList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -1518,6 +1602,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -1525,6 +1624,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/CreativeTemplateList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -1716,6 +1821,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -1723,6 +1843,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/AdList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -1942,6 +2068,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -1949,6 +2090,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/SiteList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
@@ -2225,6 +2372,21 @@ paths:
         required: true
         deprecated: false
         explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      - name: cursor
+        schema:
+          type: string
+        in: query
+        required: false
+        deprecated: false
+        explode: true
       responses:
         '200':
           description: ''
@@ -2232,6 +2394,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/ZoneList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:

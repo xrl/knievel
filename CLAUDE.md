@@ -410,9 +410,14 @@ the corresponding handler feature lands):
   row should come back at 200, not 409. Today the handler
   returns 409 `external_id_conflict`. Moved to **Phase 6.1**
   (post-v0); `:batchUpsert` already round-trips cleanly.
-- **Cursor pagination.** Every list endpoint returns
-  `next_cursor: null`; the envelope shape is ready. Real cursor
-  encoding is a follow-up.
+- **Cursor pagination.** ✅ Closed for the 8 demand+inventory
+  list endpoints in **3.33** (cursor is
+  `base64url(JSON{kind, last_id})`, default limit 50, max 500;
+  `kind`-validated to catch cross-resource replay). The 3
+  taxonomy endpoints stay non-paginated (bounded-small
+  per-project sets). `listAdLibraryItems` + `listTokens` deferred
+  to **Phase 6.5** because their TEXT primary keys need a
+  `(created_at, id)` tuple cursor.
 - **`If-Match` etag validation on PATCH.** Etag is bumped on
   every PATCH, but PATCH doesn't read the `If-Match` header
   yet. Future task.

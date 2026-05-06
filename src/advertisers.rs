@@ -8,7 +8,11 @@
 //! `REQUIREMENTS.md` § 5.
 
 use poem::web::Data;
-use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
+use poem_openapi::{
+    param::{Path, Query},
+    payload::Json,
+    ApiResponse, Object, OpenApi,
+};
 
 use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
@@ -19,6 +23,8 @@ use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
 
 pub struct AdvertisersApi;
+
+const CURSOR_KIND: &str = "advertisers";
 
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct CreateAdvertiserRequest {
@@ -93,6 +99,8 @@ pub enum CreateAdvertiserResp {
 pub enum ListAdvertisersResp {
     #[oai(status = 200)]
     Ok(Json<AdvertiserList>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
     #[oai(status = 403)]
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 500)]
@@ -240,9 +248,15 @@ impl AdvertisersApi {
         auth: BearerAuth,
         state: Data<&AppState>,
         project_id: Path<String>,
+        limit: Query<Option<i64>>,
+        cursor: Query<Option<String>>,
     ) -> ListAdvertisersResp {
         let principal = auth.0;
         let path_project_id = project_id.0;
+        let resolved = match crate::pagination::resolve(limit.0, cursor.0.as_deref(), CURSOR_KIND) {
+            Ok(r) => r,
+            Err(e) => return ListAdvertisersResp::BadRequest(Json(err(e.code(), e.message()))),
+        };
         let pool = match state.0.db.as_ref() {
             Some(p) => p,
             None => {
@@ -253,15 +267,27 @@ impl AdvertisersApi {
             Ok(tx) => tx,
             Err(e) => return forbidden_list(e),
         };
-        let sql = format!("SELECT {COLS} FROM knievel.advertisers ORDER BY id DESC LIMIT 500");
-        match sqlx::query_as::<_, Advertiser>(&sql)
-            .fetch_all(&mut *tx)
-            .await
-        {
-            Ok(items) => ListAdvertisersResp::Ok(Json(AdvertiserList {
-                items,
-                next_cursor: None,
-            })),
+        let sql = match resolved.after_id {
+            None => format!("SELECT {COLS} FROM knievel.advertisers ORDER BY id DESC LIMIT $1"),
+            Some(_) => format!(
+                "SELECT {COLS} FROM knievel.advertisers WHERE id < $2 ORDER BY id DESC LIMIT $1"
+            ),
+        };
+        let q = sqlx::query_as::<_, Advertiser>(&sql).bind(resolved.bumped_limit);
+        let q = match resolved.after_id {
+            Some(after) => q.bind(after),
+            None => q,
+        };
+        match q.fetch_all(&mut *tx).await {
+            Ok(mut rows) => {
+                let next_cursor =
+                    crate::pagination::next_cursor(&rows, &resolved, CURSOR_KIND, |r| r.id);
+                rows.truncate(resolved.effective_limit as usize);
+                ListAdvertisersResp::Ok(Json(AdvertiserList {
+                    items: rows,
+                    next_cursor,
+                }))
+            }
             Err(e) => {
                 tracing::error!(error = %e, "list advertisers failed");
                 ListAdvertisersResp::Internal(Json(err("db_error", "list failed")))

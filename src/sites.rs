@@ -9,7 +9,11 @@
 #![allow(clippy::large_enum_variant)]
 
 use poem::web::Data;
-use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
+use poem_openapi::{
+    param::{Path, Query},
+    payload::Json,
+    ApiResponse, Object, OpenApi,
+};
 
 use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
@@ -20,6 +24,8 @@ use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
 
 pub struct SitesApi;
+
+const CURSOR_KIND: &str = "sites";
 
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct CreateSiteRequest {
@@ -123,6 +129,8 @@ pub enum UpsertResp {
 pub enum ListResp {
     #[oai(status = 200)]
     Ok(Json<SiteList>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
     #[oai(status = 403)]
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 500)]
@@ -326,9 +334,15 @@ impl SitesApi {
         auth: BearerAuth,
         state: Data<&AppState>,
         project_id: Path<String>,
+        limit: Query<Option<i64>>,
+        cursor: Query<Option<String>>,
     ) -> ListResp {
         let principal = auth.0;
         let pj = project_id.0;
+        let resolved = match crate::pagination::resolve(limit.0, cursor.0.as_deref(), CURSOR_KIND) {
+            Ok(r) => r,
+            Err(e) => return ListResp::BadRequest(Json(err(e.code(), e.message()))),
+        };
         let pool = match state.0.db.as_ref() {
             Some(p) => p,
             None => return ListResp::Internal(Json(err("no_db", "no database configured"))),
@@ -337,12 +351,27 @@ impl SitesApi {
             Ok(t) => t,
             Err(e) => return forbid(ListResp::Forbidden, e),
         };
-        let sql = format!("SELECT {COLS} FROM knievel.sites ORDER BY id DESC LIMIT 500");
-        match sqlx::query_as::<_, Site>(&sql).fetch_all(&mut *tx).await {
-            Ok(items) => ListResp::Ok(Json(SiteList {
-                items,
-                next_cursor: None,
-            })),
+        let sql = match resolved.after_id {
+            None => format!("SELECT {COLS} FROM knievel.sites ORDER BY id DESC LIMIT $1"),
+            Some(_) => {
+                format!("SELECT {COLS} FROM knievel.sites WHERE id < $2 ORDER BY id DESC LIMIT $1")
+            }
+        };
+        let q = sqlx::query_as::<_, Site>(&sql).bind(resolved.bumped_limit);
+        let q = match resolved.after_id {
+            Some(after) => q.bind(after),
+            None => q,
+        };
+        match q.fetch_all(&mut *tx).await {
+            Ok(mut rows) => {
+                let next_cursor =
+                    crate::pagination::next_cursor(&rows, &resolved, CURSOR_KIND, |r| r.id);
+                rows.truncate(resolved.effective_limit as usize);
+                ListResp::Ok(Json(SiteList {
+                    items: rows,
+                    next_cursor,
+                }))
+            }
             Err(e) => {
                 tracing::error!(error = %e, "list sites failed");
                 ListResp::Internal(Json(err("db_error", "list failed")))
