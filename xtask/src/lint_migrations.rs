@@ -154,24 +154,33 @@ pub(crate) fn lint_file(file: &Path, content: &str) -> Vec<String> {
         }
     }
 
-    // Rule 4: every CREATE POLICY must reference the tenant binding
-    // `knievel.project_id`. We check the whole CREATE POLICY
-    // statement (up to its terminating `;`) rather than just the
-    // USING(...) capture, so that:
+    // Rule 4: every CREATE POLICY must reference a session-scoped
+    // tenant binding — either `knievel.project_id` (project-scoped
+    // resources) or `knievel.org_id` (org-scoped resources like
+    // organizations, api_tokens, audit_log). REQUIREMENTS.md
+    // § 7.1.1 gate (2) rule 4 says "or equivalent session-scoped
+    // tenant binding"; both GUCs are set by the principal
+    // extractor and are first-class tenant identifiers.
+    //
+    // We scan the whole CREATE POLICY statement (up to its
+    // terminating `;`) rather than just the `USING(...)` capture,
+    // so that:
     //   - multi-line USING bodies with nested parens (e.g. a
     //     subquery) parse correctly without a balanced-paren
     //     scanner;
-    //   - a policy whose tenant binding lives in WITH CHECK rather
-    //     than USING (insert-only policies) is also accepted.
-    // The looser check is arguably more correct: any reference to
-    // `knievel.project_id` inside a CREATE POLICY statement is
-    // tenant-binding intent.
+    //   - a policy whose tenant binding lives in `WITH CHECK`
+    //     rather than `USING` (insert-only policies) is also
+    //     accepted.
     let policy = Regex::new(r"(?is)create\s+policy[^;]*;").unwrap();
     for mat in policy.find_iter(content) {
-        let block = mat.as_str();
-        if !block.to_lowercase().contains("knievel.project_id") {
+        let block_lower = mat.as_str().to_lowercase();
+        let bound =
+            block_lower.contains("knievel.project_id") || block_lower.contains("knievel.org_id");
+        if !bound {
             v.push(format!(
-                "{f}: rule 4 — CREATE POLICY does not reference current_setting('knievel.project_id')"
+                "{f}: rule 4 — CREATE POLICY does not reference \
+                 current_setting('knievel.project_id') or \
+                 current_setting('knievel.org_id')"
             ));
         }
     }

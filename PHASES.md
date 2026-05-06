@@ -455,12 +455,27 @@ manager and leader election running.
       don't pull a direct `rand` dep. `routes()` was promoted
       from `pub(crate)` to `pub` so the API-slice tests can
       assemble a `TestClient` over the production routes table.
-- [ ] **3.4** Audit-log migration `0004`: `audit_log` (monthly
-      range-partitioned, RLS by `org_id`, append-only enforced via
-      policy — `UPDATE`/`DELETE` rejected). Integration test
-      asserts append-only behavior. No writers yet — first writer
-      lands in 3.6 (token mint), then 3.19 (force.*).
-      Refs: `REQUIREMENTS.md` § 7.3.
+- [x] **3.4** Audit-log migration `0004_audit_log.sql`. Parent
+      `audit_log` partitioned by RANGE (ts) with a wide seed leaf
+      covering 2026; subsequent monthly leaves land via the
+      partition manager once it generalizes (Phase 3.23+).
+      Append-only is enforced by RLS *via the absence* of `FOR
+      UPDATE` and `FOR DELETE` policies — Postgres' FORCE'd RLS
+      default-denies operations without a matching policy, so
+      tamper attempts silently affect zero rows. Integration test
+      `tests/integration_audit_log.rs` covers four invariants:
+      tenant-scoped reads, UPDATE → 0 rows affected, DELETE → 0
+      rows affected, cross-tenant `WITH CHECK` rejection.
+
+      **Note (3.4):** The Phase 3.1 linter's rule 4 was
+      generalized in this commit to accept either `knievel.org_id`
+      or `knievel.project_id` — `REQUIREMENTS.md` § 7.1.1 gate
+      (2) says "or equivalent session-scoped tenant binding," and
+      org_id is a first-class binding on org-scoped tables
+      (organizations, api_tokens, audit_log). The fixture-04
+      reject-case continues to fail because it has neither
+      binding; fixture-06's `knievel.project_id` reference still
+      passes.
 - [ ] **3.5** Idempotency middleware (24 h replay). Migration
       `0005_idempotency_keys.sql` — per-project store keyed on
       `(project_id, key, route, body_hash)`. Middleware fits
