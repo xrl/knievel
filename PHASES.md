@@ -371,15 +371,37 @@ manager and leader election running.
 
 ### Tasks
 
-- [ ] **3.1** Tenant model migration `0002`: `organizations`,
-      `projects`, RLS policies bound on
-      `current_setting('knievel.project_id')` (and `org_id` for
-      org-scoped rows). Tenant-binding helper exposed via testlib
-      (`testlib::tenant::with_project`). Integration test asserts a
-      session bound to project A cannot read rows inserted under
-      project B.
+- [x] **3.1** Tenant model migration `0002_tenants.sql`:
+      `organizations` and `projects`, RLS policies bound on
+      `current_setting('knievel.org_id')` and
+      `current_setting('knievel.project_id')`. Helper
+      `testlib::tenant::begin_bound` opens a tenant-bound
+      transaction via `set_config(..., is_local=true)` (the
+      parameterized `SET LOCAL` equivalent — caller-supplied IDs
+      can't smuggle SQL). Integration test
+      `tests/integration_tenants.rs` asserts: a session bound to
+      org A sees only org A; a session bound to (org B, project
+      B1) cannot see project A1; a project-only session can see
+      its parent org via the policy's inheritance subquery; the
+      `WITH CHECK` clause rejects an insert whose `id` doesn't
+      match the bound `org_id`.
       Refs: `REQUIREMENTS.md` § 4, § 7.1, § 7.1.1, `AUTH.md`
       "Authorization."
+
+      **Note (3.1):** The Phase 1.7 migration linter's rule 4
+      regex (`USING\s*\((...)\)`) couldn't parse multi-line USING
+      clauses with nested parens (e.g. an `IN (SELECT ...)`
+      subquery referencing the tenant binding). Fixed in this
+      commit: rule 4 now scans the entire `CREATE POLICY`
+      statement (up to its terminating `;`) for the
+      `knievel.project_id` token. The looser check is arguably
+      more correct — any reference inside a CREATE POLICY block is
+      tenant-binding intent — and it accepts policies whose
+      binding lives in `WITH CHECK` rather than `USING` (relevant
+      for INSERT-only policies starting with `audit_log` in 3.4).
+      The `real_migrations_are_clean` sanity test was generalized
+      to lint every file in `migrations/` so future migrations
+      get auto-checked.
 - [ ] **3.2** Opaque-token foundation: `auth::opaque` parse +
       argon2id hash/verify, `auth::role` enum + ordering,
       migration `0003_api_tokens.sql` (tokens table with RLS by

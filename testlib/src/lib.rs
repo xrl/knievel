@@ -6,3 +6,4 @@
 //! its own DB lifecycle rather than sqlx's auto-managed one.
 
 pub mod db;
+pub mod tenant;

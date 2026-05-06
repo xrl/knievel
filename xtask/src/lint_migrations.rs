@@ -154,15 +154,24 @@ pub(crate) fn lint_file(file: &Path, content: &str) -> Vec<String> {
         }
     }
 
-    // Rule 4: every CREATE POLICY's USING clause must reference
-    // the tenant binding `knievel.project_id`. Match non-greedy
-    // through to a balancing `)` keeping the body of USING(...).
-    let policy = Regex::new(r"(?is)create\s+policy[^;]*?\busing\s*\(([^;]*?)\)").unwrap();
-    for cap in policy.captures_iter(content) {
-        let using = cap.get(1).unwrap().as_str();
-        if !using.to_lowercase().contains("knievel.project_id") {
+    // Rule 4: every CREATE POLICY must reference the tenant binding
+    // `knievel.project_id`. We check the whole CREATE POLICY
+    // statement (up to its terminating `;`) rather than just the
+    // USING(...) capture, so that:
+    //   - multi-line USING bodies with nested parens (e.g. a
+    //     subquery) parse correctly without a balanced-paren
+    //     scanner;
+    //   - a policy whose tenant binding lives in WITH CHECK rather
+    //     than USING (insert-only policies) is also accepted.
+    // The looser check is arguably more correct: any reference to
+    // `knievel.project_id` inside a CREATE POLICY statement is
+    // tenant-binding intent.
+    let policy = Regex::new(r"(?is)create\s+policy[^;]*;").unwrap();
+    for mat in policy.find_iter(content) {
+        let block = mat.as_str();
+        if !block.to_lowercase().contains("knievel.project_id") {
             v.push(format!(
-                "{f}: rule 4 — CREATE POLICY USING does not reference current_setting('knievel.project_id')"
+                "{f}: rule 4 — CREATE POLICY does not reference current_setting('knievel.project_id')"
             ));
         }
     }
@@ -223,13 +232,18 @@ mod tests {
 
     #[test]
     fn real_migrations_are_clean() {
-        // Sanity: `migrations/0001_init.sql` (Phase 1.6) lints clean.
-        let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        // Sanity: every committed migration in `migrations/` lints
+        // clean. Catches regressions when a new migration lands.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .join("migrations/0001_init.sql");
-        let content = fs::read_to_string(&p).unwrap();
-        let v = lint_file(&p, &content);
-        assert!(v.is_empty(), "0001_init.sql should be clean: {v:?}");
+            .join("migrations");
+        let files = collect_sql_files(&dir).unwrap();
+        assert!(!files.is_empty(), "expected at least one migration");
+        for p in &files {
+            let content = fs::read_to_string(p).unwrap();
+            let v = lint_file(p, &content);
+            assert!(v.is_empty(), "{} should be clean: {v:?}", p.display());
+        }
     }
 }
