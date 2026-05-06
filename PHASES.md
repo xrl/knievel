@@ -1389,7 +1389,8 @@ flows from a working binary in a real container.
       Refs: `REQUIREMENTS.md` § 8 item 4, `AUTH.md` "Local
       Development."
 - [ ] **4.3** Multi-arch container image build, **published
-      to `ghcr.io/xrl/knievel`**. `docker buildx` for
+      to `ghcr.io/xrl/knievel`**, plus `knievel-cli` binaries
+      attached to each GitHub Release. `docker buildx` for
       `linux/amd64` + `linux/arm64`, distroless base
       (`gcr.io/distroless/cc:nonroot`). Tag policy:
       `ghcr.io/xrl/knievel:latest` from `main`,
@@ -1402,8 +1403,28 @@ flows from a working binary in a real container.
       stubbed) for tags and `.github/workflows/main-image.yml`
       (new) for `main`. The compose file in 4.1 and the Helm
       chart in 4.4 reference this image directly.
+
+      **`knievel-cli` release attachments.** On every `v*`
+      tag, cross-build the `knievel-cli` binary for
+      `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+      `x86_64-apple-darwin`, and `aarch64-apple-darwin` (cargo
+      cross / GitHub-hosted runners). Strip + tar.gz +
+      sha256sum each artifact (`knievel-cli-vX.Y.Z-<target>.tar.gz`
+      + matching `.sha256`). Sign each artifact's digest with
+      `cosign sign-blob` keyless. Upload all artifacts to the
+      GitHub Release via `softprops/action-gh-release` (or
+      `gh release upload`); a `checksums.txt` aggregates the
+      per-artifact sha256 for one-line verification. The
+      release-notes block links the image digest, the cosign
+      certificate, and the per-OS install one-liner. This
+      makes `knievel-cli` installable without docker —
+      operators on macOS / Linux can `curl | tar` the matching
+      binary, and the SDK / scripting consumers Phase 4.2
+      enables (`seed-demo`) work on bare hosts.
+
       Refs: `REQUIREMENTS.md` § 8 item 5, `MIGRATION_RX.md`
-      compose example, `TESTING.md` § 12.9.
+      compose example, `TESTING.md` § 12.9, § 10.3 (release
+      security checklist — cosign attestation lives here).
 - [ ] **4.4** `charts/knievel` Helm chart; `helm lint` +
       `kubeconform` gate. Default `values.yaml` pins
       `image.repository: ghcr.io/xrl/knievel` and `image.tag:
