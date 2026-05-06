@@ -46,20 +46,34 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
     // defeats every cross-tenant isolation test. Drop superuser
     // (keep CREATEDB so we can still mint ephemerals) so the role
     // is gated by FORCE'd policies, matching production where the
-    // app role is non-superuser per `MIGRATION_RX.md`. Conditional
-    // on rolsuper so subsequent test-fixture invocations don't try
-    // to ALTER ROLE from a no-longer-superuser session and 42501
-    // out.
-    let is_super: bool =
-        sqlx::query_scalar("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
-            .fetch_one(&admin)
+    // app role is non-superuser per `MIGRATION_RX.md`.
+    //
+    // Many test processes call `ephemeral()` concurrently; the
+    // SELECT/ALTER pair has to be serialized at the cluster
+    // level or the second-and-subsequent ALTERs trip the
+    // mid-flight loss of privilege. `pg_advisory_xact_lock` with
+    // a deterministic key is the standard recipe — first caller
+    // does the work, the rest no-op once they see rolsuper
+    // already false. The lock releases automatically when the
+    // wrapping transaction commits.
+    {
+        let mut tx = admin.begin().await.context("opening role-downgrade tx")?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('knievel_testlib_role_setup')::bigint)")
+            .execute(&mut *tx)
             .await
-            .context("checking admin role attributes")?;
-    if is_super {
-        sqlx::query("ALTER ROLE CURRENT_USER NOSUPERUSER CREATEDB")
-            .execute(&admin)
-            .await
-            .context("downgrading admin role from SUPERUSER")?;
+            .context("acquiring role-setup advisory lock")?;
+        let is_super: bool =
+            sqlx::query_scalar("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+                .fetch_one(&mut *tx)
+                .await
+                .context("checking admin role attributes")?;
+        if is_super {
+            sqlx::query("ALTER ROLE CURRENT_USER NOSUPERUSER CREATEDB")
+                .execute(&mut *tx)
+                .await
+                .context("downgrading admin role from SUPERUSER")?;
+        }
+        tx.commit().await.context("committing role-downgrade tx")?;
     }
 
     // uuid v4 simple = 32 hex chars; truncate to 16 to keep the DB

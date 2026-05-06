@@ -1454,8 +1454,20 @@ flows from a working binary in a real container.
       TESTING.md works on day 1, and (3) activating each one is
       a focused PR — flip `#[ignore]`, fill in the body.
       Refs: `TESTING.md` § 7.1.
-- [ ] **4.6** Acceptance sharding in CI (4-way nextest
-      partition).
+- [x] **4.6** Acceptance sharding in CI (4-way nextest
+      partition). Each shard runs in its own job with its own
+      Postgres service container; shard $N$ runs `nextest run
+      -E 'kind(test) & binary(acceptance)' --partition
+      count:$N$/4`. Spec calls for docker-compose orchestration
+      per shard (TESTING.md § 12.6); we run in-process via
+      `poem::test::TestClient` + ephemeral Postgres so the
+      compose dance isn't needed today (the `Dockerfile` and
+      Phase 4.3 image-publish workflows still produce the
+      compose-ready image that future chaos-rig shards will
+      `docker load` from). Live tests today distribute
+      2/2/1/1 across the four shards; ignored skeletons stay so
+      flipping `#[ignore]` is enough to add coverage to the
+      matrix.
       Refs: `TESTING.md` § 12.6.
 - [ ] **4.7** Chaos suite skeleton paired 1:1 with
       `REQUIREMENTS.md` § 10.9.
@@ -1641,6 +1653,18 @@ Phase 5.8 (it'll `helm package` + push to an OCI registry,
 ideally `ghcr.io/xrl/charts/knievel`). The chart is usable from
 the working tree today (`helm install knievel ./charts/knievel
 -f my-values.yaml`).
+
+**Note (4.6):** The 4-way shard exposed a TOCTOU race in
+`testlib::db::ephemeral`'s SUPERUSER downgrade — many parallel
+test processes all `SELECT rolsuper` then `ALTER ROLE
+NOSUPERUSER`, but only the first ALTER has privilege; the rest
+fail with 42501 (or other SQLSTATE depending on PG version) and
+emit a confusing error. Fixed by gating the SELECT/ALTER pair
+behind a `pg_advisory_xact_lock(hashtext('knievel_testlib_role_
+setup'))` — first lock-holder does the work in a transaction,
+subsequent holders see `rolsuper = false` and no-op. Lock
+auto-releases on commit, so there's no cleanup cost. 10 stress
+runs of shard-1 are clean.
 
 ---
 

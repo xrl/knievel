@@ -156,33 +156,45 @@ jobs:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -summary /tmp/knievel-rendered.yaml
 
-  build-image:
-    name: build container image
-    needs: [unit-prop, db-integ, api-contract, xtask-lints, openapi-drift]
-    runs-on: ubuntu-latest
-    if: false   # Phase 4.6 activates
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 4.6 — Dockerfile + buildx + cosign"
-
   acceptance:
+    # ACC-01..30 partitioned across 4 nextest shards per
+    # `TESTING.md` § 12.6. The binary runs in-process via
+    # `poem::test::TestClient` against an ephemeral Postgres for
+    # each test (Phase 4.5), so the docker-image artifact dance
+    # described in TESTING.md isn't needed today; the spec's
+    # `build-image` predecessor is satisfied by the existing
+    # `Dockerfile` + Phase 4.3 image-publish workflows. Going
+    # in-process keeps the shard wall-time at ~30 s per shard.
     name: acceptance shard ${{ matrix.shard }}/4
-    needs: build-image
+    needs: prime
     runs-on: ubuntu-latest
-    if: false   # Phase 4.3 / 4.4 activates
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: knievel_app
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: knievel
+        options: >-
+          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://knievel_app:dev@localhost:5432/knievel
     steps:
       - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 4.3 / 4.4 — compose + ACC scenarios + sharding"
-
-  gem-smoke:
-    name: ruby gem smoke
-    needs: acceptance
-    runs-on: ubuntu-latest
-    if: false   # Phase 4.8 activates
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 4.8 — knievel-ruby gem smoke pass"
+      - uses: ./.github/actions/rust-setup
+      - uses: taiki-e/install-action@nextest
+      - name: Run shard ${{ matrix.shard }}/4
+        run: |
+          cargo nextest run --workspace --locked \
+            -E 'kind(test) & binary(acceptance)' \
+            --partition count:${{ matrix.shard }}/4 \
+            --no-tests=pass
