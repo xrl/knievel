@@ -6,3 +6,15 @@
 .travis.yml
 .gitlab-ci.yml
 git_push.sh
+
+# Hand-written `Enumerable` wrapper layer + convenience client
+# facade (Phase 4.10). Lives alongside the generated `*Api` /
+# `models/*` classes and is hand-maintained. The generator
+# doesn't have templates for these paths today, so the rules
+# below are belt-and-suspenders against future generator
+# versions that might.
+lib/knievel/resources.rb
+lib/knievel/resources/**
+lib/knievel/client.rb
+spec/resources/**
+spec/client_spec.rb
