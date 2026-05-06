@@ -638,9 +638,24 @@ manager and leader election running.
       bad FK 422. Manifest gains 4 entries; gate now reports
       `23 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.4.
-- [ ] **3.12** Site + Zone CRUD; `:upsertByUrl` natural-key
-      endpoint for sites. Site URL/aliases uniqueness enforced at
-      the table level.
+- [x] **3.12** Sites + Zones CRUD; `:upsertByUrl` natural-key
+      endpoint for sites. `src/sites.rs::SitesApi` exposes the
+      five operations from `API.md` § 3.7 (POST, list, GET,
+      PATCH, plus `:upsertByUrl`). The upsert returns 201 on
+      first call and 200 on subsequent calls with the same URL —
+      it's "find or create", not "find or update," so a rename
+      requires the PATCH endpoint. Site URL is unique on
+      `(project_id, url)` (the migration's UNIQUE constraint
+      lands the conflict at the DB layer; aliases-vs-url
+      uniqueness across the union is application-layer for v0,
+      noted as future work).
+      `src/zones.rs::ZonesApi` adds the four standard operations
+      with a `site_id` FK, 422 fk_not_found on missing site.
+      Two API tests cover upsertByUrl 201→200, direct create 409
+      collision, zone create with aliases array round-trip,
+      cross-tenant 403, and bad-FK 422. Manifest gains 9 entries
+      (5 sites, 4 zones); gate now reports
+      `32 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.7, § 3.8.
 - [ ] **3.13** Read-only inventory taxonomy endpoints
       (channels/priorities/ad-types). Seeded by 3.7.

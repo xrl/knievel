@@ -27,9 +27,11 @@ use crate::creative_templates::CreativeTemplatesApi;
 use crate::creatives::CreativesApi;
 use crate::flights::FlightsApi;
 use crate::orgs::OrgApi;
+use crate::sites::SitesApi;
 use crate::state::AppState;
 use crate::system::SystemApi;
 use crate::tokens::TokensApi;
+use crate::zones::ZonesApi;
 
 pub async fn run(cfg: Config) -> Result<()> {
     let addr = SocketAddr::from_str(&cfg.api.bind_addr)
@@ -74,6 +76,8 @@ pub fn routes() -> Route {
             CreativesApi,
             CreativeTemplatesApi,
             AdsApi,
+            SitesApi,
+            ZonesApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

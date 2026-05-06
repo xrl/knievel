@@ -21,9 +21,11 @@ pub mod idempotency;
 pub mod observability;
 pub mod orgs;
 pub mod server;
+pub mod sites;
 pub mod state;
 pub mod system;
 pub mod tokens;
+pub mod zones;
 
 /// Generate the OpenAPI spec as YAML. Used by
 /// `cargo xtask openapi` to write `openapi.yaml` and by
@@ -42,6 +44,8 @@ pub fn openapi_spec_yaml() -> String {
             creatives::CreativesApi,
             creative_templates::CreativeTemplatesApi,
             ads::AdsApi,
+            sites::SitesApi,
+            zones::ZonesApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

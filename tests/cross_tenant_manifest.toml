@@ -141,3 +141,50 @@ test   = "cross_tenant_ads_get"
 path   = "/v1/projects/{project_id}/ads/{id}"
 method = "PATCH"
 test   = "cross_tenant_ads_patch"
+
+# Sites — Phase 3.12.
+[[entry]]
+path   = "/v1/projects/{project_id}/sites"
+method = "POST"
+test   = "cross_tenant_sites_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/sites:upsertByUrl"
+method = "POST"
+test   = "cross_tenant_sites_upsert_by_url"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/sites"
+method = "GET"
+test   = "cross_tenant_sites_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/sites/{id}"
+method = "GET"
+test   = "cross_tenant_sites_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/sites/{id}"
+method = "PATCH"
+test   = "cross_tenant_sites_patch"
+
+# Zones — Phase 3.12.
+[[entry]]
+path   = "/v1/projects/{project_id}/zones"
+method = "POST"
+test   = "cross_tenant_zones_create"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/zones"
+method = "GET"
+test   = "cross_tenant_zones_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/zones/{id}"
+method = "GET"
+test   = "cross_tenant_zones_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/zones/{id}"
+method = "PATCH"
+test   = "cross_tenant_zones_patch"

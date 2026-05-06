@@ -1308,6 +1308,405 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateAd
+  /v1/projects/{project_id}/sites:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createSite
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/SiteList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listSites
+  /v1/projects/{project_id}/sites:upsertByUrl:
+    post:
+      summary: |-
+        Natural-key upsert. Returns the existing row (200) when a
+        site with the same URL exists; otherwise creates (201). Per
+        `API.md` § 3.7: `:upsertByUrl` is the canonical entry point
+        for URL-driven flows.
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpsertSiteByUrlRequest'
+        required: true
+      responses:
+        '200':
+          description: Existing row matched by URL.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '201':
+          description: Newly inserted row.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: upsertSiteByUrl
+  /v1/projects/{project_id}/sites/{id}:
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getSite
+    patch:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateSite
+  /v1/projects/{project_id}/zones:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateZoneRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Zone'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createZone
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ZoneList'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listZones
+  /v1/projects/{project_id}/zones/{id}:
+    get:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Zone'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getZone
+    patch:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateZoneRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Zone'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: updateZone
 components:
   schemas:
     Ad:
@@ -1602,6 +2001,28 @@ components:
           description: Caller-assigned external id, unique within the org.
         name:
           type: string
+    CreateSiteRequest:
+      type: object
+      title: CreateSiteRequest
+      required:
+      - name
+      - url
+      properties:
+        external_id:
+          type: string
+        channel_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        url:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        is_active:
+          type: boolean
     CreateTokenRequest:
       type: object
       title: CreateTokenRequest
@@ -1653,6 +2074,22 @@ components:
           type: string
         created_at:
           type: string
+    CreateZoneRequest:
+      type: object
+      title: CreateZoneRequest
+      required:
+      - site_id
+      - name
+      properties:
+        external_id:
+          type: string
+        site_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        is_active:
+          type: boolean
     Creative:
       type: object
       title: Creative
@@ -1880,6 +2317,55 @@ components:
           description: RFC 3339 UTC, formatted by Postgres via `to_jsonb`.
         updated_at:
           type: string
+    Site:
+      type: object
+      title: Site
+      required:
+      - id
+      - name
+      - url
+      - aliases
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        external_id:
+          type: string
+        channel_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        url:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    SiteList:
+      type: object
+      title: SiteList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Site'
+        next_cursor:
+          type: string
     TokenListResponse:
       type: object
       title: TokenListResponse
@@ -1988,6 +2474,47 @@ components:
             format: int64
         is_active:
           type: boolean
+    UpdateSiteRequest:
+      type: object
+      title: UpdateSiteRequest
+      properties:
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        channel_id:
+          type: integer
+          format: int64
+        is_active:
+          type: boolean
+    UpdateZoneRequest:
+      type: object
+      title: UpdateZoneRequest
+      properties:
+        name:
+          type: string
+        is_active:
+          type: boolean
+    UpsertSiteByUrlRequest:
+      type: object
+      title: UpsertSiteByUrlRequest
+      required:
+      - url
+      - name
+      properties:
+        url:
+          type: string
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        channel_id:
+          type: integer
+          format: int64
     VersionResponse:
       type: object
       title: VersionResponse
@@ -2012,6 +2539,48 @@ components:
           type: string
         auth:
           $ref: '#/components/schemas/AuthBlock'
+    Zone:
+      type: object
+      title: Zone
+      required:
+      - id
+      - site_id
+      - name
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        external_id:
+          type: string
+        site_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    ZoneList:
+      type: object
+      title: ZoneList
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Zone'
+        next_cursor:
+          type: string
   securitySchemes:
     BearerAuth:
       type: http
