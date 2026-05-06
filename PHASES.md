@@ -353,63 +353,196 @@ manager and leader election running.
 - `API.md` (whole file).
 - `AUTH.md` (whole file).
 
-**Tasks (broad strokes, refined when Phase 2 closes):**
+**Parallelism:** the phase reads top-to-bottom along five rails:
 
-- [ ] **3.1** Tenant model migrations: organizations, projects, RLS
-      policies, the `current_setting('knievel.project_id')` binding.
-      `audit_log` table.
-      Refs: `REQUIREMENTS.md` § 4, § 7.1, § 7.3.
-- [ ] **3.2** Opaque token mint + verify (argon2id), `Principal`
-      extractor, role enum.
-      Refs: `AUTH.md` "Opaque Tokens," "Authorization."
-- [ ] **3.3** First handler: `POST /v1/orgs/{orgId}/projects` —
-      with the cross-tenant negative test. Proves the auth +
-      tenant-resolution + persistence loop end to end.
-      Refs: `API.md` § 2.1.
-- [ ] **3.4** Inventory + demand-chain migrations and CRUD
-      (Advertisers, Campaigns, Flights, Ads, Creatives,
-      CreativeTemplates, Sites, Zones; read-only Channel, Priority,
-      AdType).
+- **Tenancy + auth rail** (3.1 → 3.6) is sequential — every later
+  task assumes RLS-bound projects and a working `Principal`.
+- **Resource-CRUD rail** (3.7 → 3.14) follows once 3.6 lands and
+  parallelizes per-resource (3.10/3.11/3.12/3.13 are independent
+  of each other after the macro in 3.8).
+- **Hot-path rail** (3.15 → 3.19) needs the tenant model and at
+  least one resource (Site) but is otherwise independent of the
+  CRUD rail; selection (3.15) and HMAC (3.16) are independent
+  pure-Rust modules and can land in either order.
+- **Events + periodic-jobs rail** (3.20 → 3.25) needs the leader
+  (3.22) before partition manager (3.23) and rollup (3.24).
+- **JWT + Ad Library + image upload** (3.26 → 3.29) are additive
+  finishers; each unblocks an acceptance scenario.
+
+### Tasks
+
+- [ ] **3.1** Tenant model migration `0002`: `organizations`,
+      `projects`, RLS policies bound on
+      `current_setting('knievel.project_id')` (and `org_id` for
+      org-scoped rows). Tenant-binding helper exposed via testlib
+      (`testlib::tenant::with_project`). Integration test asserts a
+      session bound to project A cannot read rows inserted under
+      project B.
+      Refs: `REQUIREMENTS.md` § 4, § 7.1, § 7.1.1, `AUTH.md`
+      "Authorization."
+- [ ] **3.2** Opaque-token foundation: `auth::opaque` parse +
+      argon2id hash/verify, `auth::role` enum + ordering,
+      migration `0003_api_tokens.sql` (tokens table with RLS by
+      `org_id`), `Principal` poem-openapi extractor (opaque path
+      only — JWT lands in 3.26). Unit tests per `TESTING.md` § 4.1
+      for `auth::opaque::parse`, `auth::opaque::hash`, `auth::role`.
+      Refs: `AUTH.md` "Opaque Tokens," "Authorization,"
+      `REQUIREMENTS.md` § 4.3.
+- [ ] **3.3** First handler — `POST /v1/orgs/{orgId}/projects` and
+      `GET /v1/orgs/{orgId}/projects/{projectId}`. `OrgApi`
+      `OpenApiService` mounted alongside `SystemApi`. Insta-snapshot
+      contract test for `create_returns_201`. Cross-org negative
+      test asserts an org-A token receives `403 wrong_tenant` when
+      addressing org B. Manifest entry not required (org-scoped
+      paths aren't gated by `xtask check-cross-tenant`); the
+      negative test rides in `tests/api/orgs_projects.rs`. Updates
+      `openapi.yaml`.
+      Refs: `API.md` § 2.1, `TESTING.md` § 6.4, § 6.5.
+- [ ] **3.4** Audit-log migration `0004`: `audit_log` (monthly
+      range-partitioned, RLS by `org_id`, append-only enforced via
+      policy — `UPDATE`/`DELETE` rejected). Integration test
+      asserts append-only behavior. No writers yet — first writer
+      lands in 3.6 (token mint), then 3.19 (force.*).
+      Refs: `REQUIREMENTS.md` § 7.3.
+- [ ] **3.5** Idempotency middleware (24 h replay). Migration
+      `0005_idempotency_keys.sql` — per-project store keyed on
+      `(project_id, key, route, body_hash)`. Middleware fits
+      between auth and handler; replay returns cached body with
+      `Idempotent-Replay: true`; body mismatch → `409
+      idempotency_conflict`. Reaper deferred to leader (3.22).
+      Refs: `API.md` "Idempotency," `TESTING.md` § 6.4.
+- [ ] **3.6** Org-level Tokens API — `POST/GET/DELETE
+      /v1/orgs/{orgId}/tokens`. Mint returns the secret exactly
+      once; subsequent reads are metadata-only. Token mint emits
+      one `audit_log` row (first real audit writer). Org-scope
+      cross-tenant negative test included.
+      Refs: `API.md` § 2.2, `AUTH.md` "Opaque Tokens."
+- [ ] **3.7** Inventory + demand-chain migrations. Three migrations
+      sequenced: `0006_demand.sql` (advertisers, campaigns,
+      flights, ads, creatives, creative_templates),
+      `0007_inventory.sql` (sites with aliases, zones),
+      `0008_taxonomy.sql` (channels, priorities, ad_types — seeded
+      defaults). Every table RLS-bound; FK relationships match
+      `API.md` §§ 3.1–3.9.
       Refs: `API.md` §§ 3.1–3.9, `REQUIREMENTS.md` § 5.
-- [ ] **3.5** `crud_contract!` macro — uniform per-resource test
-      contract.
+- [ ] **3.8** `crud_contract!` macro — emits the 11-test table from
+      `TESTING.md` § 6.4 from a single invocation
+      (`create_returns_201`, `create_idempotent_on_external_id`,
+      idempotency-key replay, etag matching, listing/pagination,
+      soft delete, batch atomic, cross-entity FK in batch). One
+      worked instance against `Advertiser` to validate the shape.
       Refs: `TESTING.md` § 6.4.
-- [ ] **3.6** `:batchUpsert` — single transaction, per-row diagnostics.
-      Refs: `API.md` "Write contract."
-- [ ] **3.7** Idempotency middleware (24 h replay window).
-      Refs: `API.md` "Idempotency."
-- [ ] **3.8** Snapshot loader: cold load, LISTEN, 5 s poll backstop,
-      Aurora-failover reconnect.
-      Refs: `REQUIREMENTS.md` § 7.2.
-- [ ] **3.9** Decision API — `POST /v1/projects/{p}/decisions`.
-      `selection::filter`, `priority`, `weighted_random`. HMAC
-      mint + verify with rotation overlap.
+- [ ] **3.9** Demand-chain CRUD (advertisers, campaigns, flights).
+      Each resource gets its `crud_contract!` invocation, handler
+      module, and cross-tenant manifest entry per project-scoped
+      operation.
+      Refs: `API.md` §§ 3.1–3.3.
+- [ ] **3.10** Creative + CreativeTemplate CRUD. CreativeTemplate
+      requires the `poem-openapi` JSON-Schema round-trip spike
+      called out in cross-cutting risk (1) — runs as a
+      proof-of-concept test before the handler lands. Image upload
+      stays deferred to 3.29.
+      Refs: `API.md` § 3.5, § 3.6, cross-cutting risk (1).
+- [ ] **3.11** Ad CRUD — inline-creative variant only; library
+      reference deferred to 3.28 once the Ad Library lands. Schema
+      reserves the `oneOf` shape so 3.28 is additive.
+      Refs: `API.md` § 3.4.
+- [ ] **3.12** Site + Zone CRUD; `:upsertByUrl` natural-key
+      endpoint for sites. Site URL/aliases uniqueness enforced at
+      the table level.
+      Refs: `API.md` § 3.7, § 3.8.
+- [ ] **3.13** Read-only inventory taxonomy endpoints
+      (channels/priorities/ad-types). Seeded by 3.7.
+      Refs: `API.md` § 3.9.
+- [ ] **3.14** `:batchUpsert` — single Postgres transaction with
+      per-row diagnostics matching `API.md` "Write contract."
+      Cross-entity FK validation inside the transaction (a flight
+      created earlier in the array resolves for an ad later in the
+      array). Wired into every CRUD resource that declares it.
+      Refs: `API.md` "Write contract," `TESTING.md` § 6.4.
+- [ ] **3.15** Selection algorithm — `selection::filter` (site /
+      zone / ad_type / date), `selection::priority` (highest
+      non-empty tier wins), `selection::weighted_random` (seeded
+      `StdRng`). Pure-Rust unit tests per `TESTING.md` § 4.1, plus
+      `proptest` for the priority + blocklist invariant.
       Refs: `API.md` § 1, `REQUIREMENTS.md` § 6.1.
-- [ ] **3.10** Decision explainer — `POST .../decisions:explain`.
-      Three-control gate for `force.*` + audit log row.
+- [ ] **3.16** HMAC sign + verify with 8 h rotation overlap.
+      Per-project secret stored on the `projects` row from 3.1.
+      `proptest` over the rotation window confirming `dedup_key`
+      stability across rotation. Cross-cutting risk (3) lands here.
+      Refs: `API.md` § 4 "Signature payload,"
+      `REQUIREMENTS.md` § 6.3.
+- [ ] **3.17** Snapshot loader — cold load, `LISTEN
+      config_changed`, 5 s poll backstop, Aurora-failover
+      reconnect-with-backoff. Snapshot keyed by `(project_id,
+      resource)`. Integration tests under `tests/integration/`
+      cover the load + diff + swap path.
+      Refs: `REQUIREMENTS.md` § 7.2, `TESTING.md` § 5.2.
+- [ ] **3.18** Decision API — `POST
+      /v1/projects/{projectId}/decisions`. Wires snapshot + 3.15 +
+      3.16. HMAC-minted impression/click URLs in the response.
+      Refs: `API.md` § 1.
+- [ ] **3.19** Decision explainer — `POST
+      /v1/projects/{projectId}/decisions:explain`. Three-control
+      gate for `force.*` (`allow_force_decision` project flag,
+      Project Admin role, global kill-switch); each forced call
+      writes one `audit_log` row.
       Refs: `API.md` § 1, `AUTH.md` "Endpoint → minimum role."
-- [ ] **3.11** Event channel + COPY flusher. `events_raw` parent
-      + first leaf partition. Dedup logic.
-      Refs: `REQUIREMENTS.md` § 7.3, § 7.6, `API.md` "Replay,
-      dedup, and counts."
-- [ ] **3.12** Event endpoints `/e/i/{signed}` + `/e/c/{signed}`.
-      Refs: `API.md` § 4.
-- [ ] **3.13** Partition manager + leader election (advisory lock
-      + watchdog).
-      Refs: `REQUIREMENTS.md` § 7.4, § 7.5.
-- [ ] **3.14** `events_rollup` + watermark + leader-elected rollup
-      computation.
+- [ ] **3.20** Events migration `0009_events_raw.sql` — partitioned
+      by day on `ts`, no default partition, no secondary indexes,
+      RLS by `org_id`. First leaf for today included; partition
+      manager creates the rest from 3.23.
+      Refs: `REQUIREMENTS.md` § 7.3, § 7.6.
+- [ ] **3.21** Event channel + COPY flusher. Bounded
+      `tokio::sync::mpsc`, drain every 1–2 s or 5 k events, `COPY`
+      to `events_raw`. Channel saturation → `503
+      event_channel_saturated` on the decision endpoint. `dedup_key`
+      computation per `API.md` "Replay, dedup, and counts."
+      Graceful shutdown drains the channel.
+      Refs: `REQUIREMENTS.md` § 7.6, `API.md` § 4.
+- [ ] **3.22** Leader election — `pg_try_advisory_lock` on a
+      dedicated connection, watchdog ("must complete a maintenance
+      run every N hours" → process exits on miss), `/readyz`
+      reflects leader/follower state. Idempotency-key reaper
+      (3.5 follow-up) hangs off the leader.
+      Refs: `REQUIREMENTS.md` § 7.5.
+- [ ] **3.23** Partition manager — premake 4 days of
+      `events_raw_p<YYYY_MM_DD>` partitions, retention drop with
+      `DETACH PARTITION CONCURRENTLY`. Runs hourly off the 3.22
+      leader handle. Idempotent.
+      Refs: `REQUIREMENTS.md` § 7.4.
+- [ ] **3.24** Migration `0010_events_rollup.sql` + leader-elected
+      hourly rollup compute. Watermark advances monotonically; only
+      `is_duplicate = false` rows feed the rollup.
       Refs: `REQUIREMENTS.md` § 7.3, `REPORTING.md` § "Schema for
       Reporters."
-- [ ] **3.15** JWT validator + JWKS cache + `claim_mapping`. Boot-
-      time auth lint.
-      Refs: `AUTH.md` "JWTs," "Startup Linting."
-- [ ] **3.16** `/version` real auth block.
+- [ ] **3.25** Event endpoints — `GET /e/i/{signed}` (204 default,
+      `?fmt=gif` GIF), `GET /e/c/{signed}` (302 redirect, signed
+      open-redirect block via `?u=`).
+      Refs: `API.md` § 4.
+- [ ] **3.26** JWT validator + JWKS cache + `claim_mapping` +
+      boot-time auth lint. Issuer auto-discovery via
+      `/.well-known/openid-configuration`; per-issuer `kid` index;
+      cache miss triggers a refresh; algorithm allow-list rejects
+      `alg: none` and any `HS*`. Mocked OIDC provider via
+      `wiremock`.
+      Refs: `AUTH.md` "JWTs," "Kubernetes ServiceAccount Tokens,"
+      "Startup Linting."
+- [ ] **3.27** `/version` real auth block — issuers, audiences,
+      algorithms, claim source (`claim` or `claim_mapping` rule
+      count), JWKS URL. Mirrors the startup INFO log line. Updates
+      `openapi.yaml`.
       Refs: `AUTH.md` "Effective-policy visibility."
-- [ ] **3.17** Ad Library (org-scoped) + reference vs inline ad
-      `oneOf`.
+- [ ] **3.28** Ad Library (org-scoped) — migration
+      `0011_ad_library.sql`, CRUD per `API.md` § 2.4, Ad-side
+      `oneOf` reference (`adLibraryItemId`) wired through 3.11 and
+      the snapshot loader. References resolve at decision time.
       Refs: `REQUIREMENTS.md` § 5.1, `API.md` § 2.4, § 3.4.
-- [ ] **3.18** S3-compatible image upload.
+- [ ] **3.29** S3-compatible image upload. `POST
+      /v1/projects/{projectId}/creatives/{id}/image` (multipart),
+      magic-byte sniffing per `REQUIREMENTS.md` § 7.9, returns
+      `imageUrl`. Adapter trait so MinIO/S3/GCS back ends share
+      code.
       Refs: `REQUIREMENTS.md` § 7.9, `API.md` § 3.5.
 
 **Milestone:** Every endpoint in `API.md` returns the documented
