@@ -11,17 +11,6 @@ name: Release Ruby gem
 on:
   push:
     tags: ["v*"]
-  # Manual trigger so the empty knievel-ruby repo can be
-  # bootstrapped without cutting a real server release. Pass the
-  # gem version explicitly (we are not on a tag ref). Subsequent
-  # versioned releases should go through the tag-push path so the
-  # gem version mirrors the server tag automatically.
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Gem + tag version to publish on knievel-ruby (e.g. 0.0.1)"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -58,19 +47,10 @@ jobs:
 
       - name: Resolve gem version + target tag
         id: gem_version
-        env:
-          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            gem="${DISPATCH_VERSION#v}"
-            tag="v${gem}"
-          else
-            gem="${GITHUB_REF_NAME#v}"
-            tag="${GITHUB_REF_NAME}"
-          fi
-          echo "gem=${gem}" >> "$GITHUB_OUTPUT"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "gem=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}"   >> "$GITHUB_OUTPUT"
 
       - name: Seed/refresh openapi-generator config in knievel-ruby
         run: |
