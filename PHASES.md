@@ -103,11 +103,23 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       bookkeeping object. Migration carries an in-line comment
       explaining the deviation; revisit `REQUIREMENTS.md` § 7.2
       next time it changes to align the wording.
-- [ ] **1.7** `xtask lint-migrations` real implementation. The 4
+- [x] **1.7** `xtask lint-migrations` real implementation. All 4
       rules from `REQUIREMENTS.md` § 7.1.1 gate (2). Six fixtures
-      under `xtask/tests/fixtures/migrations/` from
-      `TESTING.md` § 10.1. Wire into CI.
+      from `TESTING.md` § 10.1 land at
+      `xtask/tests/fixtures/migrations/`; six unit tests + a
+      seventh sanity test that lints the real `migrations/`
+      directory. Wired into CI via `xtask-lints` (Phase 1.5).
       Refs: `TESTING.md` § 10.1.
+
+      **Note (1.7):** The implementation strips SQL comments
+      (`--` and `/* */`) before regex matching — without that,
+      prose like `"CREATE TABLE in knievel"` inside a migration's
+      comments tripped rule 3 with a phantom table named `in`.
+      Caught and fixed by the `real_migrations_are_clean` sanity
+      test against `0001_init.sql`. The comment stripper is naive
+      around string literals; if a future migration legitimately
+      embeds `--` inside a single-quoted string we'll need to
+      switch to `pg_query` for proper SQL parsing.
 - [ ] **1.8** `xtask check-cross-tenant` skeleton: walks the
       OpenAPI spec (initially empty), expects every
       `/v1/projects/{p}/...` operation to have a paired test

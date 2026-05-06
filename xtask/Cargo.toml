@@ -10,3 +10,4 @@ publish     = false
 [dependencies]
 anyhow = { workspace = true }
 clap   = { version = "4", features = ["derive"] }
+regex  = "1"
