@@ -882,11 +882,30 @@ manager and leader election running.
       safe to ship before the audit story closes. Rate-limiting
       (60 req/min per token per `API.md`) is a 4.x concern;
       noted as a follow-up.
-- [ ] **3.20** Events migration `0009_events_raw.sql` — partitioned
+- [x] **3.20** Events migration `0009_events_raw.sql` — partitioned
       by day on `ts`, no default partition, no secondary indexes,
       RLS by `org_id`. First leaf for today included; partition
       manager creates the rest from 3.23.
+      Landed as `migrations/0010_events_raw.sql` (the 0009 slot
+      was taken by the HMAC rotation migration in 3.16).
+      Declarative range partitioning by day on `ts`, no default
+      partition (REQUIREMENTS.md § 7.3 — a missing partition is
+      a loud signal). RLS bound on `org_id` per spec — events
+      are the one place we accept the looser binding so
+      cross-project analytics work. Dedup unique constraint
+      lives on `(project_id, kind, dedup_key, ts)` because
+      Postgres won't accept UNIQUE on a partitioned table that
+      omits the partition key. The seed leaf covers all of 2026.
       Refs: `REQUIREMENTS.md` § 7.3, § 7.6.
+
+      **Note (3.20):** Migration is at slot `0010` (not `0009`
+      as the original task numbering suggested). Linter rule 4
+      sees `knievel.org_id` in the policy and accepts the
+      org-only binding (matching the 3.4 generalization for
+      `audit_log`). The `signature_nonce` and `dedup_key`
+      columns are bytea-typed; the COPY flusher (3.21) writes
+      them in their canonical 8-byte / 16-byte forms from
+      `hmac::dedup_key`.
 - [ ] **3.21** Event channel + COPY flusher. Bounded
       `tokio::sync::mpsc`, drain every 1–2 s or 5 k events, `COPY`
       to `events_raw`. Channel saturation → `503
