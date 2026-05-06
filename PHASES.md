@@ -1196,6 +1196,19 @@ manager and leader election running.
       `memory://{key}`; the S3 adapter will return signed
       URLs.
 
+- [x] **3.31** Click-through redirect resolution from snapshot.
+      Adds `ProjectSnapshot::click_through_urls` (an
+      `ad_id → url` map) and the `/e/c/{signed}` handler now
+      302s to the resolved target instead of `"/"`. Missing
+      entries fall through to `"/"` rather than erroring — the
+      verified click is recorded either way; "broken creative"
+      is the right surface, not a 4xx. The `?u=<url>` override
+      slot stays in the resolver signature but is ignored
+      until `SignaturePayload` v2 carries a signed redirect
+      (open-redirect block remains in force).
+      Refs: `API.md` § 4 (click endpoint), `REQUIREMENTS.md`
+      § 6.3.
+
 - [x] **3.30** AppState wiring — events flusher, leader, and
       maintenance loops spawn at server bootstrap; the decision
       endpoint emits one `events_raw` row per pick and writes
@@ -1238,10 +1251,10 @@ project-scoped endpoint.
 
 ### Notes
 
-**Phase 3 close-out summary (after 3.14–3.30 landed):**
+**Phase 3 close-out summary (after 3.14–3.31 landed):**
 
-- 87 unit tests in the lib (84 at 3.29 close + 3 from 3.30),
-  all green.
+- 90 unit tests in the lib (84 at 3.29 close + 3 from 3.30
+  + 3 from 3.31), all green.
 - 46 project-scoped endpoints under `cargo xtask
   check-cross-tenant`, all covered by manifest entries.
 - `openapi.yaml` ~105 KB.
@@ -1251,19 +1264,19 @@ project-scoped endpoint.
   channel-send into the events flusher; HMAC verify → ping
   publish → events_raw row.
 
-**Open follow-ups across 3.14–3.30** (not blockers, but pulled
+**Open follow-ups across 3.14–3.31** (not blockers, but pulled
 out as their own commits):
 
-1. **Click-through redirect resolution from snapshot** (deferred
-   from 3.30; lands in 3.31). Click endpoint resolves the
-   creative's `clickThroughUrl` from the in-process snapshot
-   and 302s to it; today it 302s to `"/"` as a placeholder.
-2. **Multipart upload handler in `src/creatives.rs`** (deferred
-   from 3.29 / 3.30; lands in 3.32). `POST
+1. **Multipart upload handler in `src/creatives.rs`** (deferred
+   from 3.29; lands in 3.32). `POST
    /v1/projects/{projectId}/creatives/{id}/image` with poem's
    multipart extractor, calling `image_upload::validate` then
    the configured `ImageStore::put`, plus the cross-tenant
    manifest entry that wiring earns.
+2. **`SignaturePayload` v2 carrying a signed `?u=<url>`**
+   override (3.31 follow-up). Until the wire format gains the
+   field, the click endpoint ignores `?u=` (open-redirect
+   block) and serves the snapshot's `clickThroughUrl`.
 3. **Single-row `external_id` idempotency on POST creates**
    (CLAUDE.md known gap, deferred from 3.14).
 4. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;

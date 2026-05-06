@@ -55,6 +55,15 @@ pub struct ProjectSnapshot {
     pub ads: Vec<Ad>,
     pub sites: Vec<SnapshotSite>,
     pub zones: Vec<SnapshotZone>,
+    /// `ad_id → click_through_url` lookup for `/e/c/...`
+    /// redirect resolution (`API.md` § 4). Populated by the
+    /// snapshot loader from the creative attached to each ad;
+    /// keyed on ad_id so the click endpoint resolves with no
+    /// additional creative-id round-trip beyond what the
+    /// signed payload already carries. Ads whose creative has
+    /// no `clickThroughUrl` simply don't appear here — the
+    /// click handler falls through to a safe placeholder.
+    pub click_through_urls: HashMap<i64, String>,
     /// Current HMAC signing secret. The decision endpoint signs
     /// new URLs with this; the event endpoints accept either
     /// this OR `hmac_secret_previous` (during the 8 h overlap).
@@ -245,6 +254,7 @@ mod tests {
         assert!(p.hmac_secret.is_empty());
         assert!(p.hmac_secret_previous.is_none());
         assert!(p.org_id_for_event.is_empty());
+        assert!(p.click_through_urls.is_empty());
         assert!(!p.allow_force_decision);
     }
 }

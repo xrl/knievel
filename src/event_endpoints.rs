@@ -114,21 +114,39 @@ pub async fn click(
     );
 
     // Resolve the redirect target from the snapshot's
-    // creative entry. The snapshot's `Ad` doesn't carry
-    // `click_through_url` directly today (the consumer side is
-    // a 3.18 follow-up); for v0 the redirect is a placeholder
-    // so the contract is testable.
-    let target = query
-        .0
-        .u
-        .as_deref()
-        .filter(|_| false) // open-redirect block until ?u= signing lands
-        .unwrap_or("/");
+    // `click_through_urls` lookup, keyed on the ad id baked
+    // into the signed payload. A missing entry falls through
+    // to a safe placeholder rather than an error — the URL
+    // verified, the click is recorded, the caller's "broken
+    // creative" telemetry is the right surface for the
+    // missing target. `?u=<url>` is the spec's open-redirect
+    // override but only when signed into the payload, which
+    // the current `SignaturePayload` doesn't carry yet
+    // (follow-up paired with HMAC v2 wire format).
+    let target = resolve_redirect(&snap, &project_id, payload.ad_id, query.0.u.as_deref());
 
     Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, target)
         .finish()
+}
+
+/// Look up the click-through target. `signed_override` is the
+/// `?u=<url>` value if present; today we ignore it (open-redirect
+/// block) but the parameter stays in the signature so the call
+/// site reads as the spec describes.
+fn resolve_redirect(
+    snap: &Snapshot,
+    project_id: &str,
+    ad_id: i64,
+    signed_override: Option<&str>,
+) -> String {
+    let _ = signed_override; // wired when SignaturePayload v2 lands
+    snap.projects
+        .get(project_id)
+        .and_then(|p| p.click_through_urls.get(&ad_id))
+        .cloned()
+        .unwrap_or_else(|| "/".to_string())
 }
 
 fn emit_event(
@@ -268,5 +286,57 @@ mod tests {
     fn transparent_gif_is_43_bytes() {
         // API.md § 4 explicitly specifies the length.
         assert_eq!(TRANSPARENT_GIF.len(), 43);
+    }
+
+    fn snap_with_click_through(project_id: &str, ad_id: i64, url: &str) -> Snapshot {
+        use crate::snapshot::ProjectSnapshot;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        let mut click_through_urls = HashMap::new();
+        click_through_urls.insert(ad_id, url.to_string());
+        let mut projects = HashMap::new();
+        projects.insert(
+            project_id.to_string(),
+            Arc::new(ProjectSnapshot {
+                project_id: project_id.into(),
+                org_id_for_event: "org_a".into(),
+                click_through_urls,
+                ..ProjectSnapshot::default()
+            }),
+        );
+        Snapshot {
+            config_version: 1,
+            projects,
+        }
+    }
+
+    #[test]
+    fn resolve_redirect_returns_creative_url_when_known() {
+        let snap = snap_with_click_through("pj_a", 42, "https://acme.example/sale");
+        assert_eq!(
+            resolve_redirect(&snap, "pj_a", 42, None),
+            "https://acme.example/sale"
+        );
+    }
+
+    #[test]
+    fn resolve_redirect_falls_through_when_unknown() {
+        let snap = snap_with_click_through("pj_a", 42, "https://acme.example/sale");
+        // Unknown ad_id → placeholder.
+        assert_eq!(resolve_redirect(&snap, "pj_a", 99, None), "/");
+        // Unknown project → placeholder.
+        assert_eq!(resolve_redirect(&snap, "pj_b", 42, None), "/");
+    }
+
+    #[test]
+    fn resolve_redirect_ignores_unsigned_override() {
+        // Until SignaturePayload v2 carries a signed redirect,
+        // `?u=<url>` is treated as advisory and dropped — the
+        // resolver picks the snapshot's URL regardless.
+        let snap = snap_with_click_through("pj_a", 42, "https://safe.example");
+        assert_eq!(
+            resolve_redirect(&snap, "pj_a", 42, Some("https://attacker.example")),
+            "https://safe.example"
+        );
     }
 }
