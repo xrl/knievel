@@ -1431,10 +1431,12 @@ flows from a working binary in a real container.
       Refs: `REQUIREMENTS.md` § 8 item 5, `MIGRATION_RX.md`
       compose example, `TESTING.md` § 12.9, § 10.3 (release
       security checklist — cosign attestation lives here).
-- [ ] **4.4** `charts/knievel` Helm chart; `helm lint` +
+- [x] **4.4** `charts/knievel` Helm chart; `helm lint` +
       `kubeconform` gate. Default `values.yaml` pins
       `image.repository: ghcr.io/xrl/knievel` and `image.tag:
-      latest` (operator overrides per environment).
+      ""` (defaults to `Chart.AppVersion`; operator overrides
+      per environment, including digest pinning via a `tag`
+      starting with `sha256:`).
       Refs: `REQUIREMENTS.md` § 8.1.
 - [ ] **4.5** Acceptance scenarios ACC-01..30, run against
       the compose stack from 4.1.
@@ -1591,6 +1593,41 @@ action@v6`, `sigstore/cosign-installer@v3`,
 `softprops/action-gh-release@v2`) keep the surprise surface low,
 and the YAML parses clean (`python3 -c 'import yaml;
 yaml.safe_load(...)'`).
+
+**Note (4.4):** Chart layout under `charts/knievel/` follows the
+canonical `helm create` shape — `Chart.yaml`, `values.yaml`,
+`templates/_helpers.tpl`, `templates/{deployment,service,
+configmap,serviceaccount,ingress,servicemonitor,NOTES}.yaml`.
+The ConfigMap renders the figment-shaped `config.yaml`
+(REQUIREMENTS.md § 8.1's exact value surface). Secrets are
+projected into the pod as env vars (`KNIEVEL_DB_USER`,
+`KNIEVEL_DB_PASSWORD`, `KNIEVEL_SENTRY_DSN`) and the rendered
+config references them via `${VAR}` interpolation so plaintext
+never lands in the ConfigMap. The Deployment carries a
+`checksum/config` annotation = `sha256sum` of the rendered
+ConfigMap so a values-only `helm upgrade` rolls the pods.
+
+`image.tag` honors a digest form: a value starting with
+`sha256:` renders as `repository@sha256:...` (immutable pin),
+anything else as `repository:tag`. Pairs naturally with the
+`sha-<short>` tag the `main-image.yml` workflow publishes per
+commit.
+
+CI gate (`.github/workflows/ci.yml` `helm-lint` job, no longer
+gated on `if: false`): installs `helm v3.16.2` + `kubeconform
+v0.6.7`, runs `helm lint`, then `helm template` with all
+optional toggles on (Ingress + ServiceMonitor) piped through
+`kubeconform -strict -kubernetes-version 1.30.0` against the
+default schema set plus the
+`datreeio/CRDs-catalog` for the
+`monitoring.coreos.com/v1` ServiceMonitor schema. Locally I get
+`6 resources found … Valid: 6, Invalid: 0`.
+
+The chart `publish` step in `release.yml` stays gated until
+Phase 5.8 (it'll `helm package` + push to an OCI registry,
+ideally `ghcr.io/xrl/charts/knievel`). The chart is usable from
+the working tree today (`helm install knievel ./charts/knievel
+-f my-values.yaml`).
 
 ---
 

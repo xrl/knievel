@@ -124,10 +124,37 @@ jobs:
     name: helm lint + kubeconform
     needs: prime
     runs-on: ubuntu-latest
-    if: false   # Phase 4.5 activates
     steps:
       - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 4.5 — charts/knievel + helm lint + kubeconform"
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: helm lint
+        run: helm lint charts/knievel
+      # Render with every optional toggle on so kubeconform sees
+      # the Ingress + ServiceMonitor branches too. The OCI CRD
+      # catalog provides the ServiceMonitor schema since it isn't
+      # in the default Kubernetes schema set.
+      - name: helm template + kubeconform
+        run: |
+          helm template knievel charts/knievel \
+            --set database.host=aurora.example.com \
+            --set database.name=knievel \
+            --set database.existingSecret=knievel-db \
+            --set ingress.enabled=true \
+            --set 'ingress.hosts[0].host=knievel.example.com' \
+            --set 'ingress.hosts[0].paths[0].path=/' \
+            --set 'ingress.hosts[0].paths[0].pathType=Prefix' \
+            --set serviceMonitor.enabled=true \
+            > /tmp/knievel-rendered.yaml
+          kubeconform -strict -kubernetes-version 1.30.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -summary /tmp/knievel-rendered.yaml
 
   build-image:
     name: build container image

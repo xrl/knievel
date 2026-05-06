@@ -1,0 +1,146 @@
+# Default values for knievel.
+# Spec ref: REQUIREMENTS.md § 8.1 — every block here corresponds to
+# a section of the rendered /etc/knievel/config.yaml.
+
+image:
+  repository: ghcr.io/xrl/knievel
+  # When empty, the chart uses .Chart.AppVersion. Override to pin
+  # a specific tag (`vX.Y.Z`) or an immutable digest
+  # (`sha256:...`); the rendered Deployment uses the digest form
+  # if `tag` starts with `sha256:`.
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 2
+
+# Pod-level annotations and labels (e.g. workload-identity hints).
+podAnnotations: {}
+podLabels: {}
+
+# Resource budget per REQUIREMENTS.md § 8 ("right-sized for v0").
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# Aurora cluster writer endpoint.
+database:
+  host: ""
+  port: 5432
+  name: ""
+  schema: knievel
+  sslMode: require
+  # Secret holding `username` + `password` keys (override via
+  # `userKey` / `passwordKey`). Required.
+  existingSecret: ""
+  userKey: username
+  passwordKey: password
+  maxConnections: 8
+  autoMigrate: true
+
+events:
+  retentionDays: 30
+  flushIntervalMs: 1000
+  flushBatchSize: 5000
+  channelCapacity: 10000
+
+decisions:
+  forceOverridesEnabled: false
+
+hmac:
+  # Secret holding the default-key material for new projects.
+  existingSecret: ""
+  key: hmac-default
+
+sentry:
+  enabled: false
+  existingSecret: ""
+  dsnKey: dsn
+  environment: ""
+  tracesSampleRate: 0.0
+  release: ""
+
+otel:
+  enabled: false
+  endpoint: ""
+  serviceName: knievel
+  resourceAttributes: {}
+
+logging:
+  level: info
+  format: json
+  decisionsSampleRate: 0.01
+
+api:
+  publicBaseUrl: ""
+  bindAddr: "0.0.0.0:8080"
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts: []
+    # - host: knievel.example.com
+    #   paths:
+    #     - path: /
+    #       pathType: Prefix
+  tls: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+# Topology / scheduling. Leave empty for single-zone defaults; the
+# chart README walks through the zone-spread recipe.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# Probes for the standard /healthz + /readyz endpoints.
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 2
+    periodSeconds: 5
+    timeoutSeconds: 1
+    failureThreshold: 3

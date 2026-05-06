@@ -1,0 +1,28 @@
+{{ include "knievel.fullname" . }} v{{ default .Chart.AppVersion .Values.image.tag }} installed in namespace "{{ .Release.Namespace }}".
+
+Image:    {{ include "knievel.image" . }}
+Replicas: {{ .Values.replicaCount }}
+
+Tail logs:
+  kubectl -n {{ .Release.Namespace }} logs -f deployment/{{ include "knievel.fullname" . }}
+
+Probe the API in-cluster:
+  kubectl -n {{ .Release.Namespace }} run --rm -it --image=curlimages/curl curl-{{ randAlphaNum 5 | lower }} -- \
+    sh -c 'curl -fsS http://{{ include "knievel.fullname" . }}/healthz; echo'
+
+{{- if not .Values.database.existingSecret }}
+
+⚠  database.existingSecret is empty. Set it to a Secret with
+   `username` and `password` keys (or override `database.userKey`
+   and `database.passwordKey`) before traffic arrives — the
+   binary will start but `/readyz` will stay 503 until it can
+   reach Postgres.
+{{- end }}
+
+{{- if not .Values.api.publicBaseUrl }}
+
+⚠  api.publicBaseUrl is empty. The minted impression / click
+   URLs in decision responses will use the request's host
+   header; pin a stable hostname here when an Ingress / LB sits
+   in front (REQUIREMENTS.md § 8.1).
+{{- end }}

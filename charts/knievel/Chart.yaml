@@ -1,0 +1,25 @@
+apiVersion: v2
+name: knievel
+description: |
+  Knievel — fearlessly fast ad delivery that steals the show.
+  First-class deployment artifact per REQUIREMENTS.md § 8 item 6
+  and § 8.1. Renders values into a `config.yaml` ConfigMap that
+  the binary loads via figment; secrets are projected as env
+  vars and referenced via `${VAR}` interpolation in the rendered
+  config so plaintext doesn't land in the ConfigMap.
+type: application
+# Phase 4.4 ships the chart skeleton; Phase 5 cuts a stable tag
+# matching the binary version. Until then both are 0.1.0.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/xrl/knievel
+sources:
+  - https://github.com/xrl/knievel
+icon: https://avatars.githubusercontent.com/u/1
+keywords:
+  - ad-server
+  - ad-decisioning
+  - rust
+maintainers:
+  - name: knievel maintainers
+    url: https://github.com/xrl/knievel

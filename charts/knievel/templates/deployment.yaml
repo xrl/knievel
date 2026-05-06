@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "knievel.fullname" . }}
+  labels:
+    {{- include "knievel.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "knievel.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Forces a rollout when the rendered ConfigMap changes
+        # (per REQUIREMENTS.md § 8.1).
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "knievel.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "knievel.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: knievel
+          image: {{ include "knievel.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: KNIEVEL_CONFIG
+              value: /etc/knievel/config.yaml
+            {{- if .Values.database.existingSecret }}
+            - name: KNIEVEL_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.userKey }}
+            - name: KNIEVEL_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.passwordKey }}
+            {{- end }}
+            {{- if and .Values.sentry.enabled .Values.sentry.existingSecret }}
+            - name: KNIEVEL_SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sentry.existingSecret }}
+                  key: {{ .Values.sentry.dsnKey }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/knievel
+              readOnly: true
+            # readOnlyRootFilesystem requires a writable scratch
+            # somewhere; sqlx's connection cache and figment's
+            # interpolation tempfiles land here.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "knievel.fullname" . }}-config
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
