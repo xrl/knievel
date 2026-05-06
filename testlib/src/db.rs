@@ -73,10 +73,7 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
     let migrator = sqlx::migrate::Migrator::new(migrations_dir())
         .await
         .context("loading migrations")?;
-    migrator
-        .run(&pool)
-        .await
-        .context("applying migrations")?;
+    migrator.run(&pool).await.context("applying migrations")?;
 
     Ok(EphemeralDb { pool, url, name })
 }
@@ -127,11 +124,7 @@ mod tests {
     #[test]
     fn url_dbname_replacement() {
         assert_eq!(
-            replace_dbname_in_url(
-                "postgres://u:p@h:5432/old?sslmode=require",
-                "new"
-            )
-            .unwrap(),
+            replace_dbname_in_url("postgres://u:p@h:5432/old?sslmode=require", "new").unwrap(),
             "postgres://u:p@h:5432/new?sslmode=require"
         );
         assert_eq!(

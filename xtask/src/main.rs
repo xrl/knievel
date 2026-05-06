@@ -11,7 +11,10 @@ mod openapi;
 mod test_shape;
 
 #[derive(Parser)]
-#[command(name = "xtask", about = "Repo-internal CLI: linters, codegen, drift checks")]
+#[command(
+    name = "xtask",
+    about = "Repo-internal CLI: linters, codegen, drift checks"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -45,10 +48,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::LintMigrations { path } => lint_migrations::run(path),
-        Cmd::CheckCrossTenant        => check_cross_tenant::run(),
-        Cmd::Openapi { check }       => openapi::run(check),
-        Cmd::TestShape               => test_shape::run(),
-        Cmd::CheckDocFences          => check_doc_fences::run(),
-        Cmd::CheckApiDoc             => check_api_doc::run(),
+        Cmd::CheckCrossTenant => check_cross_tenant::run(),
+        Cmd::Openapi { check } => openapi::run(check),
+        Cmd::TestShape => test_shape::run(),
+        Cmd::CheckDocFences => check_doc_fences::run(),
+        Cmd::CheckApiDoc => check_api_doc::run(),
     }
 }

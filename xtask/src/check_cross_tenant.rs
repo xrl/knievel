@@ -46,18 +46,16 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    let raw = fs::read_to_string(spec_path)
-        .with_context(|| format!("reading {SPEC_PATH}"))?;
-    let spec: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .with_context(|| format!("parsing {SPEC_PATH} as YAML"))?;
+    let raw = fs::read_to_string(spec_path).with_context(|| format!("reading {SPEC_PATH}"))?;
+    let spec: serde_yaml::Value =
+        serde_yaml::from_str(&raw).with_context(|| format!("parsing {SPEC_PATH} as YAML"))?;
 
     let project_scoped = collect_project_scoped_endpoints(&spec);
 
     let manifest: Manifest = if Path::new(MANIFEST_PATH).exists() {
         let raw = fs::read_to_string(MANIFEST_PATH)
             .with_context(|| format!("reading {MANIFEST_PATH}"))?;
-        toml::from_str(&raw)
-            .with_context(|| format!("parsing {MANIFEST_PATH}"))?
+        toml::from_str(&raw).with_context(|| format!("parsing {MANIFEST_PATH}"))?
     } else {
         Manifest::default()
     };
@@ -103,18 +101,21 @@ fn collect_project_scoped_endpoints(spec: &serde_yaml::Value) -> Vec<(String, St
     };
     let mut out = Vec::new();
     for (path_key, methods) in paths {
-        let Some(path) = path_key.as_str() else { continue };
+        let Some(path) = path_key.as_str() else {
+            continue;
+        };
         if !is_project_scoped(path) {
             continue;
         }
-        let Some(methods) = methods.as_mapping() else { continue };
+        let Some(methods) = methods.as_mapping() else {
+            continue;
+        };
         for (m_key, _) in methods {
-            let Some(method) = m_key.as_str() else { continue };
+            let Some(method) = m_key.as_str() else {
+                continue;
+            };
             let upper = method.to_uppercase();
-            if matches!(
-                upper.as_str(),
-                "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
-            ) {
+            if matches!(upper.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE") {
                 out.push((path.to_string(), upper));
             }
         }

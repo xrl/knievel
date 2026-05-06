@@ -43,11 +43,9 @@ async fn migrations_apply_and_config_version_increments() -> Result<()> {
 
     // Migration tracking row exists in the knievel schema (proof
     // that search_path scoping worked as intended).
-    let count: i64 = sqlx::query_scalar(
-        "SELECT count(*)::bigint FROM knievel._sqlx_migrations",
-    )
-    .fetch_one(&db.pool)
-    .await?;
+    let count: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM knievel._sqlx_migrations")
+        .fetch_one(&db.pool)
+        .await?;
     assert!(count >= 1, "at least one migration tracked, got {count}");
 
     testlib::db::ephemeral_drop(db).await?;

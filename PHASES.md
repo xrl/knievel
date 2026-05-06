@@ -180,11 +180,22 @@ once 2.3 lands.
 
 ### Tasks
 
-- [ ] **2.1** figment config loader + typed `Config` struct
-      against `config.example.yaml`. Layer: defaults → file → env.
-      `${VAR}` and `${VAR:default}` interpolation; missing required
-      vars are a hard error at startup.
+- [x] **2.1** figment config loader + typed `Config` struct.
+      Layer: defaults → `config.yaml` (path from `KNIEVEL_CONFIG`)
+      → env overrides under `KNIEVEL_` prefix with `__` delimiter.
+      `${VAR}` and `${VAR:default}` interpolation applied to the
+      raw YAML before parse; missing vars without defaults are a
+      hard error reporting all unresolved names at once.
+      Six inline tests cover interpolation behaviour and the
+      no-file/no-env defaults path.
       Refs: `REQUIREMENTS.md` § 10.1.
+
+      **Note (2.1):** Typed sections today are `api`, `database`,
+      `logging`, `tracing`, `errors` (sentry/otel sub-blocks
+      stubbed). Remaining sections (`auth`, `events`, `hmac`,
+      `metrics`) are typed up as their consumer features land.
+      Module carries `#![allow(dead_code)]` to keep clippy `-D
+      warnings` happy until consumers land.
 - [ ] **2.2** `tracing-subscriber` JSON output + `EnvFilter`. Pulls
       level/format from config. OTel and Sentry initialization is
       stubbed (booleans honored, no exporters wired yet —

@@ -120,14 +120,11 @@ pub(crate) fn lint_file(file: &Path, content: &str) -> Vec<String> {
         .unwrap()
         .is_match(content);
 
-    let create_table = Regex::new(
-        r"(?i)create\s+table(?:\s+if\s+not\s+exists)?\s+(?:(\w+)\.)?(\w+)",
-    )
-    .unwrap();
-    let enable_rls = Regex::new(
-        r"(?i)alter\s+table\s+(?:(\w+)\.)?(\w+)\s+enable\s+row\s+level\s+security",
-    )
-    .unwrap();
+    let create_table =
+        Regex::new(r"(?i)create\s+table(?:\s+if\s+not\s+exists)?\s+(?:(\w+)\.)?(\w+)").unwrap();
+    let enable_rls =
+        Regex::new(r"(?i)alter\s+table\s+(?:(\w+)\.)?(\w+)\s+enable\s+row\s+level\s+security")
+            .unwrap();
 
     let mut tables_in_knievel: Vec<String> = Vec::new();
     for cap in create_table.captures_iter(content) {
@@ -160,8 +157,7 @@ pub(crate) fn lint_file(file: &Path, content: &str) -> Vec<String> {
     // Rule 4: every CREATE POLICY's USING clause must reference
     // the tenant binding `knievel.project_id`. Match non-greedy
     // through to a balancing `)` keeping the body of USING(...).
-    let policy = Regex::new(r"(?is)create\s+policy[^;]*?\busing\s*\(([^;]*?)\)")
-        .unwrap();
+    let policy = Regex::new(r"(?is)create\s+policy[^;]*?\busing\s*\(([^;]*?)\)").unwrap();
     for cap in policy.captures_iter(content) {
         let using = cap.get(1).unwrap().as_str();
         if !using.to_lowercase().contains("knievel.project_id") {
