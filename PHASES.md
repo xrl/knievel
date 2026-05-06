@@ -999,11 +999,32 @@ manager and leader election running.
       dates and post-2100 leap-year corrections. The hourly
       tick is the spec default; configurable via a future
       `partitions.tick_secs` config field.
-- [ ] **3.24** Migration `0010_events_rollup.sql` + leader-elected
+- [x] **3.24** Migration `0010_events_rollup.sql` + leader-elected
       hourly rollup compute. Watermark advances monotonically; only
       `is_duplicate = false` rows feed the rollup.
+      Landed as `migrations/0011_events_rollup.sql` (slot
+      shifted: 0009 = HMAC rotation, 0010 = events_raw).
+      Schema mirrors `REPORTING.md` "Schema for Reporters" —
+      `(hour, project_id, site_id, zone_id, flight_id, ad_id,
+      creative_id, kind, count)` plus a single-row
+      `events_rollup_watermark` table for the completeness
+      signal. `src/rollup.rs::run_once` aggregates one hour at a
+      time in a catch-up loop, skipping `is_duplicate = true`
+      rows. The aggregate INSERT uses `ON CONFLICT DO UPDATE
+      SET count = EXCLUDED.count` so re-running a closed hour
+      produces the same final state — idempotent. The leader
+      writes the new watermark after each successful pass.
+      Two unit tests pin tick interval and the on-conflict
+      idempotency clause.
       Refs: `REQUIREMENTS.md` § 7.3, `REPORTING.md` § "Schema for
       Reporters."
+
+      **Note (3.24):** Watermark monotonicity isn't enforced
+      schema-side — the loop never rolls back, so a manual
+      `UPDATE` to a lower watermark would re-aggregate (which
+      idempotency makes safe). Adding a `CHECK (watermark >=
+      OLD.watermark)` would require a trigger; deferring to a
+      follow-up since the leader is the sole writer.
 - [ ] **3.25** Event endpoints — `GET /e/i/{signed}` (204 default,
       `?fmt=gif` GIF), `GET /e/c/{signed}` (302 redirect, signed
       open-redirect block via `?u=`).

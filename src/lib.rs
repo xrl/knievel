@@ -26,6 +26,7 @@ pub mod leader;
 pub mod observability;
 pub mod orgs;
 pub mod partitions;
+pub mod rollup;
 pub mod selection;
 pub mod server;
 pub mod sites;
