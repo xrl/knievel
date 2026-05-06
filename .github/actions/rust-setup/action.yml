@@ -1,0 +1,30 @@
+name: 'rust-setup'
+description: >-
+  Checkout, install the Rust toolchain pinned in rust-toolchain.toml,
+  and restore the shared cargo cache. Single source of truth for
+  every Rust job in the workflows.
+
+inputs:
+  shared-key:
+    description: 'rust-cache shared-key (defaults to knievel-ci so all jobs share)'
+    required: false
+    default: 'knievel-ci'
+  components:
+    description: 'Comma-separated extra rustup components'
+    required: false
+    default: 'rustfmt,clippy'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: '1.94'
+        components: ${{ inputs.components }}
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.shared-key }}
+        cache-on-failure: 'true'

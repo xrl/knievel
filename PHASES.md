@@ -71,9 +71,11 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       land its real implementation.
       Refs: `TESTING.md` § 10.1, § 12.5, § 12.7,
       `DOCUMENTATION_PLAN.md` § 11.2.
-- [ ] **1.4** `.github/actions/rust-setup/action.yml` composite —
-      checkout + toolchain + `Swatinem/rust-cache@v2` with
-      `shared-key: knievel-ci`.
+- [x] **1.4** `.github/actions/rust-setup/action.yml` composite —
+      checkout + `dtolnay/rust-toolchain@stable` pinned to `1.94` +
+      `Swatinem/rust-cache@v2` with default `shared-key:
+      knievel-ci`. Inputs allow per-job override of `shared-key`
+      and `components` for the rare case a job needs them.
       Refs: `TESTING.md` § 12.2, § 12.10.
 - [ ] **1.5** `.github/workflows/ci.yml` + `nightly.yml` +
       `release.yml` skeletons matching the per-PR DAG.
