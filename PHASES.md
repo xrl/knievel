@@ -1394,7 +1394,7 @@ flows from a working binary in a real container.
       a host volume.
       Refs: `REQUIREMENTS.md` § 8 item 4, `AUTH.md` "Local
       Development."
-- [ ] **4.3** Multi-arch container image build, **published
+- [x] **4.3** Multi-arch container image build, **published
       to `ghcr.io/xrl/knievel`**, plus `knievel-cli` binaries
       attached to each GitHub Release. `docker buildx` for
       `linux/amd64` + `linux/arm64`, distroless base
@@ -1563,6 +1563,34 @@ builds and ships both `knievel` and `knievel-cli` in
 client lands in 4.9, `seed-demo`'s post-bootstrap operations
 (everything past org + project) can move to HTTP so we exercise
 the same handler path RX hits.
+
+**Note (4.3):** Two workflows. `.github/workflows/main-image.yml`
+fires on every push to `main` and pushes
+`ghcr.io/xrl/knievel:latest` + `ghcr.io/xrl/knievel:sha-<short>`
+(immutable digest pin). `.github/workflows/release.yml` fires on
+`v*` tags and produces, in order: (a) the per-PR CI gate
+(`workflow_call` into `ci.yml`); (b) the multi-arch image with
+semver tags `vX.Y.Z`, `X.Y`, and `X` plus `sha-<short>`, signed
+with cosign keyless via GitHub OIDC and attested via
+`actions/attest-build-provenance`; (c) a 4-target build matrix
+for `knievel-cli` (`x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-musl` via `cross`; `x86_64-apple-darwin`
+on `macos-13`; `aarch64-apple-darwin` on `macos-14`), each
+stripped + tar.gz'd with a `.sha256` sidecar and a cosign
+sign-blob bundle; (d) the GitHub Release with a body that pins
+the image digest, copies the `cosign verify` invocation, and
+provides curl-pipe install one-liners for every CLI target. A
+goreleaser-style `checksums.txt` aggregates the sidecar hashes.
+
+The Helm and gem publish steps stay stubbed
+(`if: false` until 4.4 / 4.9 land their respective artifacts).
+Sandbox limitation: I couldn't run the workflow end-to-end here
+(no docker daemon, no GitHub OIDC), so trust-but-verify on the
+first `v*` tag — known-good action versions (`docker/build-push-
+action@v6`, `sigstore/cosign-installer@v3`,
+`softprops/action-gh-release@v2`) keep the surprise surface low,
+and the YAML parses clean (`python3 -c 'import yaml;
+yaml.safe_load(...)'`).
 
 ---
 

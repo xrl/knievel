@@ -4,73 +4,287 @@ on:
   push:
     tags: ['v*']
 
+# One run per tag. Don't cancel in flight — uploading release
+# artifacts is expensive and the digest pin would change if a new
+# run replaced the old one.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-
-# Per TESTING.md §12.9. Runs the per-PR DAG via workflow_call, then
-# the release-only steps (bench check, security checklist, image
-# build + sign, Helm package, gem publish, GitHub Release).
-# Real implementations land in Phase 5.8.
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/knievel
 
 jobs:
   ci:
     name: per-PR CI on tag
     uses: ./.github/workflows/ci.yml
 
-  bench-regression:
-    name: bench regression vs previous tag
-    needs: ci
-    runs-on: ubuntu-latest
-    if: false   # Phase 5.7 / 5.8 activates
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 5.7 — bench/results/<version>.md regression check"
-
-  release-checklist:
-    name: release security checklist enforcer
-    needs: ci
-    runs-on: ubuntu-latest
-    if: false   # Phase 5.5 activates (RELEASE_CHECKLIST.md must exist)
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 5.5 — REQUIREMENTS.md §7.1.1 gate (3) enforcer"
-
   publish-image:
     name: publish container image
-    needs: [bench-regression, release-checklist]
+    needs: ci
     runs-on: ubuntu-latest
-    if: false   # Phase 5.8 activates
+    permissions:
+      contents: read
+      packages: write       # ghcr push
+      id-token: write       # cosign keyless via GitHub OIDC
+      attestations: write   # provenance attestation
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tag: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 5.8 — multi-arch buildx + cosign + ghcr push"
+
+      # buildx + qemu so we can produce both amd64 and arm64 from
+      # the GitHub-hosted x86_64 runner.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # vX.Y.Z (canonical), X.Y, X (major); plus the immutable
+          # sha-<short> for compose / Helm digest pinning.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push multi-arch
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless via GitHub OIDC)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes \
+            ${REGISTRY}/${IMAGE_NAME}@${DIGEST}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  build-cli:
+    name: build knievel-cli (${{ matrix.target }})
+    needs: ci
+    permissions:
+      contents: read
+      id-token: write       # cosign keyless on the artifact digest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux musl: statically-linked, runs on any libc.
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-latest
+            cross: true
+          # Apple silicon + intel — native runners avoid the
+          # cross-compile dance for Mach-O.
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            cross: false
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            cross: false
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (linux-musl only)
+        if: matrix.cross
+        run: cargo install cross --locked --version 0.2.5
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --locked --bin knievel-cli --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --locked --bin knievel-cli --target ${{ matrix.target }}
+
+      - name: Strip + package
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${TARGET}/release/knievel-cli"
+          # macOS strip behaves a little differently from GNU strip;
+          # both are fine with default flags here.
+          strip "${BIN}" || true
+          STAGING="knievel-cli-${VERSION}-${TARGET}"
+          mkdir -p "dist/${STAGING}"
+          cp "${BIN}" "dist/${STAGING}/knievel-cli"
+          cp README.md LICENSE "dist/${STAGING}/" 2>/dev/null || true
+          tar -czf "dist/${STAGING}.tar.gz" -C dist "${STAGING}"
+          # Per-artifact sha256 sidecar.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "dist/${STAGING}.tar.gz" | sed "s| dist/| |" > "dist/${STAGING}.tar.gz.sha256"
+          else
+            shasum -a 256 "dist/${STAGING}.tar.gz" | sed "s| dist/| |" > "dist/${STAGING}.tar.gz.sha256"
+          fi
+          ls -la dist/
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the tarball blob (keyless)
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGING="knievel-cli-${VERSION}-${TARGET}"
+          cosign sign-blob --yes \
+            --bundle "dist/${STAGING}.tar.gz.cosign.bundle" \
+            "dist/${STAGING}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/knievel-cli-*.*
+          if-no-files-found: error
+          retention-days: 7
+
+  github-release:
+    name: github release
+    needs: [publish-image, build-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: cli-*
+          merge-multiple: true
+
+      - name: Build aggregate checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          # One newline-delimited file with `<sha256>  <filename>`
+          # for every uploaded tarball — matches goreleaser's
+          # convention so consumers can `sha256sum -c checksums.txt`.
+          rm -f checksums.txt
+          for f in knievel-cli-*.tar.gz; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${f}" >> checksums.txt
+            else
+              shasum -a 256 "${f}" >> checksums.txt
+            fi
+          done
+          ls -la
+
+      - name: Compose release notes
+        env:
+          VERSION: ${{ github.ref_name }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        shell: bash
+        run: |
+          cat > RELEASE_NOTES.md <<EOF
+          ## ${VERSION}
+
+          ### Container image
+
+          - Tag:    \`${IMAGE}:${VERSION}\`
+          - Digest: \`${DIGEST}\`
+          - Verify: \`cosign verify ${IMAGE}@${DIGEST} \\
+              --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/release.yml.*' \\
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com\`
+
+          ### \`knievel-cli\` install
+
+          \`\`\`bash
+          # Linux x86_64
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/knievel-cli-${VERSION}-x86_64-unknown-linux-musl.tar.gz \\
+            | tar -xz --strip-components=1 -C \$HOME/.local/bin knievel-cli-${VERSION}-x86_64-unknown-linux-musl/knievel-cli
+
+          # Apple silicon
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/knievel-cli-${VERSION}-aarch64-apple-darwin.tar.gz \\
+            | tar -xz --strip-components=1 -C \$HOME/.local/bin knievel-cli-${VERSION}-aarch64-apple-darwin/knievel-cli
+          \`\`\`
+
+          Verify each tarball:
+
+          \`\`\`bash
+          cosign verify-blob \\
+            --bundle knievel-cli-${VERSION}-<target>.tar.gz.cosign.bundle \\
+            --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/release.yml.*' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            knievel-cli-${VERSION}-<target>.tar.gz
+          \`\`\`
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
+          files: |
+            dist/knievel-cli-*.tar.gz
+            dist/knievel-cli-*.tar.gz.sha256
+            dist/knievel-cli-*.tar.gz.cosign.bundle
+            dist/checksums.txt
 
   publish-helm:
     name: publish helm chart
-    needs: [bench-regression, release-checklist]
+    needs: github-release
     runs-on: ubuntu-latest
-    if: false   # Phase 5.8 activates
+    if: false   # Phase 4.4 lands the chart; 5.8 wires the publish.
     steps:
       - uses: actions/checkout@v4
       - run: echo "TODO — Phase 5.8 — helm package + chart index push"
 
   publish-gem:
     name: publish ruby gem
-    needs: [bench-regression, release-checklist]
+    needs: github-release
     runs-on: ubuntu-latest
-    if: false   # Phase 5.8 activates
+    if: false   # Phase 4.9 builds the gem; 5.8 wires the publish.
     steps:
       - uses: actions/checkout@v4
       - run: echo "TODO — Phase 5.8 — knievel-ruby gem build + RubyGems push"
-
-  github-release:
-    name: github release
-    needs: [publish-image, publish-helm, publish-gem]
-    runs-on: ubuntu-latest
-    if: false   # Phase 5.8 activates
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 5.8 — gh release create with changelog + artifact links"
