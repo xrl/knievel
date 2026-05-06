@@ -63,10 +63,12 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       pinned via `[workspace.dependencies]`; rust toolchain pinned
       to `1.94`. `cargo check --workspace` green.
       Refs: `TESTING.md` § 4, § 12.2.
-- [ ] **1.3** `xtask` crate scaffold with empty subcommands:
+- [x] **1.3** `xtask` crate scaffold with empty subcommands:
       `lint-migrations`, `check-cross-tenant`, `openapi`,
-      `test-shape`, `check-doc-fences`, `check-api-doc`. Wired so
-      `cargo xtask --help` works.
+      `test-shape`, `check-doc-fences`, `check-api-doc`. `cargo
+      xtask <cmd>` runs each stub via the `[alias]` in
+      `.cargo/config.toml`. Each stub names the phase that will
+      land its real implementation.
       Refs: `TESTING.md` § 10.1, § 12.5, § 12.7,
       `DOCUMENTATION_PLAN.md` § 11.2.
 - [ ] **1.4** `.github/actions/rust-setup/action.yml` composite —

@@ -1,0 +1,12 @@
+[package]
+name        = "xtask"
+description = "Repo-internal CLI: linters, codegen, drift checks"
+edition.workspace    = true
+license.workspace    = true
+repository.workspace = true
+version.workspace    = true
+publish     = false
+
+[dependencies]
+anyhow = { workspace = true }
+clap   = { version = "4", features = ["derive"] }
