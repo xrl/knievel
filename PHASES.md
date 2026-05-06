@@ -241,10 +241,14 @@ once 2.3 lands.
       subsystems in Phase 3+). The DB-unreachable HTTP-level
       assertion lands in db-integ once Phase 3's test harness
       threads a real `PgPool` through `AppState`.
-- [ ] **2.6** `/version` handler. Build metadata from `vergen`
-      (git SHA, build time). Schema version. The `auth` block is
-      a stub (modes `[]`, no issuers) until Phase 3 lands real
-      auth.
+- [x] **2.6** `/version` handler returns JSON with `knievel`,
+      `schema`, `git_sha`, `build_timestamp`, and `auth` (modes/
+      issuers — empty until Phase 3.16). `build.rs` shells out to
+      `git rev-parse HEAD` (with `-dirty` suffix when the working
+      tree isn't clean) and `date -u` rather than pulling in vergen
+      — the metadata needed is small enough to skip the dep.
+      `cargo:rerun-if-changed` on `.git/HEAD` and `.git/index` so
+      a new commit triggers a rebuild of the version metadata.
       Refs: `API.md` § 5, `AUTH.md` "Effective-policy visibility."
 - [ ] **2.7** `poem-openapi` setup. `/openapi.json` serves the
       generated spec. `/healthz`, `/readyz`, `/version` are

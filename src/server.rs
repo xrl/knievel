@@ -55,6 +55,7 @@ pub(crate) fn routes() -> Route {
     Route::new()
         .at("/healthz", get(system::healthz))
         .at("/readyz", get(system::readyz))
+        .at("/version", get(system::version))
 }
 
 /// Build initial `AppState`. Today: maybe-connect to Postgres;

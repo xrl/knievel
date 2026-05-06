@@ -6,10 +6,23 @@
 //! Phase 2.4 landed `/healthz`; Phase 2.5 lands `/readyz`.
 //! `/version` and the OpenAPI spec endpoint follow in 2.6–2.7.
 
+use poem::http::header;
 use poem::web::Data;
 use poem::{handler, http::StatusCode, IntoResponse, Response};
+use serde_json::json;
 
 use crate::state::AppState;
+
+/// OpenAPI schema version. Lives separately from the package
+/// version because the spec compatibility model is additive
+/// (`REQUIREMENTS.md` § 6.4) and may evolve at a different cadence
+/// than the binary itself. v0 sits at `0.0` until a tagged release
+/// pins it.
+pub const SCHEMA_VERSION: &str = "0.0";
+
+const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+const GIT_SHA: &str = env!("KNIEVEL_GIT_SHA");
+const BUILD_TIMESTAMP: &str = env!("KNIEVEL_BUILD_TIMESTAMP");
 
 /// Liveness — returns 200 as long as the process is up. The
 /// k8s liveness probe key (`API.md` § 5).
@@ -50,6 +63,26 @@ pub async fn readyz(Data(state): Data<&AppState>) -> Response {
     }
 }
 
+/// Build metadata + effective auth policy. Per `API.md` § 5 and
+/// `AUTH.md` "Effective-policy visibility." Today the auth block
+/// is empty — Phase 3.16 lands real modes/issuers.
+#[handler]
+pub async fn version() -> Response {
+    let body = json!({
+        "knievel":         PKG_VERSION,
+        "schema":          SCHEMA_VERSION,
+        "git_sha":         GIT_SHA,
+        "build_timestamp": BUILD_TIMESTAMP,
+        "auth": {
+            "modes":   [],
+            "issuers": []
+        }
+    });
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(body.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use poem::test::TestClient;
@@ -82,4 +115,25 @@ mod tests {
     // db-integ CI job once Phase 1.9's testlib is being exercised
     // by an HTTP-level test (Phase 3 brings the test client
     // together with state holding a real PgPool).
+
+    #[tokio::test]
+    async fn version_returns_json_with_required_fields() {
+        let cli = TestClient::new(app_with_state(AppState::new()));
+        let resp = cli.get("/version").send().await;
+        resp.assert_status_is_ok();
+        resp.assert_header("content-type", "application/json");
+        let body: serde_json::Value = resp.json().await.value().deserialize();
+        assert!(body.get("knievel").is_some());
+        assert!(body.get("schema").is_some());
+        assert!(body.get("git_sha").is_some());
+        assert!(body.get("build_timestamp").is_some());
+        assert!(body.get("auth").is_some());
+        let modes = body
+            .get("auth")
+            .and_then(|a| a.get("modes"))
+            .and_then(|m| m.as_array())
+            .expect("auth.modes is an array");
+        // Phase 2 has no auth wired yet.
+        assert!(modes.is_empty());
+    }
 }

@@ -906,6 +906,7 @@ dependencies = [
  "poem",
  "regex",
  "serde",
+ "serde_json",
  "sqlx",
  "testlib",
  "tokio",
