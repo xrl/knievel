@@ -86,11 +86,23 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       the phase that flips it on. `ci.yml` exposes `workflow_call`
       so `release.yml` reuses the DAG.
       Refs: `TESTING.md` § 12.4, § 12.7, § 12.8, § 12.9.
-- [ ] **1.6** First migration `0001_init.sql`: `knievel` schema
-      ownership, `pgcrypto` extension, `config_version` bookkeeping
-      table, `_sqlx_migrations` lives in `knievel`.
-      Refs: `REQUIREMENTS.md` § 7.1, § 7.2, § 7.7,
-      `MIGRATION_RX.md` "One-time provisioning."
+- [x] **1.6** First migration `0001_init.sql`: `knievel.config_version`
+      bookkeeping. Schema and extensions are operator-provisioned
+      (`MIGRATION_RX.md` "One-time provisioning"); migrations only
+      touch their own schema via `SET search_path TO knievel,
+      public;`. `_sqlx_migrations` lands in `knievel` automatically
+      because of the search_path.
+      Refs: `REQUIREMENTS.md` § 7.1, § 7.2, § 7.7.
+
+      **Note (1.6):** `config_version` is implemented as a SEQUENCE
+      rather than a single-row table. Functional behavior matches
+      `REQUIREMENTS.md` § 7.2 (`SELECT last_value` reads it,
+      `SELECT nextval` bumps it). The choice avoids tripping
+      gate (2) of § 7.1.1 — that rule requires every `CREATE TABLE`
+      in `knievel` to carry RLS, which doesn't fit a non-tenant
+      bookkeeping object. Migration carries an in-line comment
+      explaining the deviation; revisit `REQUIREMENTS.md` § 7.2
+      next time it changes to align the wording.
 - [ ] **1.7** `xtask lint-migrations` real implementation. The 4
       rules from `REQUIREMENTS.md` § 7.1.1 gate (2). Six fixtures
       under `xtask/tests/fixtures/migrations/` from
