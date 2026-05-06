@@ -20,6 +20,8 @@ use poem::listener::TcpListener;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 
+use std::sync::Arc;
+
 use crate::ad_library::AdLibraryApi;
 use crate::ads::AdsApi;
 use crate::advertisers::AdvertisersApi;
@@ -30,6 +32,7 @@ use crate::creatives::CreativesApi;
 use crate::decisions::{DecisionsApi, ExplainApi};
 use crate::events;
 use crate::flights::FlightsApi;
+use crate::image_upload::InMemoryStore;
 use crate::leader::{self, LeaderHandle};
 use crate::orgs::OrgApi;
 use crate::partitions;
@@ -107,9 +110,15 @@ pub fn routes() -> Route {
 }
 
 async fn build_state(cfg: &Config) -> AppState {
-    let mut state = AppState::new().with_decisions(DecisionFlags {
-        force_overrides_enabled: cfg.decisions.force_overrides_enabled,
-    });
+    let mut state = AppState::new()
+        .with_decisions(DecisionFlags {
+            force_overrides_enabled: cfg.decisions.force_overrides_enabled,
+        })
+        // In-process store as the v0 default. The S3 / MinIO /
+        // GCS-compat adapter is a 3.29 follow-up; both share the
+        // `ImageStore` trait so flipping the backend is a config
+        // change, not a code change.
+        .with_image_store(Arc::new(InMemoryStore::default()));
 
     let Some(url) = &cfg.database.url else {
         tracing::info!("no database.url configured; /readyz will report ok: no_db_configured");

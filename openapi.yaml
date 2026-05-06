@@ -1225,6 +1225,92 @@ paths:
       security:
       - BearerAuth: []
       operationId: listCreatives
+  /v1/projects/{project_id}/creatives/{id}/image:
+    post:
+      summary: |-
+        Multipart image upload (Phase 3.32). Validates the body
+        against the `image_upload` core (size + magic bytes + MIME
+        allow-list), writes through the configured `ImageStore`,
+        and updates the creative row's `image_url` in the same
+        transaction. Min role: editor (matches `createCreative`).
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: id
+        schema:
+          type: integer
+          format: int64
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+        required: true
+      responses:
+        '200':
+          description: |-
+            Returns the updated creative with `imageUrl` pointing at
+            the freshly stored object.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/Creative'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '413':
+          description: Body exceeds 40 MB (`REQUIREMENTS.md` § 7.9).
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '415':
+          description: |-
+            Declared `Content-Type` doesn't match the sniffed magic
+            bytes, or the format isn't on the allow list.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: uploadCreativeImage
   /v1/projects/{project_id}/creatives/{id}:
     get:
       parameters:

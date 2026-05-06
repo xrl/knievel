@@ -83,7 +83,7 @@ method = "PATCH"
 test   = "cross_tenant_flights_patch"
 
 # Creatives — Phase 3.10. Image upload (POST .../{id}/image)
-# lands in 3.29.
+# wired in 3.32 against the `image_upload` core.
 [[entry]]
 path   = "/v1/projects/{project_id}/creatives"
 method = "POST"
@@ -98,6 +98,11 @@ test   = "cross_tenant_creatives_list"
 path   = "/v1/projects/{project_id}/creatives/{id}"
 method = "GET"
 test   = "cross_tenant_creatives_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/creatives/{id}/image"
+method = "POST"
+test   = "cross_tenant_creative_image_upload"
 
 # Creative Templates — Phase 3.10.
 [[entry]]

@@ -7,18 +7,33 @@
 //! ("image creatives must have imageUrl") is enforced at write
 //! time by sending NULLs through.
 //!
-//! Image upload (`POST .../{id}/image`) lands in 3.29.
+//! Image upload (`POST .../{id}/image`) is wired in 3.32 against
+//! `image_upload::ImageStore`.
 
 #![allow(clippy::large_enum_variant)]
 
 use poem::web::Data;
-use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
+use poem_openapi::{
+    param::Path, payload::Json, types::multipart::Upload, ApiResponse, Multipart, Object, OpenApi,
+};
 
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::handlers::{open_project_tx, AuthzError};
+use crate::image_upload::{self, UploadError};
 use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
+
+/// 16 random bytes as hex — stable per upload, distinguishes
+/// repeat uploads of the same creative. argon2's
+/// `password_hash::rand_core` is already in-tree, so no new dep.
+fn random_object_uuid() -> String {
+    use argon2::password_hash::rand_core::{OsRng, RngCore};
+    let mut bytes = [0u8; 16];
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
 
 pub struct CreativesApi;
 
@@ -110,6 +125,34 @@ pub enum GetResp {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
     NotFound(Json<ErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+
+#[derive(Multipart)]
+pub struct UploadImageRequest {
+    pub file: Upload,
+}
+
+#[derive(ApiResponse)]
+pub enum UploadImageResp {
+    /// Returns the updated creative with `imageUrl` pointing at
+    /// the freshly stored object.
+    #[oai(status = 200)]
+    Ok(Json<Creative>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    #[oai(status = 404)]
+    NotFound(Json<ErrorEnvelope>),
+    /// Body exceeds 40 MB (`REQUIREMENTS.md` § 7.9).
+    #[oai(status = 413)]
+    PayloadTooLarge(Json<ErrorEnvelope>),
+    /// Declared `Content-Type` doesn't match the sniffed magic
+    /// bytes, or the format isn't on the allow list.
+    #[oai(status = 415)]
+    UnsupportedMediaType(Json<ErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -269,6 +312,134 @@ impl CreativesApi {
                 ListResp::Internal(Json(err("db_error", "list failed")))
             }
         }
+    }
+
+    /// Multipart image upload (Phase 3.32). Validates the body
+    /// against the `image_upload` core (size + magic bytes + MIME
+    /// allow-list), writes through the configured `ImageStore`,
+    /// and updates the creative row's `image_url` in the same
+    /// transaction. Min role: editor (matches `createCreative`).
+    #[oai(
+        path = "/v1/projects/:project_id/creatives/:id/image",
+        method = "post",
+        operation_id = "uploadCreativeImage"
+    )]
+    async fn upload_image(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        project_id: Path<String>,
+        id: Path<i64>,
+        body: UploadImageRequest,
+    ) -> UploadImageResp {
+        let principal = auth.0;
+        let pj = project_id.0;
+        let id = id.0;
+
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => return UploadImageResp::Internal(Json(err("no_db", "no database configured"))),
+        };
+        let store = match state.0.image_store.as_ref() {
+            Some(s) => s.clone(),
+            None => {
+                return UploadImageResp::Internal(Json(err(
+                    "no_image_store",
+                    "no image store configured",
+                )))
+            }
+        };
+
+        let mut tx = match open_project_tx(pool, &principal, &pj, Role::Editor).await {
+            Ok(t) => t,
+            Err(e) => return forbid(UploadImageResp::Forbidden, e),
+        };
+
+        // Confirm the creative is visible under the bound tenant
+        // before reading the (potentially large) body. RLS would
+        // otherwise let the `UPDATE` no-op with rows_affected = 0;
+        // the explicit lookup gives us a clean 404.
+        let exists: Option<(i64,)> =
+            match sqlx::query_as("SELECT id FROM knievel.creatives WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(error = %e, "creative existence check failed");
+                    return UploadImageResp::Internal(Json(err("db_error", "lookup failed")));
+                }
+            };
+        if exists.is_none() {
+            return UploadImageResp::NotFound(Json(err("not_found", "creative not found")));
+        }
+
+        let declared = body.file.content_type().map(|s| s.to_string());
+        let bytes = match body.file.into_vec().await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(error = %e, "multipart body read failed");
+                return UploadImageResp::BadRequest(Json(err(
+                    "invalid_multipart",
+                    "could not read multipart body",
+                )));
+            }
+        };
+        let mime = match image_upload::validate(declared.as_deref(), &bytes) {
+            Ok(m) => m,
+            Err(UploadError::PayloadTooLarge) => {
+                return UploadImageResp::PayloadTooLarge(Json(err(
+                    "payload_too_large",
+                    "image exceeds 40 MB limit",
+                )))
+            }
+            Err(UploadError::UnsupportedMediaType) => {
+                return UploadImageResp::UnsupportedMediaType(Json(err(
+                    "unsupported_media_type",
+                    "declared content-type does not match sniffed bytes",
+                )))
+            }
+            Err(UploadError::DisallowedMime) => {
+                return UploadImageResp::UnsupportedMediaType(Json(err(
+                    "disallowed_mime",
+                    "image format is not on the allow list",
+                )))
+            }
+        };
+
+        let uuid = random_object_uuid();
+        let key = image_upload::storage_key(&pj, id, &uuid, mime);
+        let url = match store.put(&key, mime, &bytes).await {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::error!(error = %e, "image_store put failed");
+                return UploadImageResp::Internal(Json(err(
+                    "image_store_error",
+                    "could not write image to storage",
+                )));
+            }
+        };
+
+        let updated: Result<Creative, _> = sqlx::query_as(&format!(
+            "UPDATE knievel.creatives SET image_url = $1 WHERE id = $2 RETURNING {COLS}"
+        ))
+        .bind(&url)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await;
+        let creative = match updated {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "creative image_url update failed");
+                return UploadImageResp::Internal(Json(err("db_error", "update failed")));
+            }
+        };
+        if let Err(e) = tx.commit().await {
+            tracing::error!(error = %e, "commit failed");
+            return UploadImageResp::Internal(Json(err("db_error", "commit failed")));
+        }
+        UploadImageResp::Ok(Json(creative))
     }
 
     #[oai(

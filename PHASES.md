@@ -1196,6 +1196,24 @@ manager and leader election running.
       `memory://{key}`; the S3 adapter will return signed
       URLs.
 
+- [x] **3.32** Multipart upload handler in `src/creatives.rs`.
+      `POST /v1/projects/{projectId}/creatives/{id}/image`
+      accepts a multipart body via `poem-openapi`'s `Multipart`
+      derive, runs the body through `image_upload::validate`,
+      writes through the configured `ImageStore`, and updates
+      the creative's `image_url` in the same transaction. Min
+      role: editor (matches `createCreative`). Returns the
+      updated creative on 200; 413 / 415 / 404 / 403 / 400 /
+      500 envelopes per the response shape on
+      `image_upload::UploadError`. Server bootstrap injects an
+      `InMemoryStore` as the v0 default; the S3-compat adapter
+      is the 3.29 follow-up. The `random_object_uuid` helper
+      keeps us off `uuid` as a workspace dep — argon2's
+      `password_hash::rand_core` already provides `OsRng`.
+      Cross-tenant manifest grows by 1 entry; cross-tenant
+      gate now reports 47 endpoints, all covered.
+      Refs: `REQUIREMENTS.md` § 7.9, `API.md` § 3.5.
+
 - [x] **3.31** Click-through redirect resolution from snapshot.
       Adds `ProjectSnapshot::click_through_urls` (an
       `ad_id → url` map) and the `/e/c/{signed}` handler now
@@ -1251,41 +1269,38 @@ project-scoped endpoint.
 
 ### Notes
 
-**Phase 3 close-out summary (after 3.14–3.31 landed):**
+**Phase 3 close-out summary (after 3.14–3.32 landed):**
 
 - 90 unit tests in the lib (84 at 3.29 close + 3 from 3.30
   + 3 from 3.31), all green.
-- 46 project-scoped endpoints under `cargo xtask
-  check-cross-tenant`, all covered by manifest entries.
-- `openapi.yaml` ~105 KB.
+- 47 project-scoped endpoints under `cargo xtask
+  check-cross-tenant`, all covered by manifest entries
+  (3.32 added image upload).
+- `openapi.yaml` ~107 KB.
 - Twelve migrations clean under `cargo xtask lint-migrations`.
 - The full hot path is wired end-to-end now: snapshot →
   selection → HMAC sign → decision response with a real
   channel-send into the events flusher; HMAC verify → ping
   publish → events_raw row.
 
-**Open follow-ups across 3.14–3.31** (not blockers, but pulled
+**Open follow-ups across 3.14–3.32** (not blockers, but pulled
 out as their own commits):
 
-1. **Multipart upload handler in `src/creatives.rs`** (deferred
-   from 3.29; lands in 3.32). `POST
-   /v1/projects/{projectId}/creatives/{id}/image` with poem's
-   multipart extractor, calling `image_upload::validate` then
-   the configured `ImageStore::put`, plus the cross-tenant
-   manifest entry that wiring earns.
-2. **`SignaturePayload` v2 carrying a signed `?u=<url>`**
+1. **`SignaturePayload` v2 carrying a signed `?u=<url>`**
    override (3.31 follow-up). Until the wire format gains the
    field, the click endpoint ignores `?u=` (open-redirect
    block) and serves the snapshot's `clickThroughUrl`.
-3. **Single-row `external_id` idempotency on POST creates**
+2. **Single-row `external_id` idempotency on POST creates**
    (CLAUDE.md known gap, deferred from 3.14).
-4. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;
+3. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;
    `:batchUpsert` made the duplication worse but didn't extract).
-5. **Real JWT signature verification + JWKS auto-discovery**
+4. **Real JWT signature verification + JWKS auto-discovery**
    (3.26 follow-up).
-6. **Real S3-adapter implementation** for `image_upload`
-   (3.29 follow-up).
-7. **Snapshot loader query bodies + LISTEN integration** (3.17
+5. **Real S3-adapter implementation** for `image_upload`
+   (3.29 / 3.32 follow-up; the v0 in-process `InMemoryStore`
+   is fine for tests but won't serve uploads beyond a single
+   instance's lifetime).
+6. **Snapshot loader query bodies + LISTEN integration** (3.17
    follow-up; the poll loop is the spec-documented backstop and
    sufficient on its own).
 
