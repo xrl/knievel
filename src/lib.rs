@@ -24,6 +24,7 @@ pub mod server;
 pub mod sites;
 pub mod state;
 pub mod system;
+pub mod taxonomy;
 pub mod tokens;
 pub mod zones;
 
@@ -46,6 +47,7 @@ pub fn openapi_spec_yaml() -> String {
             ads::AdsApi,
             sites::SitesApi,
             zones::ZonesApi,
+            taxonomy::TaxonomyApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

@@ -657,8 +657,25 @@ manager and leader election running.
       (5 sites, 4 zones); gate now reports
       `32 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.7, § 3.8.
-- [ ] **3.13** Read-only inventory taxonomy endpoints
-      (channels/priorities/ad-types). Seeded by 3.7.
+- [x] **3.13** Read-only taxonomy endpoints + project-creation
+      seeding. `src/taxonomy.rs::TaxonomyApi` exposes
+      `GET .../channels[,/{id}]`, `GET .../priorities[,/{id}]`,
+      `GET .../ad-types[,/{id}]` — all read-only per `API.md`
+      § 3.9 (write endpoints are post-v0).
+      `taxonomy::seed_default_taxonomy` is called from the
+      `create_project` handler in the same transaction as the
+      project insert: bind `knievel.project_id` mid-tx (so the
+      taxonomy RLS policies pass), insert defaults
+      (3 channels: Web/Mobile/Email; 3 priorities:
+      House/Standard/Backfill; 4 ad-types: 300x250 / 728x90 /
+      320x50 / 970x90). Atomic with the project row — a crash
+      between project insert and seed leaves no half-applied
+      state.
+      One test asserts the seed lands on POST /projects, the
+      read endpoints surface it, priorities are ordered by tier
+      ascending, and a cross-org reader is rejected.
+      Manifest gains 6 entries; gate now reports
+      `38 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.9.
 - [ ] **3.14** `:batchUpsert` — single Postgres transaction with
       per-row diagnostics matching `API.md` "Write contract."

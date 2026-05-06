@@ -30,6 +30,7 @@ use crate::orgs::OrgApi;
 use crate::sites::SitesApi;
 use crate::state::AppState;
 use crate::system::SystemApi;
+use crate::taxonomy::TaxonomyApi;
 use crate::tokens::TokensApi;
 use crate::zones::ZonesApi;
 
@@ -78,6 +79,7 @@ pub fn routes() -> Route {
             AdsApi,
             SitesApi,
             ZonesApi,
+            TaxonomyApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

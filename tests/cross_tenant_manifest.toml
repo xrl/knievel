@@ -188,3 +188,34 @@ test   = "cross_tenant_zones_get"
 path   = "/v1/projects/{project_id}/zones/{id}"
 method = "PATCH"
 test   = "cross_tenant_zones_patch"
+
+# Read-only taxonomy — Phase 3.13. Seeded at project creation.
+[[entry]]
+path   = "/v1/projects/{project_id}/channels"
+method = "GET"
+test   = "cross_tenant_channels_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/channels/{id}"
+method = "GET"
+test   = "cross_tenant_channels_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/priorities"
+method = "GET"
+test   = "cross_tenant_priorities_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/priorities/{id}"
+method = "GET"
+test   = "cross_tenant_priorities_get"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/ad-types"
+method = "GET"
+test   = "cross_tenant_ad_types_list"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/ad-types/{id}"
+method = "GET"
+test   = "cross_tenant_ad_types_get"

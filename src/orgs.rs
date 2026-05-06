@@ -24,6 +24,7 @@ use crate::auth::Role;
 use crate::db;
 use crate::idempotency::{self, CheckResult};
 use crate::state::AppState;
+use crate::taxonomy;
 
 pub struct OrgApi;
 
@@ -286,6 +287,30 @@ impl OrgApi {
                 )));
             }
         };
+
+        // Bind knievel.project_id mid-transaction so the taxonomy
+        // RLS policies (project_id-scoped) let the seed inserts
+        // through, then seed default channels / priorities /
+        // ad_types under the new project. Same transaction → seed
+        // is atomic with the project create.
+        if let Err(e) = sqlx::query("SELECT set_config('knievel.project_id', $1, true)")
+            .bind(&response.id)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(error = %e, "set_config(project_id) failed");
+            return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                "db_error",
+                "could not bind project for taxonomy seed",
+            )));
+        }
+        if let Err(e) = taxonomy::seed_default_taxonomy(&mut tx, &path_org_id, &response.id).await {
+            tracing::error!(error = %e, "default taxonomy seed failed");
+            return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                "db_error",
+                "default taxonomy seed failed",
+            )));
+        }
 
         // Store the idempotency row inside the same transaction so
         // a crash between insert and store can't leave a
