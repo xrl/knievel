@@ -37,9 +37,13 @@ services:
       - "127.0.0.1:5432:5432"
 
   knievel:
-    # Default to the published ghcr image; set KNIEVEL_BUILD=1 to
-    # build from the local tree instead. Phase 4.3 will start
-    # publishing this tag.
+    # Default points at the published ghcr image. Phase 4.3
+    # publishes images on semver tags only (no main-branch
+    # pushes) — until the first release, contributors must
+    # build locally via `KNIEVEL_BUILD=1 docker compose build`.
+    # `KNIEVEL_IMAGE` overrides the default; production
+    # deployments should pin a digest:
+    #   KNIEVEL_IMAGE=ghcr.io/xrl/knievel@sha256:... docker compose up
     image: ${KNIEVEL_IMAGE:-ghcr.io/xrl/knievel:latest}
     build:
       context: ../..

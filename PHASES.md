@@ -1395,20 +1395,23 @@ flows from a working binary in a real container.
       Refs: `REQUIREMENTS.md` § 8 item 4, `AUTH.md` "Local
       Development."
 - [x] **4.3** Multi-arch container image build, **published
-      to `ghcr.io/xrl/knievel`**, plus `knievel-cli` binaries
-      attached to each GitHub Release. `docker buildx` for
-      `linux/amd64` + `linux/arm64`, distroless base
+      to `ghcr.io/xrl/knievel`** on semver tags only — every
+      published image is a deliberate release, not a moving
+      target. `docker buildx` for `linux/amd64` +
+      `linux/arm64`, distroless base
       (`gcr.io/distroless/cc:nonroot`). Tag policy:
-      `ghcr.io/xrl/knievel:latest` from `main`,
-      `ghcr.io/xrl/knievel:vX.Y.Z` from semver tags,
-      `ghcr.io/xrl/knievel:sha-<short>` for every push to
-      `main` (immutable digest pin for compose / Helm
-      pre-release pinning). `cosign` keyless signing via
-      Sigstore Fulcio; provenance attestation included.
-      Build runs in `.github/workflows/release.yml` (already
-      stubbed) for tags and `.github/workflows/main-image.yml`
-      (new) for `main`. The compose file in 4.1 and the Helm
-      chart in 4.4 reference this image directly.
+      `ghcr.io/xrl/knievel:vX.Y.Z` (semver, immutable) plus
+      `ghcr.io/xrl/knievel:latest` re-pointed to the freshest
+      semver release. **No image is built or pushed for
+      main-branch commits or PRs** — pre-release deployments
+      pin to a digest from a published `vX.Y.Z-rc.N` tag, or
+      build locally via the in-tree `Dockerfile` (the compose
+      stack from 4.1 supports `KNIEVEL_BUILD=1`). `cosign`
+      keyless signing via Sigstore Fulcio; provenance
+      attestation included. Build runs in
+      `.github/workflows/release.yml` under `on: push: tags:
+      ['v*']`. The compose file in 4.1 and the Helm chart in
+      4.4 reference this image directly.
 
       **`knievel-cli` release attachments.** On every `v*`
       tag, cross-build the `knievel-cli` binary for
@@ -1564,21 +1567,23 @@ flows from a working binary in a real container.
          break mid-cutover. Update local remote:
          `git remote set-url origin
          git@github.com:knievel-ads/knievel.git`.
-      3. **Post-transfer rebuild.** First push from the new
-         org fires `main-image.yml` and republishes
-         `ghcr.io/knievel-ads/knievel:latest` +
-         `:sha-<short>`. Cosign cert-identity regex auto-
-         rehomes via the workflow's `${{ github.repository
-         }}` interpolation. The first `v*` tag publishes
-         `:vX.Y.Z` and the CLI release artifacts under the
-         new path. Document the cutover date in
-         `CHANGELOG.md` (Phase 5.4 lands the file; until
-         then a one-line `Note (4.9)` here suffices).
+      3. **Post-transfer rebuild.** Tagging a `v*` release
+         under the new org fires `release.yml` and publishes
+         `ghcr.io/knievel-ads/knievel:vX.Y.Z` (plus
+         `:latest` re-pointed to that tag). Cosign cert-
+         identity regex auto-rehomes via the workflow's
+         `${{ github.repository }}` interpolation. CLI
+         release artifacts attach under the new path.
+         Document the cutover date in `CHANGELOG.md` (Phase
+         5.4 lands the file; until then a one-line
+         `Note (4.9)` here suffices). No `main`-side rebuild
+         is needed since main pushes don't publish images
+         (Phase 4.3 tag-only policy).
 
       **Auto-adapts** (don't touch):
-      - `.github/workflows/release.yml` and `main-image.yml`
-        — both image name and cosign cert identity derive
-        from `${{ github.repository[_owner] }}`.
+      - `.github/workflows/release.yml` — image name and
+        cosign cert identity both derive from
+        `${{ github.repository[_owner] }}`.
       - The `Dockerfile` itself — image-tag-agnostic.
 
       **Harness setup for the next session.** Whatever
@@ -1612,9 +1617,9 @@ from old-4.8 to new-4.9 (last) because the gem's smoke test
 needs a deployable to integration-test against. `ghcr.io/xrl/
 knievel` is now the explicit image registry per
 `REQUIREMENTS.md` § 8 and `MIGRATION_RX.md`'s compose example;
-4.3's task description pins tag policy
-(`latest` / `vX.Y.Z` / `sha-<short>`) and the cosign signing
-mechanism.
+4.3's task description pins tag policy (`vX.Y.Z` semver +
+`latest` re-pointed at the freshest semver release; **no
+main-branch publishes**) and the cosign signing mechanism.
 
 **Phase 4.0 follow-up (renumber, post-4.8):** Rehoming the repo
 to the `knievel-ads` GitHub org earned its own slot — landed as
@@ -1671,14 +1676,12 @@ client lands in 4.9, `seed-demo`'s post-bootstrap operations
 (everything past org + project) can move to HTTP so we exercise
 the same handler path RX hits.
 
-**Note (4.3):** Two workflows. `.github/workflows/main-image.yml`
-fires on every push to `main` and pushes
-`ghcr.io/xrl/knievel:latest` + `ghcr.io/xrl/knievel:sha-<short>`
-(immutable digest pin). `.github/workflows/release.yml` fires on
-`v*` tags and produces, in order: (a) the per-PR CI gate
-(`workflow_call` into `ci.yml`); (b) the multi-arch image with
-semver tags `vX.Y.Z`, `X.Y`, and `X` plus `sha-<short>`, signed
-with cosign keyless via GitHub OIDC and attested via
+**Note (4.3):** Single workflow. `.github/workflows/release.yml`
+fires only on `v*` tags and produces, in order: (a) the per-PR
+CI gate (`workflow_call` into `ci.yml`); (b) the multi-arch
+image with semver tags `vX.Y.Z`, `X.Y`, `X`, and `latest`
+re-pointed to the freshest semver release, signed with cosign
+keyless via GitHub OIDC and attested via
 `actions/attest-build-provenance`; (c) a 4-target build matrix
 for `knievel-cli` (`x86_64-unknown-linux-musl`,
 `aarch64-unknown-linux-musl` via `cross`; `x86_64-apple-darwin`
@@ -1689,8 +1692,15 @@ the image digest, copies the `cosign verify` invocation, and
 provides curl-pipe install one-liners for every CLI target. A
 goreleaser-style `checksums.txt` aggregates the sidecar hashes.
 
+**No image is built or pushed for main-branch commits or PRs.**
+CI on PRs still **builds** the image via the `Dockerfile` in
+ci.yml's per-PR DAG to catch Dockerfile rot, but doesn't push.
+Pre-release deployments either build locally (`KNIEVEL_BUILD=1
+docker compose build` against the in-tree Dockerfile) or pin a
+digest from a published `vX.Y.Z-rc.N` tag.
+
 The Helm and gem publish steps stay stubbed
-(`if: false` until 4.4 / 4.9 land their respective artifacts).
+(`if: false` until 4.4 / 4.10 land their respective artifacts).
 Sandbox limitation: I couldn't run the workflow end-to-end here
 (no docker daemon, no GitHub OIDC), so trust-but-verify on the
 first `v*` tag — known-good action versions (`docker/build-push-
@@ -1714,9 +1724,9 @@ ConfigMap so a values-only `helm upgrade` rolls the pods.
 
 `image.tag` honors a digest form: a value starting with
 `sha256:` renders as `repository@sha256:...` (immutable pin),
-anything else as `repository:tag`. Pairs naturally with the
-`sha-<short>` tag the `main-image.yml` workflow publishes per
-commit.
+anything else as `repository:tag`. Operators pin a digest from a
+published `vX.Y.Z` (or `vX.Y.Z-rc.N`) release to keep deploys
+reproducible.
 
 CI gate (`.github/workflows/ci.yml` `helm-lint` job, no longer
 gated on `if: false`): installs `helm v3.16.2` + `kubeconform

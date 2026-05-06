@@ -156,6 +156,28 @@ jobs:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             -summary /tmp/knievel-rendered.yaml
 
+  build-image:
+    # Per Phase 4.3: tag-only publish, but PR / main-branch CI
+    # still BUILDS the image (no push) to catch Dockerfile rot
+    # before a release attempt ships a broken artifact. Single
+    # platform here keeps the wall-time small; the multi-arch
+    # publish lives in release.yml.
+    name: build container image (no push)
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (linux/amd64, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   acceptance:
     # ACC-01..30 partitioned across 4 nextest shards per
     # `TESTING.md` § 12.6. The binary runs in-process via
