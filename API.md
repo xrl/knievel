@@ -91,16 +91,18 @@ degenerate to a single-page walk. `listAdLibraryItems` and
 `listTokens` are also un-cursored in v0 because their primary
 keys are TEXT (`(created_at, id)` cursor lands in Phase 6.5).
 
-Every list operation carries an `x-knievel-paginated: true` vendor
-extension in the OpenAPI spec, plus an `x-knievel-paginated-items`
-pointer (default `items`) and `x-knievel-paginated-cursor` pointer
-(default `nextCursor`). Generated client wrappers (e.g. the Ruby gem
-in `REQUIREMENTS.md` §8 item 3) key off these extensions to expose
-`Enumerable`/`Iterator` semantics over cursor walks rather than
-making the caller write pagination loops. The vendor extensions
-themselves land alongside the wrapper work in Phase 4.10 proper —
-poem-openapi 5 doesn't expose generic operation-level extensions,
-so they require a post-processor in `cargo xtask openapi`.
+**Future:** generated client wrappers (e.g. the Ruby gem in
+`REQUIREMENTS.md` §8 item 3) eventually key off
+`x-knievel-paginated: true` /
+`x-knievel-paginated-items: items` /
+`x-knievel-paginated-cursor: nextCursor` vendor extensions on
+each paginated operation, so a second-language binding or a
+doc-site generator can discover paginated endpoints from the
+spec alone. **Not shipped today** — poem-openapi 5 lacks an
+operation-level extension API, and we're upstreaming it first
+rather than carrying a post-processor in `cargo xtask openapi`.
+Tracked in PHASES.md § 6.6. Until then, the Ruby gem's
+hand-written wrapper hardcodes its paginated set.
 
 ### Filters
 

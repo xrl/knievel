@@ -1280,11 +1280,15 @@ manager and leader election running.
       `id` shape this commit ships — moved to **Phase 6.5**.
       All five still return `nextCursor: null` so wrappers
       degenerate to a single page cleanly. The vendor
-      extensions (`x-knievel-paginated*`) the wrapper layer
-      reads off the spec also stay deferred — poem-openapi 5
-      doesn't expose generic operation-level extensions, so
-      they need a post-processor in `cargo xtask openapi`;
-      lands alongside the wrapper itself in Phase 4.10 proper.
+      extensions (`x-knievel-paginated*`) API.md once promised
+      are deferred to **Phase 6.6** — poem-openapi 5 doesn't
+      expose generic operation-level extensions, and rather
+      than carry a `cargo xtask openapi` post-processor as a
+      maintenance liability we'll upstream extension support
+      to poem-openapi first. The hand-written Ruby wrapper
+      from 4.10 doesn't need extensions to know its paginated
+      set; they earn their keep when a second consumer (Python
+      / Go binding, doc-site renderer) shows up.
 
 **Milestone:** Every endpoint in `API.md` returns the documented
 shape. Full API-contract suite + cross-tenant suite green for every
@@ -2060,10 +2064,36 @@ re-prioritize within the phase.
       Refs: `API.md` § "Pagination" (non-paginated v0
       footnote), `PHASES.md` § 3.33 note.
 
+- [ ] **6.6** Vendor-extension support — upstream poem-openapi
+      first, then surface `x-knievel-paginated*` natively.
+      poem-openapi 5 has no operation-level extension API
+      (`MetaOperation` hardcodes its serialized fields plus a
+      special-case `x-code-samples`); generic extensions fight
+      the derive-macro model. Plan: land an extension API in
+      poem-openapi upstream — likely
+      `#[oai(extension("x-foo", json!({...})))]` or a
+      registry-side `MetaExtensions` map serialized via the
+      `x-` prefix convention — then come back here and tag
+      every paginated `#[OpenApi]` operation with
+      `x-knievel-paginated: true` /
+      `x-knievel-paginated-items: items` /
+      `x-knievel-paginated-cursor: nextCursor`. The Ruby
+      wrapper from 4.10 doesn't need them (hand-written, knows
+      its own paginated set), but a future Python/Go binding
+      or a doc-site generator (Redoc-style) would. Until the
+      upstream PR lands, the spec stays extension-free —
+      `cargo xtask openapi`-side post-processing was
+      considered and rejected as a maintenance liability we'd
+      have to keep porting forward.
+      Refs: `API.md` § "Pagination" (deferred-extensions
+      footnote), `PHASES.md` § 3.33 note,
+      `https://github.com/poem-web/poem` (upstream).
+
 **Milestone:** `:batchUpsert` is consistent across every
 resource that declares it; POST creates are truly idempotent;
 handler bodies are short again. Every list endpoint in
-`API.md` is cursor-paginated.
+`API.md` is cursor-paginated. Vendor extensions ship natively
+through poem-openapi.
 
 ### Notes
 
