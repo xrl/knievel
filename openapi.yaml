@@ -78,24 +78,17 @@ paths:
         required: true
       responses:
         '201':
-          description: Fresh create.
-          content:
-            application/json; charset=utf-8:
-              schema:
-                $ref: '#/components/schemas/ProjectResponse'
-        '201':
           description: |-
-            Idempotency replay — same `Idempotency-Key`, same body. The
-            `Idempotent-Replay: true` header lets the caller distinguish
-            the cached response from a fresh one (`API.md`
-            "Idempotency").
+            Fresh create, OR an idempotency replay. The
+            `Idempotent-Replay: true` header lets the caller
+            distinguish a cached return from a fresh one
+            (`API.md` "Idempotency"). Absent on fresh executions.
           content:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/ProjectResponse'
           headers:
             IDEMPOTENT-REPLAY:
-              required: true
               deprecated: false
               schema:
                 type: string
@@ -168,6 +161,132 @@ paths:
       security:
       - BearerAuth: []
       operationId: getProject
+  /v1/orgs/{org_id}/tokens:
+    post:
+      summary: |-
+        Mint an opaque token. Returns the plaintext secret exactly
+        once. Min role: org-admin.
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/CreateTokenRequest'
+        required: true
+      responses:
+        '201':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/CreateTokenResponse'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: createToken
+    get:
+      summary: |-
+        List tokens (metadata only; secrets never leave the mint
+        response). Min role: org-admin.
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/TokenListResponse'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listTokens
+  /v1/orgs/{org_id}/tokens/{token_id}:
+    delete:
+      summary: |-
+        Revoke a token (soft delete via `revoked_at`). The auth
+        path filters revoked rows at the next request. Min role:
+        org-admin.
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: token_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '204':
+          description: ''
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: revokeToken
 components:
   schemas:
     AuthBlock:
@@ -195,6 +314,57 @@ components:
           type: string
           description: Caller-assigned external id, unique within the org.
         name:
+          type: string
+    CreateTokenRequest:
+      type: object
+      title: CreateTokenRequest
+      required:
+      - name
+      - scope
+      - role
+      properties:
+        name:
+          type: string
+        scope:
+          type: string
+          description: '"org" or "project".'
+        project_id:
+          type: string
+          description: Required iff `scope == "project"`.
+        role:
+          type: string
+          description: '`reader`, `editor`, `admin`, `org-admin`, `org-owner`.'
+        expires_at:
+          type: string
+        ip_allowlist:
+          type: array
+          items:
+            type: string
+    CreateTokenResponse:
+      type: object
+      title: CreateTokenResponse
+      required:
+      - id
+      - secret
+      - name
+      - scope
+      - role
+      - created_at
+      properties:
+        id:
+          type: string
+        secret:
+          type: string
+          description: |-
+            Plaintext secret. **Returned exactly once** — knievel stores
+            only the argon2id hash. Lost secrets cannot be recovered.
+        name:
+          type: string
+        scope:
+          type: string
+        role:
+          type: string
+        created_at:
           type: string
     ErrorBody:
       type: object
@@ -251,6 +421,49 @@ components:
           type: string
           description: RFC 3339 UTC, formatted by Postgres via `to_jsonb`.
         updated_at:
+          type: string
+    TokenListResponse:
+      type: object
+      title: TokenListResponse
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenSummary'
+        next_cursor:
+          type: string
+          description: |-
+            Cursor pagination lands when first paginated endpoint
+            genuinely needs it; until then this is always null.
+    TokenSummary:
+      type: object
+      title: TokenSummary
+      required:
+      - id
+      - name
+      - scope
+      - role
+      - created_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+        role:
+          type: string
+        project_id:
+          type: string
+        created_at:
+          type: string
+        last_used_at:
+          type: string
+        revoked_at:
+          type: string
+        expires_at:
           type: string
     VersionResponse:
       type: object

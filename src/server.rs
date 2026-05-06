@@ -23,6 +23,7 @@ use crate::config::Config;
 use crate::orgs::OrgApi;
 use crate::state::AppState;
 use crate::system::SystemApi;
+use crate::tokens::TokensApi;
 
 pub async fn run(cfg: Config) -> Result<()> {
     let addr = SocketAddr::from_str(&cfg.api.bind_addr)
@@ -56,7 +57,11 @@ pub async fn run(cfg: Config) -> Result<()> {
 /// management + decision OpenAPI services as additional
 /// `OpenApiService` mounts.
 pub fn routes() -> Route {
-    let api = OpenApiService::new((SystemApi, OrgApi), "knievel", env!("CARGO_PKG_VERSION"));
+    let api = OpenApiService::new(
+        (SystemApi, OrgApi, TokensApi),
+        "knievel",
+        env!("CARGO_PKG_VERSION"),
+    );
     let spec = api.spec_endpoint();
 
     Route::new().nest("/", api).at("/openapi.json", spec)

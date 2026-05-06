@@ -107,17 +107,14 @@ impl ErrorEnvelope {
 
 #[derive(ApiResponse)]
 pub enum CreateProjectResponse {
-    /// Fresh create.
+    /// Fresh create, OR an idempotency replay. The
+    /// `Idempotent-Replay: true` header lets the caller
+    /// distinguish a cached return from a fresh one
+    /// (`API.md` "Idempotency"). Absent on fresh executions.
     #[oai(status = 201)]
-    Created(Json<ProjectResponse>),
-    /// Idempotency replay — same `Idempotency-Key`, same body. The
-    /// `Idempotent-Replay: true` header lets the caller distinguish
-    /// the cached response from a fresh one (`API.md`
-    /// "Idempotency").
-    #[oai(status = 201)]
-    CreatedReplay(
+    Created(
         Json<ProjectResponse>,
-        #[oai(header = "Idempotent-Replay")] String,
+        #[oai(header = "Idempotent-Replay")] Option<String>,
     ),
     /// Org mismatch between the principal and the path.
     #[oai(status = 403)]
@@ -221,7 +218,7 @@ impl OrgApi {
                     let parsed: Result<ProjectResponse, _> = serde_json::from_slice(&body);
                     match parsed {
                         Ok(resp) if status == 201 => {
-                            return CreateProjectResponse::CreatedReplay(Json(resp), "true".into());
+                            return CreateProjectResponse::Created(Json(resp), Some("true".into()));
                         }
                         Ok(_) | Err(_) => {
                             tracing::warn!("idempotency replay payload incompatible; re-executing");
@@ -331,7 +328,7 @@ impl OrgApi {
                 "could not commit transaction",
             )));
         }
-        CreateProjectResponse::Created(Json(response))
+        CreateProjectResponse::Created(Json(response), None)
     }
 
     /// Read a single project by id (path).

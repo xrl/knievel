@@ -29,6 +29,10 @@ pub struct Principal {
     /// resolve the project from the request path at handler entry.
     pub project_id: Option<String>,
     pub role: Role,
+    /// Opaque actor identifier suitable for `audit_log.actor`. For
+    /// opaque tokens this is the row id (`tok_<short>`); for JWTs
+    /// (Phase 3.26) it will be `(iss, sub, azp)`. Always non-empty.
+    pub actor_id: String,
 }
 
 impl Principal {

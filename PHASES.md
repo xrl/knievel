@@ -502,12 +502,37 @@ manager and leader election running.
       `TESTING.md` § 4.1 "stability across body whitespace" test
       actually requires. Added `sha2` and `hex` to workspace
       deps.
-- [ ] **3.6** Org-level Tokens API — `POST/GET/DELETE
-      /v1/orgs/{orgId}/tokens`. Mint returns the secret exactly
-      once; subsequent reads are metadata-only. Token mint emits
-      one `audit_log` row (first real audit writer). Org-scope
-      cross-tenant negative test included.
-      Refs: `API.md` § 2.2, `AUTH.md` "Opaque Tokens."
+- [x] **3.6** Org-level Tokens API — `POST/GET/DELETE
+      /v1/orgs/{orgId}/tokens`. `src/tokens.rs::TokensApi`:
+      mint generates `kvl_prod_<scope>_<id_short>_<secret>`,
+      stores argon2id hash, returns plaintext exactly once;
+      list returns metadata only (no secrets) up to 500 rows
+      (cursor pagination lands later); revoke is a soft delete
+      via `revoked_at` so the auth path filters it on the next
+      request. Mint and revoke each emit one `audit_log` row in
+      the same transaction as the data mutation — first real
+      audit writers. `Principal` gained `actor_id: String` so
+      the audit_log `actor` column can be populated without an
+      extra DB query. Six API tests in `tests/api_tokens.rs`
+      cover: 201 + plaintext + audit row, end-to-end auth via a
+      newly-minted token, cross-org `wrong_tenant`, editor
+      `role_insufficient`, list excludes secrets and is
+      tenant-scoped, revoke makes auth fail and emits the audit
+      row.
+      Refs: `API.md` § 2.2, `AUTH.md` "Opaque Tokens",
+      "Endpoint -> minimum role".
+
+      **Note (3.6):** poem-openapi rejects two `ApiResponse`
+      variants sharing the same status code (the OpenAPI YAML
+      ends up with duplicate-key entries). Phase 3.5's separate
+      `Created` and `CreatedReplay` 201 variants on
+      `CreateProjectResponse` were merged into a single `Created`
+      variant carrying `Option<String>` for the
+      `Idempotent-Replay` header — `None` on fresh execution,
+      `Some("true")` on replay. The wire shape is identical;
+      the spec just emits a single 201 entry now. The token env
+      segment is hardcoded to `prod` for v0; future commits
+      parameterize via config.
 - [ ] **3.7** Inventory + demand-chain migrations. Three migrations
       sequenced: `0006_demand.sql` (advertisers, campaigns,
       flights, ads, creatives, creative_templates),

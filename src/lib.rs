@@ -16,6 +16,7 @@ pub mod orgs;
 pub mod server;
 pub mod state;
 pub mod system;
+pub mod tokens;
 
 /// Generate the OpenAPI spec as YAML. Used by
 /// `cargo xtask openapi` to write `openapi.yaml` and by
@@ -24,7 +25,7 @@ pub mod system;
 pub fn openapi_spec_yaml() -> String {
     use poem_openapi::OpenApiService;
     let svc = OpenApiService::new(
-        (system::SystemApi, orgs::OrgApi),
+        (system::SystemApi, orgs::OrgApi, tokens::TokensApi),
         "knievel",
         env!("CARGO_PKG_VERSION"),
     );

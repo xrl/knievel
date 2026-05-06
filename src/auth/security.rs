@@ -69,5 +69,6 @@ async fn verify_bearer(req: &Request, bearer: Bearer) -> Option<Principal> {
         org_id,
         project_id,
         role,
+        actor_id: db_id,
     })
 }
