@@ -294,8 +294,14 @@ signal.
   `siteExternalId`).
 - `creative` is a `oneOf`:
   - `{"type":"image","imageUrl":..,"width":..,"height":..,"alt":..,"clickThroughUrl":..}`
-  - `{"type":"html","body":..,"clickThroughUrl":..}`
+  - `{"type":"html","body":..,"clickThroughUrl":..}` — `body` is the
+    static HTML stored on the creative, returned verbatim.
   - `{"type":"native","template":..,"values":{...},"clickThroughUrl":..}`
+    — caller renders `values` client-side using its own components.
+  - `{"type":"templated","template":..,"values":{...},"body":..,"clickThroughUrl":..}`
+    — server renders the referenced template's Liquid source against
+    `values` at decision time and returns the result in `body`.
+    `values` is also echoed so callers can re-render or inspect.
 - All URL fields are absolute.
 
 ### `POST /v1/projects/{projectId}/decisions:explain`
@@ -664,8 +670,40 @@ Body (`oneOf` on `type`):
 }
 ```
 
-`values` for `native` creatives is validated against the referenced
-template's JSON Schema at write time; `422` on schema violation.
+```json
+{
+  "type":            "templated",
+  "templateId":      7,
+  "values": {
+    "title":    "...",
+    "body":     "...",
+    "imageUrl": "...",
+    "ctaText":  "Learn more"
+  },
+  "clickThroughUrl": "https://..."
+}
+```
+
+`values` for `native` and `templated` creatives is validated against
+the referenced template's JSON Schema at write time; `422` on schema
+violation. `templated` additionally requires the referenced template
+to carry a non-null `template` (Liquid source) field — `422 /
+template_missing_body` if the referenced template is
+input-validation-only.
+
+`templated` differs from `native` only in **who renders**:
+
+- `native` — server returns `values`; the caller renders client-side.
+  The decision response carries no `body`.
+- `templated` — server renders `template` (Liquid) against `values`
+  at decision time and returns the resulting string in `body` on the
+  decision response. `values` is echoed too so a caller can fall back
+  to its own renderer or display debug info.
+
+Templated rendering happens only on the decision path (`POST
+/v1/projects/{projectId}/decisions`); the creative resource itself
+stores nothing rendered — the `body` field on the wire is not
+persisted on the creative row.
 
 ### 3.6 Creative Templates
 
@@ -692,13 +730,46 @@ Body:
       "ctaText":  { "type": "string", "maxLength": 24 }
     },
     "additionalProperties": false
-  }
+  },
+  "template":       "<a href=\"{{ad.clickUrl}}\"><img src=\"{{values.imageUrl}}\" alt=\"{{values.title}}\"><span>{{values.title}}</span><p>{{values.body}}</p><span class=\"cta\">{{values.ctaText}}</span><img src=\"{{ad.impressionUrl}}\" width=\"1\" height=\"1\"></a>",
+  "templateEngine": "liquid"
 }
 ```
 
+`schema` is the JSON Schema validated against `values` at creative
+write time. It is required.
+
+`template` is an optional Liquid source string. When present, this
+template can be referenced by `templated` creatives, which render it
+server-side at decision time. When absent, the template is
+input-validation-only and can only be referenced by `native`
+creatives. `template` is parsed and rejected with `422 /
+template_parse_error` at write time if it does not parse.
+
+`templateEngine` is required when `template` is present; today the
+only accepted value is `"liquid"` (DotLiquid-compatible). The field
+exists so additional engines can be added later without a breaking
+schema change.
+
+Helpers exposed inside `template`:
+
+- `ad.id`, `ad.clickUrl`, `ad.impressionUrl` — engine-injected at
+  decision time; the URLs are the same signed values returned at the
+  top level of the decision response.
+- `placement.id` — echo of the request placement key.
+- `decision.snapshotVersion` — the current `snapshotVersion`.
+- `values.*` — the creative's `values` object, after JSON-Schema
+  validation.
+
+No file, network, or environment access is exposed. Templates run in
+a sandbox with hard caps on render time and output size; both caps
+are configurable via `config.yaml` and surfaced in `/version`.
+
 Mutating `schema` does **not** retroactively re-validate existing
-creatives; it applies to subsequent writes only. Use a new template name
-for breaking changes.
+creatives; it applies to subsequent writes only. The same applies to
+`template` — changes affect subsequent decisions only; in-flight
+creative rows are not invalidated. Use a new template name for
+breaking changes.
 
 ### 3.7 Sites
 

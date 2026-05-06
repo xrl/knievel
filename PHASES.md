@@ -815,6 +815,58 @@ in CI. Generated Ruby gem published from the OpenAPI spec.
 - [ ] **4.8** `openapi-generator-cli` wired into CI; Ruby gem with
       `Resource` wrappers + `Enumerable` pagination; gem-smoke job.
       Refs: `REQUIREMENTS.md` § 8 item 3, `API.md` "Pagination."
+- [ ] **4.9** Server-side ad-template rendering (`templated`
+      creative variant). Adds the fourth `creative` `oneOf` arm
+      defined in `API.md` § 1 / § 3.5, and extends
+      `CreativeTemplate` (`API.md` § 3.6) with optional `template`
+      (Liquid source) + `templateEngine: "liquid"` fields. Sub-tasks:
+      - `creative_templates.template TEXT NULL` +
+        `template_engine TEXT NULL` migration with the four RLS
+        rules; parse-on-write rejects malformed Liquid with
+        `422 / template_parse_error`.
+      - Pick the rendering crate (`liquid` recommended — Kevel
+        parity for RX migration; `minijinja` is the Rust-native
+        alternative). Capture the choice as a `**Note (4.9):**`
+        block before the task closes.
+      - Add the `templated` arm to the creative `oneOf` write
+        contract; wire `templateId` validation
+        (`422 / template_missing_body` when the referenced
+        template has no `template` field).
+      - Selection-path render: fetch parsed template from a
+        per-`(template_id, version)` cache (invalidate on PATCH —
+        `version` already bumps per `API.md` § 3.6).
+        Engine-inject `ad.{id,clickUrl,impressionUrl}`,
+        `placement.id`, `decision.snapshotVersion`, `values.*`.
+        Sandbox: no `include` / `render` tags, no FS, no network;
+        configurable render-time-ms cap and output-bytes cap;
+        exceed → `decisions[i]` falls back to no-fill with a
+        structured warning logged at WARN (not the request).
+      - Surface caps + engine version in `/version` so operators
+        can confirm the deployed sandbox config.
+      - `decisions:explain` shows a `templated_render` rule per
+        candidate with `{result: "rendered" | "skipped" |
+        "timeout" | "oversize"}` plus the byte size.
+      - Cross-tenant manifest entries unchanged (the rendering
+        path doesn't add new endpoints), but the existing
+        decisions row needs a multi-tenant render-isolation
+        property test: a template authored in project A must
+        never observe project B's `values` even if both projects
+        reference templates with the same `name`.
+      - Acceptance scenario `ACC-XX templated_creative_renders`
+        added to the suite started in 4.3.
+      Risks to front-load:
+        - **Sandbox escape.** Add to `TESTING.md` § 10.3 release
+          security checklist; fuzz the engine in nightly.
+        - **Hot-path latency.** Measure render p50 / p95 against
+          the QPS gate floor; bail early if the parse cache is
+          cold.
+        - **XSS via untrusted creative `values`.** Document
+          per-helper escape rules; default-autoescape on, with an
+          explicit `| raw` escape hatch for trusted fields.
+      Refs: `API.md` § 1 (decision response `oneOf`), § 3.5
+      (creative `oneOf`), § 3.6 (CreativeTemplate `template` /
+      `templateEngine`); `REQUIREMENTS.md` § 7.1.1 (RLS rules),
+      § 10 (release security).
 
 **Milestone:** `docker compose up` boots a working knievel against
 Postgres + MinIO + wiremock; a third party can integrate from the
