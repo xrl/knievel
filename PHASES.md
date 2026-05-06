@@ -1025,10 +1025,39 @@ manager and leader election running.
       idempotency makes safe). Adding a `CHECK (watermark >=
       OLD.watermark)` would require a trigger; deferring to a
       follow-up since the leader is the sole writer.
-- [ ] **3.25** Event endpoints — `GET /e/i/{signed}` (204 default,
+- [x] **3.25** Event endpoints — `GET /e/i/{signed}` (204 default,
       `?fmt=gif` GIF), `GET /e/c/{signed}` (302 redirect, signed
       open-redirect block via `?u=`).
+      `src/event_endpoints.rs` exposes the two public handlers,
+      mounted in `server::routes()` outside the OpenAPI service
+      (they're not in the spec — they're URL-signed beacons).
+      Impression always returns 204 (or 43-byte transparent GIF
+      with `?fmt=gif`); tampered/expired signatures still 204
+      (silent) per `API.md` § 4. Click verifies the signature and
+      302's to a redirect target; tampered/expired → 400.
+      `peek_project_id` extracts the project id from the
+      length-prefixed signed blob without verifying — needed
+      because verify requires the project's secret, but we
+      don't know which project until we peek. Three unit tests
+      pin the GIF length, peek round-trip, and peek-on-garbage.
       Refs: `API.md` § 4.
+
+      **Note (3.25):** Three pieces deferred to a focused
+      follow-up commit. (1) **Real `?u=` signing**: spec says
+      `?u=` overrides the redirect only when signed into the
+      payload — today the override is silently ignored
+      (open-redirect block by exclusion). Adding the signed
+      `u` requires extending `SignaturePayload` with an
+      optional URL field plus a wire-format version bump.
+      (2) **`click_through_url` resolution**: redirects to `/`
+      as a placeholder; the real target lives on the creative
+      row in the snapshot. Lands when the snapshot's `Ad`
+      shape carries `creative_id` and the snapshot reload
+      query bodies materialize creatives (paired with 3.18
+      follow-ups). (3) **Events-channel send**: the verify
+      result should produce an `Event` row queued via
+      `EventSender::try_send`. Lands as the AppState-wiring
+      commit that also threads `EventSender` through.
 - [ ] **3.26** JWT validator + JWKS cache + `claim_mapping` +
       boot-time auth lint. Issuer auto-discovery via
       `/.well-known/openid-configuration`; per-issuer `kid` index;

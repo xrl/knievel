@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use poem::get;
 use poem::listener::TcpListener;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
@@ -89,7 +90,14 @@ pub fn routes() -> Route {
     );
     let spec = api.spec_endpoint();
 
-    Route::new().nest("/", api).at("/openapi.json", spec)
+    Route::new()
+        .nest("/", api)
+        .at("/openapi.json", spec)
+        // Public event-tracking endpoints (Phase 3.25).
+        // Unauthenticated; the HMAC signature in the URL is the
+        // authorization (`API.md` § 4).
+        .at("/e/i/:signed", get(crate::event_endpoints::impression))
+        .at("/e/c/:signed", get(crate::event_endpoints::click))
 }
 
 async fn build_state(cfg: &Config) -> AppState {
