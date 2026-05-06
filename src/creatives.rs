@@ -14,7 +14,10 @@
 
 use poem::web::Data;
 use poem_openapi::{
-    param::Path, payload::Json, types::multipart::Upload, ApiResponse, Multipart, Object, OpenApi,
+    param::{Path, Query},
+    payload::Json,
+    types::multipart::Upload,
+    ApiResponse, Multipart, Object, OpenApi,
 };
 
 use crate::api_tags::ApiTags;
@@ -37,6 +40,8 @@ fn random_object_uuid() -> String {
 }
 
 pub struct CreativesApi;
+
+const CURSOR_KIND: &str = "creatives";
 
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct CreateCreativeRequest {
@@ -113,6 +118,8 @@ pub enum CreateResp {
 pub enum ListResp {
     #[oai(status = 200)]
     Ok(Json<CreativeList>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
     #[oai(status = 403)]
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 500)]
@@ -322,9 +329,15 @@ impl CreativesApi {
         auth: BearerAuth,
         state: Data<&AppState>,
         project_id: Path<String>,
+        limit: Query<Option<i64>>,
+        cursor: Query<Option<String>>,
     ) -> ListResp {
         let principal = auth.0;
         let pj = project_id.0;
+        let resolved = match crate::pagination::resolve(limit.0, cursor.0.as_deref(), CURSOR_KIND) {
+            Ok(r) => r,
+            Err(e) => return ListResp::BadRequest(Json(err(e.code(), e.message()))),
+        };
         let pool = match state.0.db.as_ref() {
             Some(p) => p,
             None => return ListResp::Internal(Json(err("no_db", "no database configured"))),
@@ -333,15 +346,27 @@ impl CreativesApi {
             Ok(t) => t,
             Err(e) => return forbid(ListResp::Forbidden, e),
         };
-        let sql = format!("SELECT {COLS} FROM knievel.creatives ORDER BY id DESC LIMIT 500");
-        match sqlx::query_as::<_, Creative>(&sql)
-            .fetch_all(&mut *tx)
-            .await
-        {
-            Ok(items) => ListResp::Ok(Json(CreativeList {
-                items,
-                next_cursor: None,
-            })),
+        let sql = match resolved.after_id {
+            None => format!("SELECT {COLS} FROM knievel.creatives ORDER BY id DESC LIMIT $1"),
+            Some(_) => format!(
+                "SELECT {COLS} FROM knievel.creatives WHERE id < $2 ORDER BY id DESC LIMIT $1"
+            ),
+        };
+        let q = sqlx::query_as::<_, Creative>(&sql).bind(resolved.bumped_limit);
+        let q = match resolved.after_id {
+            Some(after) => q.bind(after),
+            None => q,
+        };
+        match q.fetch_all(&mut *tx).await {
+            Ok(mut rows) => {
+                let next_cursor =
+                    crate::pagination::next_cursor(&rows, &resolved, CURSOR_KIND, |r| r.id);
+                rows.truncate(resolved.effective_limit as usize);
+                ListResp::Ok(Json(CreativeList {
+                    items: rows,
+                    next_cursor,
+                }))
+            }
             Err(e) => {
                 tracing::error!(error = %e, "list creatives failed");
                 ListResp::Internal(Json(err("db_error", "list failed")))

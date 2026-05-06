@@ -65,8 +65,31 @@ Response envelope:
 }
 ```
 
-`limit` defaults to 50, max 500. No `totalRecords` — counting is
-expensive and rarely useful at this layer.
+`limit` defaults to 50, max 500 (`limit=0` and `limit > 500` are
+rejected with `400 invalid_limit`). No `totalRecords` — counting
+is expensive and rarely useful at this layer.
+
+Cursors are opaque (`base64url(JSON{kind, last_id})` internally,
+but consumers should treat them as black boxes). The server
+rejects a cursor whose `kind` doesn't match the endpoint that
+received it (`400 invalid_cursor`) — this catches the
+"`listAdvertisers` cursor pasted into `listCampaigns`" footgun
+without requiring HMAC-signed cursors.
+
+The cursor only carries the resume key — **changing filters
+between pages is the caller's responsibility**. A cursor minted
+under one filter set, replayed against a different filter set on
+the same endpoint, may skip rows or return duplicates relative
+to a fresh-walk-with-the-new-filter. Consumers walking with
+filters should keep the filter set stable across the walk.
+
+**Non-paginated list endpoints (v0):** taxonomy
+(`listChannels`, `listPriorities`, `listAdTypes`) return the
+full set in semantic order (priorities by `tier`); the response
+shape still carries `nextCursor` (always `null`) so wrappers
+degenerate to a single-page walk. `listAdLibraryItems` and
+`listTokens` are also un-cursored in v0 because their primary
+keys are TEXT (`(created_at, id)` cursor lands in Phase 6.5).
 
 Every list operation carries an `x-knievel-paginated: true` vendor
 extension in the OpenAPI spec, plus an `x-knievel-paginated-items`
@@ -74,7 +97,10 @@ pointer (default `items`) and `x-knievel-paginated-cursor` pointer
 (default `nextCursor`). Generated client wrappers (e.g. the Ruby gem
 in `REQUIREMENTS.md` §8 item 3) key off these extensions to expose
 `Enumerable`/`Iterator` semantics over cursor walks rather than
-making the caller write pagination loops.
+making the caller write pagination loops. The vendor extensions
+themselves land alongside the wrapper work in Phase 4.10 proper —
+poem-openapi 5 doesn't expose generic operation-level extensions,
+so they require a post-processor in `cargo xtask openapi`.
 
 ### Filters
 

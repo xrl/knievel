@@ -31,6 +31,7 @@ pub mod leader;
 pub mod migrate;
 pub mod observability;
 pub mod orgs;
+pub mod pagination;
 pub mod partitions;
 pub mod rollup;
 pub mod selection;

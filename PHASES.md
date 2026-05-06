@@ -1247,6 +1247,45 @@ manager and leader election running.
       default sensibly (8 192 channel slots, force overrides
       enabled, 30-day retention).
 
+- [x] **3.33** Cursor pagination — server side. Every paginated
+      list endpoint accepts `?limit=N&cursor=<opaque>` per
+      `API.md` § "Pagination" (default 50, max 500). Cursor is
+      `base64url(JSON{kind, last_id})`; server validates `kind`
+      matches the endpoint to catch cross-resource cursor
+      replay (`400 invalid_cursor`). `?limit=0` and
+      `?limit > 500` return `400 invalid_limit`. Implementation
+      lives in `src/pagination.rs` (~80 lines + 13 unit tests),
+      wired into the 8 demand+inventory list handlers
+      (`advertisers`, `campaigns`, `flights`, `ads`,
+      `creatives`, `creative_templates`, `sites`, `zones`) via
+      a uniform shape: `Query<Option<i64>>` + `Query<Option<String>>`
+      params, `pagination::resolve` + `pagination::next_cursor`
+      around an `id`-DESC keyset query that fetches `LIMIT N+1`
+      to peek "are there more pages?" without a separate COUNT.
+      `tests/api_pagination.rs` covers the contract:
+      default-limit, cursor walk across multiple pages,
+      last-page-null-cursor, `invalid_limit` (zero + overcap),
+      `invalid_cursor` (corrupt + cross-resource replay).
+      Refs: `API.md` § "Pagination," CLAUDE.md "Open known
+      gaps."
+
+      **Note (3.33):** Five list endpoints are intentionally
+      not cursor-paginated for v0:
+      `listChannels`/`listPriorities`/`listAdTypes` (taxonomy
+      tables are bounded-small per project, ~5 rows each, and
+      `listPriorities` is sorted by `tier` semantically rather
+      than by `id`); `listAdLibraryItems` and `listTokens`
+      have TEXT primary keys, so they need a
+      `(created_at, id)` tuple cursor instead of the bigserial-
+      `id` shape this commit ships — moved to **Phase 6.5**.
+      All five still return `nextCursor: null` so wrappers
+      degenerate to a single page cleanly. The vendor
+      extensions (`x-knievel-paginated*`) the wrapper layer
+      reads off the spec also stay deferred — poem-openapi 5
+      doesn't expose generic operation-level extensions, so
+      they need a post-processor in `cargo xtask openapi`;
+      lands alongside the wrapper itself in Phase 4.10 proper.
+
 **Milestone:** Every endpoint in `API.md` returns the documented
 shape. Full API-contract suite + cross-tenant suite green for every
 project-scoped endpoint.
@@ -2004,9 +2043,27 @@ re-prioritize within the phase.
       check inline).
       Refs: `API.md` § 3.7 ("Ad library"), 3.7 commit note.
 
+- [ ] **6.5** Cursor pagination for TEXT-id list endpoints
+      (`listAdLibraryItems`, `listTokens`). Phase 3.33 shipped
+      cursor pagination keyed on a bigserial `id`, but
+      `ad_library_items.id` and `api_tokens.id` are TEXT
+      primary keys — they need a `(created_at, id)` tuple
+      cursor (timestamp as the sort key, id as the unique
+      tiebreaker). Generalize `crate::pagination` to take a
+      strategy or expose a second `resolve_timestamp` /
+      `next_cursor_timestamp` pair, then wire the two
+      handlers. Tests piggyback on the
+      `tests/api_pagination.rs` shape. Both endpoints today
+      return `nextCursor: null` and a hard `LIMIT 500`, so
+      consumers won't break — they just gain real pagination
+      when this lands.
+      Refs: `API.md` § "Pagination" (non-paginated v0
+      footnote), `PHASES.md` § 3.33 note.
+
 **Milestone:** `:batchUpsert` is consistent across every
 resource that declares it; POST creates are truly idempotent;
-handler bodies are short again.
+handler bodies are short again. Every list endpoint in
+`API.md` is cursor-paginated.
 
 ### Notes
 
