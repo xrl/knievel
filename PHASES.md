@@ -1381,11 +1381,17 @@ flows from a working binary in a real container.
       up` against the image) ran as a release-mode `cargo
       check` only. Phase 4.3's CI workflow will exercise the
       full container build path on every PR.
-- [ ] **4.2** `knievel-cli seed-demo` implementation. Admin
+- [x] **4.2** `knievel-cli seed-demo` implementation. Admin
       CLI binary alongside the server binary; `seed-demo`
-      populates org/project/advertisers/flights/ads/creatives
-      via the OpenAPI client so a contributor can issue
-      meaningful decisions against the compose stack.
+      populates org/project/advertisers/campaigns/flights/ads/
+      creatives/sites/zones via direct DB access (auth
+      chicken-and-egg dictates DB-direct, not HTTP) so a
+      contributor can issue meaningful decisions against the
+      compose stack. Idempotent — re-runs find every row by
+      `external_id` and a deterministic hash-derived id for the
+      org / project. Bearer is written to a file on a configured
+      path so the compose `knievel-seed` sidecar can drop it on
+      a host volume.
       Refs: `REQUIREMENTS.md` § 8 item 4, `AUTH.md` "Local
       Development."
 - [ ] **4.3** Multi-arch container image build, **published
@@ -1533,6 +1539,30 @@ start of every ephemeral DB; `examples/compose/init.sql`
 mirrors the downgrade for local dev. Idempotent and matches
 `MIGRATION_RX.md`'s production recipe (`knievel_app` is a
 non-superuser there). Documented as gotcha 17 in `CLAUDE.md`.
+
+**Note (4.2):** `seed-demo` connects to Postgres directly rather
+than going through the OpenAPI client because there's no token in
+existence on a clean install (auth chicken-and-egg). The org row's
+`id` is derived deterministically from `external_id` via SHA-256
+[:12] so the lookup-then-insert pattern doesn't need a tenant
+binding the caller hasn't established yet — `INSERT … ON CONFLICT
+(id) DO UPDATE … RETURNING (xmax = 0)` handles both the
+fresh-install and re-run cases without a SELECT-by-external-id
+that RLS would hide. Project ids are derived the same way (hash
+of `org_id + '/' + external_id`); the lower-level resources
+(advertiser, campaign, flight, ad, creative, site, zone) all use
+auto-`bigserial` ids and are upserted via `(project_id,
+external_id)` lookups under a proper `(org_id, project_id)`
+binding.
+
+The compose `knievel-seed` sidecar now invokes
+`knievel-cli seed-demo` against the live Postgres and drops the
+bearer at `./tmp/knievel-dev-token` on the host. The Dockerfile
+builds and ships both `knievel` and `knievel-cli` in
+`/usr/local/bin/`. Open follow-up: when the OpenAPI-generated
+client lands in 4.9, `seed-demo`'s post-bootstrap operations
+(everything past org + project) can move to HTTP so we exercise
+the same handler path RX hits.
 
 ---
 

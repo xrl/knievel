@@ -30,12 +30,13 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY xtask/Cargo.toml xtask/Cargo.toml
 COPY testlib/Cargo.toml testlib/Cargo.toml
-RUN mkdir -p src xtask/src testlib/src \
+RUN mkdir -p src/bin xtask/src testlib/src \
  && echo 'fn main() {}' > src/main.rs \
  && echo '' > src/lib.rs \
+ && echo 'fn main() {}' > src/bin/knievel_cli.rs \
  && echo 'fn main() {}' > xtask/src/main.rs \
  && echo '' > testlib/src/lib.rs \
- && cargo build --release --locked --bin knievel \
+ && cargo build --release --locked --bins \
  && rm -rf src xtask/src testlib/src
 
 # Real source.
@@ -44,12 +45,13 @@ COPY migrations migrations
 COPY src src
 COPY xtask/src xtask/src
 COPY testlib/src testlib/src
-RUN cargo build --release --locked --bin knievel \
- && strip target/release/knievel
+RUN cargo build --release --locked --bin knievel --bin knievel-cli \
+ && strip target/release/knievel target/release/knievel-cli
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 
-COPY --from=builder /build/target/release/knievel /usr/local/bin/knievel
+COPY --from=builder /build/target/release/knievel     /usr/local/bin/knievel
+COPY --from=builder /build/target/release/knievel-cli /usr/local/bin/knievel-cli
 
 USER nonroot:nonroot
 EXPOSE 8080

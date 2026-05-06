@@ -72,13 +72,28 @@ you can read either file and recognize the structure.
   psql -U knievel_app -d knievel`.
 - **Tail logs:** `docker compose logs -f knievel`.
 
-## What's stubbed
+## Seeding the demo data
 
-`knievel-seed` is a placeholder until Phase 4.2 wires
-`knievel-cli seed-demo`. Today it polls `/readyz` and exits 0.
-After 4.2 lands it'll mint a fixed dev token and seed an org +
-project + advertiser + flight + ad + creative so you can issue
-meaningful decisions immediately.
+`knievel-seed` runs `knievel-cli seed-demo` once on first compose
+up — connects to Postgres directly, idempotently provisions an
+org / project / advertiser / campaign / flight / ad / creative /
+site / zone, and writes a fixed dev bearer to
+`./tmp/knievel-dev-token` (path is `examples/compose/../../tmp/`,
+i.e. the repo root's `tmp/`). Re-running compose up after data
+already exists is a no-op apart from a hash rotation on the
+bootstrap token.
+
+```bash
+docker compose up                         # one-shot bootstrap
+TOKEN=$(cat ../../tmp/knievel-dev-token)  # the demo bearer
+curl -fsS -X POST http://localhost:8080/v1/projects/<pj>/decisions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"placements": [{"id": "header", "ad_type_id": <id>}]}'
+```
+
+The project and ad-type ids are printed on the seed-demo log line:
+`docker compose logs knievel-seed`.
 
 ## Refs
 

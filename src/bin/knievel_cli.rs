@@ -1,0 +1,119 @@
+//! `knievel-cli` — admin CLI sibling of the knievel server binary.
+//!
+//! Phase 4.2. Today the only subcommand is `seed-demo`; future
+//! phases extend with `admin` (token mint/revoke), `migrate`
+//! (run migrations standalone), `snapshot` (debug-inspect), and a
+//! generated subcommand surface that wraps the OpenAPI client.
+//!
+//! Refs: `REQUIREMENTS.md` § 8 item 4; `AUTH.md` "Local
+//! Development"; `MIGRATION_RX.md` "Local Development for RX
+//! Engineers."
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
+use knievel::cli::seed_demo;
+
+#[derive(Parser)]
+#[command(
+    name = "knievel-cli",
+    version,
+    about = "knievel admin / fixtures CLI",
+    long_about = "Admin CLI sibling of the knievel server binary. \
+                  See `knievel-cli seed-demo --help` for the \
+                  bootstrap-fixtures subcommand."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Populate a fresh knievel install with a demo org / project /
+    /// advertiser / flight / ad / creative / site / zone, plus an
+    /// org-admin token. Idempotent; safe to re-run.
+    SeedDemo(SeedDemoFlags),
+}
+
+#[derive(clap::Args)]
+struct SeedDemoFlags {
+    /// Postgres connection string. Defaults to the `DATABASE_URL`
+    /// env var. Required (either flag or env).
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: String,
+
+    /// `external_id` of the org row. Reused if it already exists.
+    #[arg(long, default_value = "demo-org")]
+    org_external_id: String,
+
+    /// `external_id` of the project row. Reused if it already
+    /// exists under the org.
+    #[arg(long, default_value = "demo-project")]
+    project_external_id: String,
+
+    /// Pre-supplied bearer in `kvl_<env>_org_<id_short>_<secret>`
+    /// form. When omitted, a random `kvl_dev_org_*` is generated.
+    /// Re-supplying the same token rotates the row's hash.
+    #[arg(long)]
+    token: Option<String>,
+
+    /// Path to write the plaintext bearer to. Created with mode
+    /// 0600 on Unix. The parent directory must already exist.
+    #[arg(long)]
+    write_token_to: Option<PathBuf>,
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::SeedDemo(args) => match run_seed_demo(args).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("seed-demo failed: {e:#}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+async fn run_seed_demo(flags: SeedDemoFlags) -> anyhow::Result<()> {
+    let out = seed_demo::run(seed_demo::SeedDemoArgs {
+        database_url: flags.database_url,
+        org_external_id: flags.org_external_id,
+        project_external_id: flags.project_external_id,
+        token: flags.token,
+        write_token_to: flags.write_token_to.clone(),
+    })
+    .await?;
+
+    println!(
+        "seed-demo: org_id={} project_id={}",
+        out.org_id, out.project_id
+    );
+    println!(
+        "  advertiser_id={} campaign_id={} flight_id={} ad_id={}",
+        out.advertiser_id, out.campaign_id, out.flight_id, out.ad_id
+    );
+    println!(
+        "  creative_id={} site_id={} zone_id={}",
+        out.creative_id, out.site_id, out.zone_id
+    );
+    println!(
+        "  priority_id={} ad_type_id={}",
+        out.priority_id, out.ad_type_id
+    );
+
+    // The token is written to the file path when set; print it to
+    // stdout only when no file path was supplied so accidental
+    // pipes / `docker compose logs` don't leak the bearer.
+    if flags.write_token_to.is_none() {
+        println!("  token={}", out.token);
+    } else if let Some(p) = &flags.write_token_to {
+        println!("  token written to {}", p.display());
+    }
+
+    Ok(())
+}

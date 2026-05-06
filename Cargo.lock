@@ -1034,6 +1034,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "base64",
+ "clap",
  "figment",
  "hex",
  "hmac",

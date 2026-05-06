@@ -69,25 +69,28 @@ services:
       retries: 30
 
   knievel-seed:
-    # Phase 4.2 replaces this stub with the real seed-demo run.
-    # Today: confirm the server is up, log, exit cleanly so
-    # `docker compose up --wait` succeeds.
-    image: curlimages/curl:8.10.1
+    # Bootstrap fixture data on first compose-up. Reuses the same
+    # image as the server (multi-binary Cargo package — `knievel-cli`
+    # ships in /usr/local/bin alongside `knievel`). Connects to
+    # Postgres directly to bypass the auth chicken-and-egg, then
+    # writes the bearer to ./tmp/knievel-dev-token on the host.
+    # Idempotent — re-running compose up after data exists is a
+    # no-op apart from a hash-rotation if --token is supplied.
+    image: ${KNIEVEL_IMAGE:-ghcr.io/xrl/knievel:latest}
     depends_on:
-      - knievel
-    entrypoint:
-      - sh
-      - -c
-      - |
-        echo "phase 4.1 stub: waiting for knievel /readyz"
-        for i in $$(seq 1 60); do
-          if curl -fsS http://knievel:8080/readyz >/dev/null 2>&1; then
-            echo "knievel ready; seed-demo lands in phase 4.2"
-            exit 0
-          fi
-          sleep 2
-        done
-        echo "knievel did not become ready"; exit 1
+      knievel-postgres:
+        condition: service_healthy
+    entrypoint: ["/usr/local/bin/knievel-cli"]
+    command:
+      - seed-demo
+      - --org-external-id=demo-org
+      - --project-external-id=demo-project
+      - --token=kvl_dev_org_compose_dev
+      - --write-token-to=/out/knievel-dev-token
+    environment:
+      DATABASE_URL: postgres://knievel_app:dev@knievel-postgres:5432/knievel?sslmode=disable
+    volumes:
+      - ../../tmp:/out
     restart: "no"
 
 volumes:

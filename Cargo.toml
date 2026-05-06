@@ -43,11 +43,20 @@ repository.workspace = true
 homepage.workspace   = true
 version.workspace    = true
 
+[[bin]]
+name = "knievel"
+path = "src/main.rs"
+
+[[bin]]
+name = "knievel-cli"
+path = "src/bin/knievel_cli.rs"
+
 [dependencies]
 anyhow       = { workspace = true }
 argon2       = { workspace = true }
 async-trait  = { workspace = true }
 base64       = { workspace = true }
+clap         = { version = "4", features = ["derive", "env"] }
 figment      = { workspace = true }
 hex          = { workspace = true }
 hmac         = { workspace = true }
