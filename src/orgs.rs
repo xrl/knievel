@@ -13,11 +13,16 @@
 //! `REQUIREMENTS.md` § 4, § 7.1.1.
 
 use poem::web::Data;
-use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
+use poem_openapi::{
+    param::{Header, Path},
+    payload::Json,
+    ApiResponse, Object, OpenApi,
+};
 
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::db;
+use crate::idempotency::{self, CheckResult};
 use crate::state::AppState;
 
 pub struct OrgApi;
@@ -59,14 +64,14 @@ impl From<ProjectRow> for ProjectResponse {
     }
 }
 
-#[derive(Object)]
+#[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct CreateProjectRequest {
     /// Caller-assigned external id, unique within the org.
     pub external_id: Option<String>,
     pub name: String,
 }
 
-#[derive(Object, Clone)]
+#[derive(Object, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectResponse {
     pub id: String,
     pub external_id: Option<String>,
@@ -102,12 +107,23 @@ impl ErrorEnvelope {
 
 #[derive(ApiResponse)]
 pub enum CreateProjectResponse {
+    /// Fresh create.
     #[oai(status = 201)]
     Created(Json<ProjectResponse>),
+    /// Idempotency replay — same `Idempotency-Key`, same body. The
+    /// `Idempotent-Replay: true` header lets the caller distinguish
+    /// the cached response from a fresh one (`API.md`
+    /// "Idempotency").
+    #[oai(status = 201)]
+    CreatedReplay(
+        Json<ProjectResponse>,
+        #[oai(header = "Idempotent-Replay")] String,
+    ),
     /// Org mismatch between the principal and the path.
     #[oai(status = 403)]
     Forbidden(Json<ErrorEnvelope>),
-    /// `externalId` already taken in this org.
+    /// `externalId` already taken in this org, OR `Idempotency-Key`
+    /// reused with a different body.
     #[oai(status = 409)]
     Conflict(Json<ErrorEnvelope>),
     #[oai(status = 500)]
@@ -128,10 +144,11 @@ pub enum GetProjectResponse {
 
 #[OpenApi]
 impl OrgApi {
-    /// Create a project under an org. Idempotency-key replay and
-    /// `externalId`-based no-op upsert land in Phase 3.5; v0 of
-    /// this endpoint is a straight insert that returns `409` on
-    /// `external_id` collision.
+    /// Create a project under an org. Honors `Idempotency-Key`
+    /// (24 h replay window per `API.md` "Idempotency"); `409
+    /// idempotency_conflict` if the same key is reused with a
+    /// different body. Returns `409 external_id_conflict` if the
+    /// `externalId` is already taken in this org.
     #[oai(
         path = "/v1/orgs/:org_id/projects",
         method = "post",
@@ -142,14 +159,13 @@ impl OrgApi {
         auth: BearerAuth,
         state: Data<&AppState>,
         org_id: Path<String>,
+        idempotency_key: Header<Option<String>>,
         body: Json<CreateProjectRequest>,
     ) -> CreateProjectResponse {
         let principal = auth.0;
         let path_org_id = org_id.0;
 
-        // Authz: org match + role ≥ org-admin.
-        // Per AUTH.md, project creation is org-admin (or owner);
-        // the role check uses the Ord on Role.
+        // Authz: org match + role >= org-admin.
         if principal.org_id != path_org_id {
             return CreateProjectResponse::Forbidden(Json(ErrorEnvelope::of(
                 "wrong_tenant",
@@ -173,17 +189,6 @@ impl OrgApi {
             }
         };
 
-        let new_id = match random_pj_id() {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::error!(error = %e, "id generation failed");
-                return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
-                    "id_generation_failed",
-                    "could not generate a project id",
-                )));
-            }
-        };
-
         let mut tx = match db::begin_bound(pool, &path_org_id, None).await {
             Ok(tx) => tx,
             Err(e) => {
@@ -191,6 +196,63 @@ impl OrgApi {
                 return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
                     "db_error",
                     "could not begin transaction",
+                )));
+            }
+        };
+
+        // Idempotency: check for an existing row keyed on
+        // (org_id, NULL project, key, route, body_hash). The
+        // route literal is the operation's `oai` path; if a future
+        // refactor moves it, the same hash must move with it.
+        const ROUTE: &str = "POST /v1/orgs/{org_id}/projects";
+        let body_hash = match idempotency::body_hash(&body.0) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::error!(error = %e, "idempotency body hash failed");
+                return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                    "internal_error",
+                    "could not hash request body",
+                )));
+            }
+        };
+        if let Some(key) = idempotency_key.0.as_deref() {
+            match idempotency::check(&mut tx, &path_org_id, None, key, ROUTE, &body_hash).await {
+                Ok(CheckResult::Replay { status, body }) => {
+                    let parsed: Result<ProjectResponse, _> = serde_json::from_slice(&body);
+                    match parsed {
+                        Ok(resp) if status == 201 => {
+                            return CreateProjectResponse::CreatedReplay(Json(resp), "true".into());
+                        }
+                        Ok(_) | Err(_) => {
+                            tracing::warn!("idempotency replay payload incompatible; re-executing");
+                            // Fall through to fresh execution below.
+                        }
+                    }
+                }
+                Ok(CheckResult::Conflict) => {
+                    return CreateProjectResponse::Conflict(Json(ErrorEnvelope::of(
+                        "idempotency_conflict",
+                        "Idempotency-Key reused with a different request body",
+                    )));
+                }
+                Ok(CheckResult::Fresh) => {} // proceed
+                Err(e) => {
+                    tracing::error!(error = %e, "idempotency check failed");
+                    return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                        "db_error",
+                        "idempotency check failed",
+                    )));
+                }
+            }
+        }
+
+        let new_id = match random_pj_id() {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::error!(error = %e, "id generation failed");
+                return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                    "id_generation_failed",
+                    "could not generate a project id",
                 )));
             }
         };
@@ -210,33 +272,66 @@ impl OrgApi {
             .fetch_one(&mut *tx)
             .await;
 
-        match row {
-            Ok(row) => {
-                if let Err(e) = tx.commit().await {
-                    tracing::error!(error = %e, "commit failed");
-                    return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
-                        "db_error",
-                        "could not commit transaction",
-                    )));
-                }
-                CreateProjectResponse::Created(Json(row.into()))
-            }
+        let response: ProjectResponse = match row {
+            Ok(row) => row.into(),
             Err(e) => {
                 let msg = format!("{e}");
                 if msg.contains("duplicate key") || msg.contains("unique constraint") {
-                    CreateProjectResponse::Conflict(Json(ErrorEnvelope::of(
+                    return CreateProjectResponse::Conflict(Json(ErrorEnvelope::of(
                         "external_id_conflict",
                         "external_id is already taken in this org",
-                    )))
-                } else {
-                    tracing::error!(error = %e, "create_project insert failed");
-                    CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
-                        "db_error",
-                        "insert failed",
-                    )))
+                    )));
                 }
+                tracing::error!(error = %e, "create_project insert failed");
+                return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                    "db_error",
+                    "insert failed",
+                )));
+            }
+        };
+
+        // Store the idempotency row inside the same transaction so
+        // a crash between insert and store can't leave a
+        // half-applied state.
+        if let Some(key) = idempotency_key.0.as_deref() {
+            let stored_body = match serde_json::to_vec(&response) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::error!(error = %e, "idempotency response serialization failed");
+                    return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                        "internal_error",
+                        "could not serialize response for idempotency cache",
+                    )));
+                }
+            };
+            if let Err(e) = idempotency::store(
+                &mut tx,
+                &path_org_id,
+                None,
+                key,
+                ROUTE,
+                &body_hash,
+                201,
+                &stored_body,
+            )
+            .await
+            {
+                tracing::error!(error = %e, "idempotency store failed");
+                return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                    "db_error",
+                    "idempotency store failed",
+                )));
             }
         }
+
+        if let Err(e) = tx.commit().await {
+            tracing::error!(error = %e, "commit failed");
+            return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
+                "db_error",
+                "could not commit transaction",
+            )));
+        }
+        CreateProjectResponse::Created(Json(response))
     }
 
     /// Read a single project by id (path).

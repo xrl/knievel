@@ -15,6 +15,8 @@ version    = "0.1.0"
 [workspace.dependencies]
 anyhow      = "1"
 argon2      = "0.5"
+hex         = "0.4"
+sha2        = "0.10"
 thiserror   = "2"
 regex       = "1"
 serde       = { version = "1", features = ["derive"] }
@@ -41,11 +43,13 @@ version.workspace    = true
 anyhow       = { workspace = true }
 argon2       = { workspace = true }
 figment      = { workspace = true }
+hex          = { workspace = true }
 poem         = { workspace = true }
 poem-openapi = { workspace = true }
 regex        = { workspace = true }
 serde        = { workspace = true }
 serde_json   = { workspace = true }
+sha2         = { workspace = true }
 sqlx         = { workspace = true }
 tokio              = { workspace = true }
 tracing            = { workspace = true }

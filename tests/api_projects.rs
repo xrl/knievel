@@ -222,6 +222,126 @@ async fn create_project_bad_token_returns_401() -> Result<()> {
 }
 
 #[tokio::test]
+async fn create_project_idempotency_key_replay() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let f = setup().await?;
+    let cli = TestClient::new(build_app(f.db.pool.clone()));
+    let body = serde_json::json!({"name": "Idem", "external_id": "idem-1"});
+
+    // First call: 201 Created.
+    let resp = cli
+        .post("/v1/orgs/org_a/projects")
+        .header("Authorization", format!("Bearer {}", f.org_a_admin))
+        .header("Idempotency-Key", "abc-123")
+        .body_json(&body)
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CREATED);
+    let first: serde_json::Value = resp.json().await.value().deserialize();
+    let first_id = first["id"].as_str().unwrap().to_string();
+
+    // Replay: same key, same body → 201 + Idempotent-Replay: true,
+    // same id, no second row.
+    let resp = cli
+        .post("/v1/orgs/org_a/projects")
+        .header("Authorization", format!("Bearer {}", f.org_a_admin))
+        .header("Idempotency-Key", "abc-123")
+        .body_json(&body)
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CREATED);
+    resp.assert_header("Idempotent-Replay", "true");
+    let replay: serde_json::Value = resp.json().await.value().deserialize();
+    assert_eq!(replay["id"].as_str().unwrap(), first_id);
+
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*)::bigint FROM knievel.projects WHERE org_id = 'org_a'")
+            .fetch_one(&f.db.pool)
+            .await?;
+    assert_eq!(count, 1, "replay must not produce a second project row");
+
+    testlib::db::ephemeral_drop(f.db).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_project_idempotency_key_body_mismatch_409() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let f = setup().await?;
+    let cli = TestClient::new(build_app(f.db.pool.clone()));
+
+    // First call.
+    let resp = cli
+        .post("/v1/orgs/org_a/projects")
+        .header("Authorization", format!("Bearer {}", f.org_a_admin))
+        .header("Idempotency-Key", "key-x")
+        .body_json(&serde_json::json!({"name": "Original"}))
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CREATED);
+
+    // Second call: same key, different body → 409 idempotency_conflict.
+    let resp = cli
+        .post("/v1/orgs/org_a/projects")
+        .header("Authorization", format!("Bearer {}", f.org_a_admin))
+        .header("Idempotency-Key", "key-x")
+        .body_json(&serde_json::json!({"name": "Different"}))
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CONFLICT);
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    assert_eq!(
+        body["error"]["code"],
+        serde_json::json!("idempotency_conflict")
+    );
+
+    testlib::db::ephemeral_drop(f.db).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_project_idempotency_whitespace_stable() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let f = setup().await?;
+    let cli = TestClient::new(build_app(f.db.pool.clone()));
+
+    // First call with compact JSON.
+    let resp = cli
+        .post("/v1/orgs/org_a/projects")
+        .header("Authorization", format!("Bearer {}", f.org_a_admin))
+        .header("Idempotency-Key", "ws-key")
+        .body_json(&serde_json::json!({"name": "WS", "external_id": "ws-1"}))
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CREATED);
+
+    // Second call with the same logical body but extra whitespace
+    // is treated as a replay (`body_hash` canonicalizes).
+    let resp = cli
+        .post("/v1/orgs/org_a/projects")
+        .header("Authorization", format!("Bearer {}", f.org_a_admin))
+        .header("Idempotency-Key", "ws-key")
+        .header("Content-Type", "application/json")
+        .body(r#"{ "name" :  "WS",  "external_id":   "ws-1" }"#)
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CREATED);
+    resp.assert_header("Idempotent-Replay", "true");
+
+    testlib::db::ephemeral_drop(f.db).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn get_project_round_trips_through_create() -> Result<()> {
     if std::env::var("DATABASE_URL").is_err() {
         eprintln!("DATABASE_URL not set; skipping.");

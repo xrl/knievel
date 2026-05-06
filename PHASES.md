@@ -476,13 +476,32 @@ manager and leader election running.
       reject-case continues to fail because it has neither
       binding; fixture-06's `knievel.project_id` reference still
       passes.
-- [ ] **3.5** Idempotency middleware (24 h replay). Migration
-      `0005_idempotency_keys.sql` — per-project store keyed on
-      `(project_id, key, route, body_hash)`. Middleware fits
-      between auth and handler; replay returns cached body with
-      `Idempotent-Replay: true`; body mismatch → `409
-      idempotency_conflict`. Reaper deferred to leader (3.22).
+- [x] **3.5** Idempotency replay store. Migration
+      `0005_idempotency_keys.sql` — `(org_id, project_id, key,
+      route, body_hash)` lookup with a unique partial-coalescing
+      index (`coalesce(project_id, '')`) so the same logic
+      handles org-scoped and project-scoped writes on Postgres 14.
+      `src/idempotency.rs` exposes `body_hash` (canonical
+      `serde_json::to_vec` + SHA-256), `check`, and `store`. The
+      `create_project` handler now consumes `Idempotency-Key`:
+      replay returns the cached payload with `Idempotent-Replay:
+      true`; body mismatch returns `409 idempotency_conflict`;
+      check + insert + store all run in the same tenant-bound
+      transaction so a crash between insert and store can't leave
+      a half-applied state. Three new API tests cover the replay,
+      conflict, and whitespace-stable paths.
       Refs: `API.md` "Idempotency," `TESTING.md` § 6.4.
+
+      **Note (3.5):** The reaper for expired rows hangs off the
+      leader (3.22) — for now rows accumulate; the
+      `expires_at` column + `idempotency_keys_expires_at_idx`
+      let the reaper sweep efficiently when it lands. Full
+      canonical-form hashing (recursive key-sort) is deferred;
+      `serde_json::to_vec` gives whitespace stability and
+      Serialize-determined field order, which is what the
+      `TESTING.md` § 4.1 "stability across body whitespace" test
+      actually requires. Added `sha2` and `hex` to workspace
+      deps.
 - [ ] **3.6** Org-level Tokens API — `POST/GET/DELETE
       /v1/orgs/{orgId}/tokens`. Mint returns the secret exactly
       once; subsequent reads are metadata-only. Token mint emits

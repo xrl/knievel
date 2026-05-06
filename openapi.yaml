@@ -50,16 +50,24 @@ paths:
   /v1/orgs/{org_id}/projects:
     post:
       summary: |-
-        Create a project under an org. Idempotency-key replay and
-        `externalId`-based no-op upsert land in Phase 3.5; v0 of
-        this endpoint is a straight insert that returns `409` on
-        `external_id` collision.
+        Create a project under an org. Honors `Idempotency-Key`
+        (24 h replay window per `API.md` "Idempotency"); `409
+        idempotency_conflict` if the same key is reused with a
+        different body. Returns `409 external_id_conflict` if the
+        `externalId` is already taken in this org.
       parameters:
       - name: org_id
         schema:
           type: string
         in: path
         required: true
+        deprecated: false
+        explode: true
+      - name: idempotency_key
+        schema:
+          type: string
+        in: header
+        required: false
         deprecated: false
         explode: true
       requestBody:
@@ -70,11 +78,27 @@ paths:
         required: true
       responses:
         '201':
-          description: ''
+          description: Fresh create.
           content:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/ProjectResponse'
+        '201':
+          description: |-
+            Idempotency replay — same `Idempotency-Key`, same body. The
+            `Idempotent-Replay: true` header lets the caller distinguish
+            the cached response from a fresh one (`API.md`
+            "Idempotency").
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+          headers:
+            IDEMPOTENT-REPLAY:
+              required: true
+              deprecated: false
+              schema:
+                type: string
         '403':
           description: Org mismatch between the principal and the path.
           content:
@@ -82,7 +106,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: '`externalId` already taken in this org.'
+          description: |-
+            `externalId` already taken in this org, OR `Idempotency-Key`
+            reused with a different body.
           content:
             application/json; charset=utf-8:
               schema:
