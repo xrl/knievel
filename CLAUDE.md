@@ -303,6 +303,20 @@ Future sessions: don't relearn these.
     `taxonomy::seed_default_taxonomy`. A crash between the
     project insert and the seed leaves no half-applied state.
 
+17. **Postgres SUPERUSER bypasses RLS even with
+    `FORCE ROW LEVEL SECURITY`.** The `postgres:16` docker image
+    creates `POSTGRES_USER` (= `knievel_app`) as a SUPERUSER,
+    which silently defeats every cross-tenant isolation test —
+    `FORCE` only gates the table owner, not superusers. Fixed
+    by `testlib::db::ephemeral` running `ALTER ROLE CURRENT_USER
+    NOSUPERUSER CREATEDB` against the admin connection at the
+    start of every ephemeral fixture; `examples/compose/init.sql`
+    does the same for local dev. Idempotent. If you ever
+    re-introduce a code path that connects as a superuser to
+    run knievel queries, RLS will appear to work in dev and
+    silently fail in CI — keep app sessions on the
+    NOSUPERUSER role.
+
 ## Running the gates locally
 
 ```bash

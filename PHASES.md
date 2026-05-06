@@ -1494,6 +1494,25 @@ knievel` is now the explicit image registry per
 (`latest` / `vX.Y.Z` / `sha-<short>`) and the cosign signing
 mechanism.
 
+**Phase 4.1 follow-up — RLS bypass via Postgres SUPERUSER.**
+The Phase 3.30+ wiring exposed a long-standing test-harness
+bug: the `postgres:16` docker image creates `POSTGRES_USER`
+(`knievel_app` in CI and `examples/compose`) as a SUPERUSER,
+and Postgres superusers bypass RLS unconditionally — even with
+`FORCE ROW LEVEL SECURITY` set. The cross-tenant isolation
+tests (`integration_tenants`, `integration_audit_log`,
+`integration_demand`, plus the API-level
+`cross_tenant_advertisers_get` / `ad_inline_create_round_trip
+_and_cross_tenant`) had been passing on superficial assertions
+but silently failed all the `count == 1` / `403` checks once
+they actually ran end-to-end. Fixed by
+`testlib::db::ephemeral` running `ALTER ROLE CURRENT_USER
+NOSUPERUSER CREATEDB` against the admin connection at the
+start of every ephemeral DB; `examples/compose/init.sql`
+mirrors the downgrade for local dev. Idempotent and matches
+`MIGRATION_RX.md`'s production recipe (`knievel_app` is a
+non-superuser there). Documented as gotcha 17 in `CLAUDE.md`.
+
 ---
 
 ## Phase 5 — Ship v0.1.0

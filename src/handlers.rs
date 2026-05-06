@@ -64,10 +64,15 @@ pub async fn open_project_tx<'p>(
             return Err(AuthzError::WrongProject);
         }
     }
-    // Bind both GUCs and verify the project is visible (i.e. lives
-    // under the principal's org). The projects RLS policy filters
-    // by org_id OR project_id; a wrong-tenant project is invisible.
-    let mut tx = db::begin_bound(pool, &principal.org_id, Some(path_project_id))
+    // Two-step bind: verify the project is in the principal's org
+    // with ONLY `knievel.org_id` set, then add `knievel.project_id`
+    // after the verify. The projects RLS policy reads `org_id OR
+    // id = bound project_id`; binding both GUCs up front would let
+    // a wrong-tenant project pass the verify via the `id` clause
+    // matching itself. With project_id GUC unset, the OR's right
+    // side is NULL → falsy and only the org-membership check
+    // gates the row.
+    let mut tx = db::begin_bound(pool, &principal.org_id, None)
         .await
         .map_err(|_| AuthzError::Internal)?;
     let row: Option<(String,)> = sqlx::query_as("SELECT id FROM knievel.projects WHERE id = $1")
@@ -78,5 +83,10 @@ pub async fn open_project_tx<'p>(
     if row.is_none() {
         return Err(AuthzError::WrongTenant);
     }
+    sqlx::query("SELECT set_config('knievel.project_id', $1, true)")
+        .bind(path_project_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| AuthzError::Internal)?;
     Ok(tx)
 }

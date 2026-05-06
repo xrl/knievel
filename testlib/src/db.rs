@@ -40,6 +40,28 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
         .await
         .context("connecting to admin DB")?;
 
+    // The Postgres docker image creates `POSTGRES_USER` as a
+    // SUPERUSER, and Postgres superusers bypass RLS unconditionally
+    // — even with `FORCE ROW LEVEL SECURITY` — which silently
+    // defeats every cross-tenant isolation test. Drop superuser
+    // (keep CREATEDB so we can still mint ephemerals) so the role
+    // is gated by FORCE'd policies, matching production where the
+    // app role is non-superuser per `MIGRATION_RX.md`. Conditional
+    // on rolsuper so subsequent test-fixture invocations don't try
+    // to ALTER ROLE from a no-longer-superuser session and 42501
+    // out.
+    let is_super: bool =
+        sqlx::query_scalar("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+            .fetch_one(&admin)
+            .await
+            .context("checking admin role attributes")?;
+    if is_super {
+        sqlx::query("ALTER ROLE CURRENT_USER NOSUPERUSER CREATEDB")
+            .execute(&admin)
+            .await
+            .context("downgrading admin role from SUPERUSER")?;
+    }
+
     // uuid v4 simple = 32 hex chars; truncate to 16 to keep the DB
     // name comfortably below Postgres's 63-char NAMEDATALEN limit.
     let suffix = uuid::Uuid::new_v4().simple().to_string();

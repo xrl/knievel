@@ -17,3 +17,9 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS knievel AUTHORIZATION knievel_app;
 ALTER ROLE knievel_app SET search_path = knievel, public;
+-- The postgres image creates POSTGRES_USER as a SUPERUSER, and
+-- Postgres superusers bypass RLS unconditionally even with
+-- `FORCE ROW LEVEL SECURITY` set. Drop superuser (keep CREATEDB so
+-- the role can still create ephemeral test DBs) so RLS actually
+-- gates the app role, matching production per MIGRATION_RX.md.
+ALTER ROLE knievel_app NOSUPERUSER CREATEDB;
