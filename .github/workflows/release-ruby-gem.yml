@@ -87,7 +87,7 @@ jobs:
           config-file: knievel-ruby/openapi-generator-config.json
           openapi-file: knievel/openapi.yaml
           command-args: >-
-            --additional-properties=gemVersion=${{ steps.gem_version.outputs.value }},library=faraday
+            --additional-properties=gemVersion=${{ steps.gem_version.outputs.gem }},library=faraday
             --output=knievel-ruby
 
       - name: Ensure Gemfile.lock is gitignored
@@ -98,10 +98,42 @@ jobs:
             echo Gemfile.lock >> knievel-ruby/.gitignore
           fi
 
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: knievel-ruby
+          bundler-cache: false
+
+      - name: Build + smoke-test gem
+        working-directory: knievel-ruby
+        run: |
+          set -eu
+          # Generated repo — Gemfile.lock isn't tracked, so do a
+          # fresh resolve every run.
+          bundle config set --local frozen false
+          bundle install --jobs=4
+          rake build
+          # Verify the packaged gem loads cleanly (catches syntax
+          # errors and missing requires that rake build doesn't).
+          gem_file=$(ls pkg/*.gem | head -n1)
+          test -n "$gem_file"
+          unpack_dir=$(mktemp -d)
+          gem unpack "$gem_file" --target "$unpack_dir" >/dev/null
+          ruby -I "$unpack_dir"/*/lib -e "require 'knievel'; puts Knievel::VERSION"
+
+      - name: Upload built gem as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: knievel-${{ steps.gem_version.outputs.gem }}.gem
+          path: knievel-ruby/pkg/*.gem
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Commit + tag knievel-ruby
         working-directory: knievel-ruby
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.gem_version.outputs.tag }}
         run: |
           set -eu
           git config user.name  "knievel-pipelines[bot]"
