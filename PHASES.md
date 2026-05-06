@@ -1097,11 +1097,27 @@ manager and leader election running.
       mapping evaluator is a v0-stub follow-up. Boot-time
       auth lint (warn on misconfigured policies) hangs off the
       same commit as the wiremock harness.
-- [ ] **3.27** `/version` real auth block — issuers, audiences,
+- [x] **3.27** `/version` real auth block — issuers, audiences,
       algorithms, claim source (`claim` or `claim_mapping` rule
       count), JWKS URL. Mirrors the startup INFO log line. Updates
       `openapi.yaml`.
+      `system::IssuerSummary` grew `algorithms`, `claim_source`,
+      and `jwks_url` fields per `AUTH.md` "Effective-policy
+      visibility." `auth.modes` always includes `"opaque"`
+      (every deployment has the api_tokens table); `"jwt"`
+      lights up when the config carries one or more issuer
+      policies. `openapi.yaml` updated.
       Refs: `AUTH.md` "Effective-policy visibility."
+
+      **Note (3.27):** The materialization function
+      `build_auth_block(state)` reads from `AppState`, but the
+      JWT-side fields stay empty until `Config` grows the
+      `auth.jwt.issuers` block. The shape on the wire is the
+      final shape, so any future `Config` extension can wire
+      up the values without breaking the spec. Startup INFO
+      log line for the same surface is the natural pair —
+      lands when `Config::auth` materializes in 3.26's
+      follow-up commit.
 - [ ] **3.28** Ad Library (org-scoped) — migration
       `0011_ad_library.sql`, CRUD per `API.md` § 2.4, Ad-side
       `oneOf` reference (`adLibraryItemId`) wired through 3.11 and

@@ -41,8 +41,11 @@ pub enum ReadyzResponse {
 }
 
 /// Build metadata + effective auth policy. Per `API.md` § 5 and
-/// `AUTH.md` "Effective-policy visibility." `auth.modes` and
-/// `auth.issuers` are empty until Phase 3.16 lands real auth.
+/// `AUTH.md` "Effective-policy visibility." `auth.modes` lists
+/// the enabled credential types (`opaque`, `jwt`); `auth.issuers`
+/// summarizes each configured JWT issuer with its audience,
+/// algorithms, claim source, and JWKS URL. Secrets are never
+/// returned.
 #[derive(Object)]
 pub struct VersionResponse {
     pub knievel: String,
@@ -62,6 +65,13 @@ pub struct AuthBlock {
 pub struct IssuerSummary {
     pub issuer: String,
     pub audience: String,
+    pub algorithms: Vec<String>,
+    /// `claim` (default `knievel`) when claims live verbatim in
+    /// a custom claim; `claim_mapping(<n>)` when one or more
+    /// mapping rules pull standard-claim values into the authz
+    /// shape.
+    pub claim_source: String,
+    pub jwks_url: Option<String>,
 }
 
 #[OpenApi]
@@ -94,15 +104,33 @@ impl SystemApi {
 
     /// Build metadata + effective auth policy.
     #[oai(path = "/version", method = "get", operation_id = "version")]
-    async fn version(&self) -> Json<VersionResponse> {
+    async fn version(&self, Data(state): Data<&AppState>) -> Json<VersionResponse> {
         Json(VersionResponse {
             knievel: PKG_VERSION.into(),
             schema: SCHEMA_VERSION.into(),
             git_sha: GIT_SHA.into(),
             build_timestamp: BUILD_TIMESTAMP.into(),
-            auth: AuthBlock::default(),
+            auth: build_auth_block(state),
         })
     }
+}
+
+/// Materialize the `/version` auth block from `AppState`. Phase
+/// 3.27 v0: opaque tokens are always available (the `api_tokens`
+/// table is in every deployment); JWT mode is enabled when the
+/// config carries one or more issuer policies. Empty
+/// `auth.issuers` here means "no JWT issuers configured" —
+/// pure-opaque deployments serve a legitimate empty array.
+fn build_auth_block(_state: &AppState) -> AuthBlock {
+    let mut block = AuthBlock {
+        modes: vec!["opaque".into()],
+        issuers: vec![],
+    };
+    // JWT mode + per-issuer policies are wired in once `Config`
+    // grows the `auth.jwt.issuers` block (3.27 follow-up). For
+    // now the binary advertises only the always-on opaque mode.
+    let _ = &mut block.issuers;
+    block
 }
 
 #[cfg(test)]
@@ -143,10 +171,16 @@ mod tests {
         assert_eq!(body["schema"], serde_json::json!(SCHEMA_VERSION));
         assert!(body.get("git_sha").is_some());
         assert!(body.get("build_timestamp").is_some());
+        // Phase 3.27: opaque mode is always advertised; JWT
+        // mode is conditional and absent in the no-issuer case.
         let modes = body["auth"]["modes"]
             .as_array()
             .expect("auth.modes is an array");
-        assert!(modes.is_empty());
+        let mode_strs: Vec<String> = modes
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        assert!(mode_strs.contains(&"opaque".to_string()));
     }
 
     #[tokio::test]

@@ -3480,10 +3480,25 @@ components:
       required:
       - issuer
       - audience
+      - algorithms
+      - claim_source
       properties:
         issuer:
           type: string
         audience:
+          type: string
+        algorithms:
+          type: array
+          items:
+            type: string
+        claim_source:
+          type: string
+          description: |-
+            `claim` (default `knievel`) when claims live verbatim in
+            a custom claim; `claim_mapping(<n>)` when one or more
+            mapping rules pull standard-claim values into the authz
+            shape.
+        jwks_url:
           type: string
     Priority:
       type: object
@@ -3745,8 +3760,11 @@ components:
       title: VersionResponse
       description: |-
         Build metadata + effective auth policy. Per `API.md` § 5 and
-        `AUTH.md` "Effective-policy visibility." `auth.modes` and
-        `auth.issuers` are empty until Phase 3.16 lands real auth.
+        `AUTH.md` "Effective-policy visibility." `auth.modes` lists
+        the enabled credential types (`opaque`, `jwt`); `auth.issuers`
+        summarizes each configured JWT issuer with its audience,
+        algorithms, claim source, and JWKS URL. Secrets are never
+        returned.
       required:
       - knievel
       - schema
