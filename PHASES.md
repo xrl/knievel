@@ -250,9 +250,13 @@ once 2.3 lands.
       `cargo:rerun-if-changed` on `.git/HEAD` and `.git/index` so
       a new commit triggers a rebuild of the version metadata.
       Refs: `API.md` § 5, `AUTH.md` "Effective-policy visibility."
-- [ ] **2.7** `poem-openapi` setup. `/openapi.json` serves the
-      generated spec. `/healthz`, `/readyz`, `/version` are
-      registered as OpenAPI operations so the spec reflects them.
+- [x] **2.7** `poem-openapi` setup. `SystemApi` is a single
+      `#[OpenApi]` impl carrying `/healthz`, `/readyz`, `/version`
+      with typed responses (`PlainText`, `ApiResponse` enum, typed
+      `Object`). `OpenApiService::new(SystemApi, "knievel", PKG_VERSION)`
+      mounts the operations and exposes `/openapi.json` via
+      `.spec_endpoint()`. The fourth test asserts the served spec
+      lists all three system paths.
       Refs: `REQUIREMENTS.md` § 3, `API.md` "Path Structure."
 - [ ] **2.8** `xtask openapi --check` — generates the spec from
       the binary, diffs against committed `openapi.yaml`, fails on

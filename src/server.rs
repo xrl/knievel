@@ -5,9 +5,10 @@
 //! and total timeouts come from `ApiConfig` (defaults: 30 s drain,
 //! 60 s total — `REQUIREMENTS.md` § 10.7).
 //!
-//! Handlers (`/healthz`, `/readyz`, `/version`, `/openapi.json`)
-//! land in Phase 2.4–2.7 and are wired into `routes()` as they
-//! arrive.
+//! System endpoints are described via `poem-openapi`; the spec is
+//! served at `/openapi.json` (`API.md` § 5). New API surface is
+//! added by extending `SystemApi` (or composing additional
+//! `OpenApi` impls — Phase 3+ adds them).
 
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -15,11 +16,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use poem::listener::TcpListener;
-use poem::{get, EndpointExt, Route, Server};
+use poem::{EndpointExt, Route, Server};
+use poem_openapi::OpenApiService;
 
 use crate::config::Config;
 use crate::state::AppState;
-use crate::system;
+use crate::system::SystemApi;
 
 pub async fn run(cfg: Config) -> Result<()> {
     let addr = SocketAddr::from_str(&cfg.api.bind_addr)
@@ -48,20 +50,23 @@ pub async fn run(cfg: Config) -> Result<()> {
     Ok(())
 }
 
-/// Routes wired so far. Each Phase 2.x task adds its endpoint
-/// here; the helper is the single edit point for new top-level
-/// system routes.
+/// Top-level routes. Phase 2 wires the system OpenAPI service
+/// plus its `/openapi.json` spec endpoint; Phase 3+ adds the
+/// management + decision OpenAPI services as additional
+/// `OpenApiService` mounts.
 pub(crate) fn routes() -> Route {
+    let api = OpenApiService::new(
+        SystemApi,
+        "knievel",
+        env!("CARGO_PKG_VERSION"),
+    );
+    let spec = api.spec_endpoint();
+
     Route::new()
-        .at("/healthz", get(system::healthz))
-        .at("/readyz", get(system::readyz))
-        .at("/version", get(system::version))
+        .nest("/", api)
+        .at("/openapi.json", spec)
 }
 
-/// Build initial `AppState`. Today: maybe-connect to Postgres;
-/// failure is non-fatal during Phase 2 bootstrap (the server
-/// still starts and `/readyz` reports 503 with `db_unreachable`).
-/// Phase 3+ makes a working DB connection mandatory at boot.
 async fn build_state(cfg: &Config) -> AppState {
     let mut state = AppState::new();
 
