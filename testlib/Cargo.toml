@@ -1,0 +1,14 @@
+[package]
+name        = "testlib"
+description = "Test helpers for knievel's integration suite"
+edition.workspace    = true
+license.workspace    = true
+repository.workspace = true
+version.workspace    = true
+publish     = false
+
+[dependencies]
+anyhow = { workspace = true }
+sqlx   = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate"] }
+tokio  = { workspace = true }
+uuid   = { version = "1", features = ["v4"] }

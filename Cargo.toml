@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["xtask"]
+members = ["xtask", "testlib"]
 
 [workspace.package]
 edition    = "2021"
@@ -33,3 +33,9 @@ version.workspace    = true
 
 [dependencies]
 # Real deps land per-task in subsequent Phase 1/2 commits.
+
+[dev-dependencies]
+anyhow  = { workspace = true }
+sqlx    = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
+testlib = { path = "testlib" }
+tokio   = { workspace = true }

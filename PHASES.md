@@ -129,10 +129,25 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       tests cover the project-scoped path detection and spec
       walking.
       Refs: `TESTING.md` § 6.5, `REQUIREMENTS.md` § 7.1.1 gate (1).
-- [ ] **1.9** `testlib::db::ephemeral` — wrapper around `sqlx::test`
-      / testcontainers for tests that need a real Postgres. First
-      integration test exercises 1.6's migration round-trip.
+- [x] **1.9** `testlib::db::ephemeral` creates a uniquely-named
+      Postgres database against `DATABASE_URL`, provisions
+      schema+pgcrypto, runs migrations, hands back a pool.
+      `ephemeral_drop` handles explicit cleanup; CI's per-job
+      service container is the broader teardown. Integration test
+      `tests/integration_migrations.rs` round-trips
+      `0001_init.sql`: applies migrations, asserts
+      `nextval('knievel.config_version')` increments 1→2,
+      asserts `_sqlx_migrations` lives in the knievel schema. Test
+      self-skips with a warning when `DATABASE_URL` is unset so
+      contributors without Postgres can still run unit tests.
       Refs: `TESTING.md` § 5.1.
+
+      **Note (1.9):** Docker daemon was unavailable in the
+      authoring sandbox so the integration test couldn't be run
+      locally; verified by `cargo check --workspace --all-targets`
+      (clean) and by running the suite with the test self-skipping.
+      First real run lands when the CI workflow executes the
+      `db-integ` job against the Postgres service container.
 
 **Milestone:** `cargo nextest run` passes, `cargo xtask
 lint-migrations` passes, the CI DAG is green against an empty
