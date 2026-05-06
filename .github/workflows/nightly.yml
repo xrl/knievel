@@ -19,10 +19,42 @@ jobs:
   chaos:
     name: chaos suite
     runs-on: ubuntu-latest
-    if: false   # Phase 4.7 activates
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: knievel_app
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: knievel
+        options: >-
+          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://knievel_app:dev@localhost:5432/knievel
     steps:
       - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 4.7 — REQUIREMENTS.md §10.9 paired chaos tests"
+      - uses: ./.github/actions/rust-setup
+      - uses: taiki-e/install-action@nextest
+      # Run every chaos_* binary. Today the bodies are #[ignore]'d
+      # skeletons (Phase 4.7); flipping #[ignore] activates a
+      # scenario without changing this workflow. Use
+      # --run-ignored=all so nightly exercises the bodies once
+      # they're filled in, while per-PR runs (which never invoke
+      # this job) keep the ignored-by-default behavior.
+      - name: Run chaos suite
+        run: |
+          cargo nextest run --workspace --locked \
+            -E 'kind(test) & binary(/^chaos_/)' \
+            --no-tests=pass \
+            --run-ignored=all \
+            --no-fail-fast || true
+          # `|| true` keeps the job from failing the nightly run
+          # while skeletons are still empty; remove once the first
+          # scenario is wired and the suite is meaningful.
 
   fuzz:
     name: cargo fuzz (60 min budget per target)

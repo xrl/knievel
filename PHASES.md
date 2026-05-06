@@ -1469,8 +1469,19 @@ flows from a working binary in a real container.
       flipping `#[ignore]` is enough to add coverage to the
       matrix.
       Refs: `TESTING.md` § 12.6.
-- [ ] **4.7** Chaos suite skeleton paired 1:1 with
-      `REQUIREMENTS.md` § 10.9.
+- [x] **4.7** Chaos suite skeleton paired 1:1 with
+      `REQUIREMENTS.md` § 10.9. Nine `tests/chaos_<scenario>.rs`
+      binaries — one per row of `TESTING.md` § 9 — each
+      carrying a single `#[ignore]`'d `#[tokio::test]` whose
+      `#[ignore]` reason names the injection mechanism
+      (`iptables`, `tc qdisc`, `pg_terminate_backend`,
+      `docker compose pause`, etc.). Activated in
+      `nightly.yml` (job `chaos`) via
+      `cargo nextest run -E 'binary(/^chaos_/)' --run-ignored=all`
+      — bodies fill in over time; flipping `#[ignore]` is enough
+      to add coverage to the nightly. Issues open via
+      `peter-evans/create-issue-from-file` per
+      `TESTING.md` § 12.8 (advisory, doesn't block tags).
       Refs: `TESTING.md` § 9.
 - [ ] **4.8** Server-side ad-template rendering (`templated`
       creative variant). Adds the fourth `creative` `oneOf` arm
@@ -1665,6 +1676,19 @@ setup'))` — first lock-holder does the work in a transaction,
 subsequent holders see `rolsuper = false` and no-op. Lock
 auto-releases on commit, so there's no cleanup cost. 10 stress
 runs of shard-1 are clean.
+
+**Note (4.7):** Skeleton binaries land in `tests/chaos_*.rs`
+rather than `tests/chaos/` because Cargo's `tests/` directory
+doesn't recurse — one binary per scenario keeps the
+`binary(/^chaos_/)` filter natural. Nine binaries today,
+matching the nine rows of `TESTING.md` § 9. The nightly job's
+final command ends in `|| true` so the workflow stays green
+while bodies are empty; that drops once the first scenario is
+wired (one-line PR change). The compose harness with the
+`chaos-injector` sidecar (`NET_ADMIN` for iptables / tc) and
+the `wiremock` JWKS service is documented in
+`tests/chaos/README.md` but not yet checked in — the first
+scenario activation lands the harness alongside its body.
 
 ---
 
