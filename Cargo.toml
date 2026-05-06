@@ -38,6 +38,8 @@ anyhow  = { workspace = true }
 figment = { workspace = true }
 regex   = { workspace = true }
 serde   = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 anyhow  = { workspace = true }

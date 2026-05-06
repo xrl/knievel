@@ -196,11 +196,21 @@ once 2.3 lands.
       `metrics`) are typed up as their consumer features land.
       Module carries `#![allow(dead_code)]` to keep clippy `-D
       warnings` happy until consumers land.
-- [ ] **2.2** `tracing-subscriber` JSON output + `EnvFilter`. Pulls
-      level/format from config. OTel and Sentry initialization is
-      stubbed (booleans honored, no exporters wired yet —
-      Phase 3 work).
+- [x] **2.2** `src/observability.rs` — tracing subscriber init
+      driven by `cfg.logging.{level,format}`. JSON layer (default)
+      flattens events; `compact`/`text` available for dev. Filter
+      parses as `EnvFilter` so `knievel=info,sqlx=warn` style
+      directives work. OTel and Sentry honor their `enabled`
+      flags but log a "stub" line — real exporters land in Phase
+      3 alongside their first consumers.
       Refs: `REQUIREMENTS.md` § 10.2, § 10.3, § 10.4.
+
+      **Note (2.2):** Successful init has a process-global side
+      effect (sets the tracing default dispatcher), so we don't
+      unit-test the success path. Two negative tests cover the
+      error paths (invalid format, invalid level directive); the
+      success path is exercised by the binary at runtime and
+      eventually by the acceptance suite.
 - [ ] **2.3** `main.rs` binds `poem` at the configured `bind_addr`,
       installs SIGTERM/SIGINT handlers, drains in-flight requests
       with a bounded shutdown timeout. No handlers wired yet — bare
