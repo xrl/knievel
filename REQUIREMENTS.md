@@ -1140,6 +1140,33 @@ Total budget bounded by `shutdown_total_timeout` (default 60 s).
 or via `knievel-cli migrate`. All migrations target the configured
 schema and are idempotent at the migration-runner level (`_sqlx_migrations`).
 
+### 10.9 Degraded mode behavior
+
+When part of the stack fails, knievel's behavior is contractual —
+not best-effort. The matrix below specifies what callers see, the
+status code returned, and the operator action.
+
+| Failure mode | Detection signal | API behavior | Status | Caller retry guidance | Operator action |
+|---|---|---|---|---|---|
+| **DB writer unreachable** | `sqlx` pool errors on writes; `LISTEN` connection drops | Decision endpoint **continues serving** from in-memory snapshot; management writes fail; impression/click pings still work (events buffer in channel) | `503 / db_writer_unreachable` on writes; `200` on decisions and event pings | Backoff with jitter on writes; reads stay healthy | Check Aurora failover; the writer endpoint is the bottleneck |
+| **Snapshot stale > warn threshold** (default 60 s) | `snapshot_age_seconds` > 60 | Decisions still served; response carries `X-Knievel-Stale-Snapshot: <age_seconds>` header; management reads also carry the header | `200` (read-only paths) | None — caller decides whether stale data is acceptable | Investigate NOTIFY queue depth, Aurora failover state, network reachability of writer endpoint |
+| **Snapshot stale > critical** (default 300 s) | `snapshot_age_seconds` > 300 | Decisions still served (stale); `/readyz` returns 503 (k8s pulls pod from rotation); management writes fail | `503 / snapshot_critically_stale` on writes; `200` on decisions (with stale header) | Caller can keep trying decisions; writes need backoff | Same as above; this is operator-actionable |
+| **Event channel saturation** | `event_channel_depth == channel_capacity` | Decision endpoint **fails fast** at 503 — events would otherwise drop silently. Pings (`/e/...`) still succeed at signature-verify level but may be dropped if the channel is fully wedged | `503 / event_channel_saturated` | Backoff with jitter; the cluster is over capacity | Scale DB writer tier; the flusher can't keep up |
+| **Leader maintenance failure** (partition or rollup) | watchdog assertion: no successful run in `watchdog_hours` | Process exits with non-zero status; k8s reschedules; advisory lock released; another pod elects | n/a (process death is external) | n/a | `/readyz` reports the watchdog state; investigate the underlying SQL error in Sentry |
+| **Idempotency cache miss / corruption** | Internal | Replays of `Idempotency-Key` produce a fresh execution rather than a cached response | `200`/`201` as if first call (effects are idempotent at the row level via `externalId`) | None | None — degrades gracefully; investigate if frequent |
+| **Both auth modes misconfigured at boot** | Linter (§ AUTH.md) | Process refuses to start | n/a | n/a | Fix config, restart |
+| **JWKS endpoint unreachable** | HTTP failure on cache refresh | Cached keys serve until TTL expires, then JWT validation starts failing for that issuer (other issuers unaffected); cache refresh attempts continue at backoff | `401` for tokens whose `kid` is missing | Use a token from another issuer or wait for JWKS to be reachable | Check IdP availability and network |
+| **All Postgres connections exhausted** | `sqlx_pool_*` saturation | All endpoints return 503 except `/healthz` and `/metrics` | `503 / db_pool_exhausted` | Backoff with jitter | Scale connections, scale pods, or scale DB tier |
+
+Two cross-cutting principles:
+
+- **Reads degrade later than writes.** Decision serving is the
+  hot path; it stays available as long as the in-memory snapshot
+  exists, even when Postgres is wholly unreachable.
+- **Failures surface, not silently drop.** Channel saturation
+  returns 503; events never silently drop. Operator gets a
+  signal; caller gets a backoff hint.
+
 ## 11. Roadmap (post-v0)
 
 Order is rough; each item is independently shippable.
