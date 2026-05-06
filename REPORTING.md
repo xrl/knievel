@@ -114,7 +114,8 @@ kind.
 | `referrer_host` | `text` | Hostname only. |
 | `user_agent_hash` | `bytea` | Hash, not raw UA. |
 | `signature_nonce` | `bytea` | Per-event nonce; useful as a unique key. |
-| `dedup_key` | `bytea` | Stable per (event, signature) for impression-replay dedup. |
+| `dedup_key` | `bytea` | Stable per (event, signature) for replay dedup. Unique within `(project_id, kind, dedup_key)`. |
+| `is_duplicate` | `bool` | `false` for the first hit of a given `(kind, dedup_key)`; `true` for any subsequent hits. **Canonical billable / reportable count is `count(*) WHERE NOT is_duplicate`.** Raw counts (including duplicates) are available against `events_raw` directly when traffic-volume analysis is wanted. `events_rollup` aggregates the non-duplicate count only. |
 | `snapshot_version` | `bigint` | Monotonic config version that produced the decision; lets you reproduce a decision deterministically. |
 
 **Default retention:** 30 days. Rolling reports older than that

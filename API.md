@@ -784,10 +784,10 @@ from the rendered ad.
 
 Impression ping.
 
-- Default: `204 No Content`.
+- Default: `204 No Content` (returned in all cases below; the ping
+  is fire-and-forget from the browser's perspective).
 - With `?fmt=gif`: `200 OK`, `image/gif`, 43-byte 1×1 transparent GIF.
 - Tampered or expired signature: `204` (silent), counter incremented.
-- Replay within TTL: counted (deduped via `dedup_key`).
 
 ### `GET /e/c/{signed}`
 
@@ -798,6 +798,49 @@ Click ping.
 - Tampered or expired signature: `400`.
 - Optional `?u=<url>` overrides the redirect target only if signed into
   the payload (prevents open-redirect abuse).
+- Replays still 302 to the same URL (so users who hit Back-then-click
+  still land at the destination); see "Replay, dedup, and counts" for
+  what gets counted.
+
+### Replay, dedup, and counts
+
+There is **one canonical count** per event kind: a row is a
+"countable" event iff `is_duplicate = false`. Reporting queries can
+present either the canonical count or the raw count (which includes
+duplicates) depending on use case; billing always uses the canonical
+count.
+
+| Field | Source |
+|---|---|
+| `dedup_key` | `HMAC-SHA256(per-project-secret, kind || signature_nonce)` truncated to 16 bytes. Stable for the lifetime of a signed URL. |
+| Uniqueness | `(project_id, kind, dedup_key)` is unique within `events_raw`. The first hit lands with `is_duplicate = false`; subsequent hits with the same `(kind, dedup_key)` land with `is_duplicate = true`. |
+| Window | Lifetime within retention (default 30 days). After the partition is dropped, dedup state is gone — but so is the original event, so this is moot. |
+
+Behavior summary by event kind:
+
+- **Impression**: every hit is recorded. First → `is_duplicate=false`,
+  countable. Subsequent → `is_duplicate=true`, not counted for billing
+  but visible in raw analysis.
+- **Click**: every hit is recorded *and* every hit redirects (the
+  user expects to land somewhere). First → `is_duplicate=false`,
+  countable. Subsequent → `is_duplicate=true`, redirected, not
+  counted for CTR.
+- **Custom events** (post-v0): same shape.
+
+Canonical SQL conventions:
+
+```sql
+-- Billable / reportable count (default).
+SELECT count(*) FROM events_raw
+WHERE kind = 2 AND ts >= ... AND NOT is_duplicate;
+
+-- Raw traffic volume (analytics curiosity, abuse triage).
+SELECT count(*) FROM events_raw
+WHERE kind = 2 AND ts >= ...;
+```
+
+`events_rollup` aggregates the canonical (non-duplicate) count only.
+Raw analysis goes against `events_raw` directly.
 
 ### Signature payload
 
@@ -808,7 +851,9 @@ project_id | ad_id | creative_id | placement_id_hash | issued_at | nonce
 ```
 
 URL-safe base64. Per-project secret. TTL is configurable per project
-(default 24 h).
+(default 24 h). The 8-hour rotation overlap (REQUIREMENTS.md §6.3)
+applies to the signature secret; `dedup_key` is independent of which
+secret the URL was signed under, so dedup spans rotation cleanly.
 
 ---
 
