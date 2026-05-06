@@ -72,14 +72,38 @@ src/
                             # poem-openapi
   lib.rs                    # exposes openapi_spec_yaml() for xtask
   main.rs                   # entry point
+src/auth/                   # opaque-token parse, argon2id hash,
+                            # Role enum, Principal, BearerAuth
+                            # security scheme (Phase 3.2/3.3)
+src/handlers.rs             # open_project_tx — common prologue
+                            # for every project-scoped handler
+                            # (auth + role + tenant binding +
+                            # project-existence check)
+src/db.rs                   # begin_bound / begin_auth_lookup —
+                            # tenant-binding tx openers
+src/idempotency.rs          # Idempotency-Key replay store
+                            # (24h, body_hash via canonical
+                            # serde_json::to_vec + SHA-256)
+src/orgs.rs                 # OrgApi (projects)
+src/tokens.rs               # TokensApi (mint / list / revoke)
+src/<resource>.rs           # one file per project-scoped CRUD
+                            # resource (advertisers, campaigns,
+                            # flights, ads, creatives,
+                            # creative_templates, sites, zones,
+                            # taxonomy). Same handler shape;
+                            # macro extraction deferred until
+                            # 3.14 :batchUpsert lands.
 testlib/                    # DB test harness; testlib::db::ephemeral
+                            # plus testlib::tenant::begin_bound
 xtask/                      # repo CLI: linters + codegen
   src/lint_migrations.rs    # 4 RLS rules from REQUIREMENTS §7.1.1
   src/check_cross_tenant.rs # gate (1) — endpoint coverage
   src/openapi.rs            # spec drift gate
 tests/                      # integration tests, slice-named
-  api_placeholder.rs        # binary anchor for the api/contract slice
-  integration_migrations.rs # binary anchor for the integration slice
+  api_*.rs                  # binary(/^api/) — full HTTP via
+                            # poem::test::TestClient
+  integration_*.rs          # binary(/^integration/) — DB-level
+                            # tests; self-skip without DATABASE_URL
   cross_tenant_manifest.toml
 openapi.yaml                # generated spec, drift-checked in CI
 ```
@@ -127,6 +151,38 @@ Verify before assuming:
 - **OpenAPI spec is the contract**; `cargo xtask openapi --check`
   fails CI when the committed `openapi.yaml` drifts from what the
   binary emits. Regenerate with `cargo xtask openapi`.
+- **Project-scoped handler shape (3.8+):** `auth: BearerAuth,
+  state: Data<&AppState>, project_id: Path<String>, body:
+  Json<...>` → `crate::handlers::open_project_tx(pool,
+  &principal, &path_project_id, Role::Editor)` returns a
+  tenant-bound `Transaction` with both `knievel.org_id` and
+  `knievel.project_id` set, after running the standard authz
+  prologue. Add the operation's row to
+  `tests/cross_tenant_manifest.toml` in the same commit — the
+  cross-tenant gate fails CI without it.
+- **Cross-tenant manifest paths use the OpenAPI spec's literal
+  param names.** `:project_id` in `#[oai(path = ...)]` becomes
+  `{project_id}` in the spec; the manifest entry must match
+  exactly, including the brace-delimited param name.
+- **Wire timestamps formatted at the SQL layer** via
+  `to_char(... AT TIME ZONE 'UTC',
+  'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`. Avoids needing the
+  `sqlx` `time` feature; the `created_at` / `updated_at`
+  columns flow into `String` row fields verbatim.
+- **Object response types that round-trip via JSON** (idempotency
+  cache, etc.) need explicit `#[derive(Object,
+  serde::Serialize, serde::Deserialize)]` — `Object` does NOT
+  derive serde traits automatically. Same for request types when
+  the handler hashes them via `idempotency::body_hash`.
+- **Random IDs come from `argon2::password_hash::rand_core::{OsRng,
+  RngCore}`.** argon2 is already a dep; no need to add `rand`
+  directly. Pattern in `src/orgs.rs::random_pj_id`.
+- **Per-resource test files duplicate fixture helpers
+  intentionally** (`seed_org_project`, `mint_token`,
+  `build_app`). Extracting to a shared `tests/common/mod.rs`
+  module is a future refactor — wait until the test patterns
+  stabilize across `:batchUpsert` (3.14) and the hot path
+  (3.18).
 
 ## Gotchas already hit
 
@@ -182,6 +238,71 @@ Future sessions: don't relearn these.
    the migration linter's "every CREATE TABLE in knievel needs
    RLS" rule. Spec follow-up noted in `PHASES.md`.
 
+9. **`#[derive(ApiResponse)]` rejects two variants sharing the
+   same status code** — they collide as duplicate keys in the
+   generated OpenAPI YAML. To distinguish flavors at the same
+   status (e.g. fresh create vs idempotency replay), use one
+   variant carrying `Option<String>` for a differentiator
+   header: `Created(Json<T>, #[oai(header = "X-Foo")]
+   Option<String>)`. Send `None` for one flavor, `Some("true")`
+   for the other.
+
+10. **`clippy::large_enum_variant` trips on `ApiResponse` enums
+    where the typed Json variant is a wide struct** (10+ fields).
+    Boxing for one alloc per response isn't worth obscuring the
+    typed return — add `#![allow(clippy::large_enum_variant)]`
+    at module level. Convention used in
+    `flights.rs`/`creatives.rs`/`sites.rs`/etc.
+
+11. **`serde_json::Value` works as a `poem-openapi` Object field,**
+    surfacing as a free-form JSON `Any` schema in the spec.
+    Used for `creative_template.schema` (Phase 3.10 closes
+    cross-cutting risk #1: round-trips POST → GET → PATCH
+    bit-for-bit).
+
+12. **Postgres FORCE'd RLS default-denies operations without a
+    matching policy.** `audit_log` (Phase 3.4) relies on this
+    for append-only — only `FOR SELECT` and `FOR INSERT`
+    policies exist; UPDATE/DELETE silently affect 0 rows. The
+    migration linter's rule 3 (every `CREATE TABLE` in knievel
+    needs ENABLE RLS) still applies to partition leaves even
+    though the parent's policies cover them — keep the
+    redundant `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` on
+    each leaf you create explicitly.
+
+13. **Postgres 14 doesn't have `NULLS NOT DISTINCT`.** For
+    nullable lookup keys (e.g. `idempotency_keys.project_id`),
+    use a unique partial expression-index that coalesces NULL
+    to a sentinel: `UNIQUE (a, coalesce(b, ''), c)`. Pattern in
+    `migrations/0005_idempotency_keys.sql`.
+
+14. **`api_tokens` RLS auth-bootstrap is a chicken-and-egg fix.**
+    The principal extractor needs to read `secret_hash` before
+    any tenant binding is known. Solution: a single-row bypass
+    via the `knievel.auth_lookup_id` GUC, scoped to one row by
+    primary key (`OR id = current_setting('knievel.auth_lookup_id',
+    true)` in the USING clause). `db::begin_auth_lookup` sets
+    the GUC; the `WITH CHECK` clause for writes deliberately
+    omits it so the bypass cannot escalate writes. See
+    `migrations/0003_api_tokens.sql` and
+    `src/auth/security.rs`.
+
+15. **Migration linter rule 4 was loosened** in Phase 3.4 to
+    accept either `knievel.project_id` OR `knievel.org_id`
+    (matching `REQUIREMENTS.md` § 7.1.1's "or equivalent
+    session-scoped tenant binding" wording). The regex now
+    scans the entire `CREATE POLICY` statement (up to its
+    terminating `;`) so multi-line USING bodies with nested
+    parens and `WITH CHECK`-only INSERT policies parse
+    correctly.
+
+16. **Project creation seeds default taxonomy in the same
+    transaction.** `create_project` (in `src/orgs.rs`) binds
+    `knievel.project_id` mid-transaction with `set_config(...,
+    true)` after the project insert succeeds, then calls
+    `taxonomy::seed_default_taxonomy`. A crash between the
+    project insert and the seed leaves no half-applied state.
+
 ## Running the gates locally
 
 ```bash
@@ -218,24 +339,57 @@ force-push to main, etc.).
 
 `PHASES.md` is the source of truth. As of the last writing:
 
-- **Phase 1**: complete (foundation rails: workspace, CI, xtask
-  linters, first migration, DB harness).
-- **Phase 2**: complete (walking skeleton: config, tracing,
-  poem server, /healthz, /readyz, /version, /openapi.json).
-- **Phase 3**: broad strokes only. **First task at session
-  resume:** decompose Phase 3 into 1.x/2.x-level granularity
-  (tasks `3.1` through `3.18` are sketched; refine).
+- **Phase 1**: complete (foundation rails).
+- **Phase 2**: complete (walking skeleton).
+- **Phase 3**: decomposed into 29 tasks (Phase 3.0 commit). The
+  tenancy + auth rail (3.1–3.6) and resource-CRUD rail
+  (3.7–3.13) are complete; `xtask check-cross-tenant` reports
+  **38 project-scoped endpoints, all covered**, and
+  `openapi.yaml` is ~74 KB.
+- **Next task: 3.14** — `:batchUpsert` for every CRUD resource
+  that declares it (advertisers, campaigns, flights, ads,
+  sites, zones). Single Postgres transaction with per-row
+  diagnostics matching `API.md` "Write contract"; cross-entity
+  FK validation inside the transaction. The
+  `crud_contract!` macro (deferred from 3.8 / 3.9) should be
+  extracted in this commit — the `:batchUpsert` test rows are
+  the natural unit for the macro. After 3.14 the hot-path rail
+  starts (3.15 selection → 3.21 events).
 
 Risks to front-load (per `PHASES.md` cross-cutting risks):
 
-1. `poem-openapi` round-trip of `CreativeTemplate.schema` JSON
-   Schema documents — spike before Phase 3.5 (CreativeTemplate
-   handlers).
+1. ~~`poem-openapi` round-trip of `CreativeTemplate.schema`~~
+   **Closed in 3.10** — `serde_json::Value` round-trips
+   bit-for-bit through the typed handler surface. See
+   `creative_template_json_schema_round_trips`.
 2. Aurora-specific behavior (NOTIFY drop on failover, advisory
    lock release semantics) — simulated in code, validate against
    real Aurora before Phase 5 tag.
 3. HMAC rotation overlap with stable `dedup_key` — land in
-   Phase 3.9 with `proptest` coverage.
+   Phase 3.16 (renumbered from 3.9) with `proptest` coverage.
+
+**Open known gaps** (documented as PHASES.md notes; resolve when
+the corresponding handler feature lands):
+
+- **External-id idempotency on POST creates.** `API.md` says
+  POST `/projects` is "idempotent on externalId" — the existing
+  row should come back at 200, not 409. Today the handler
+  returns 409 `external_id_conflict`. Lands with 3.14
+  `:batchUpsert` (the upsert path is shared).
+- **Cursor pagination.** Every list endpoint returns
+  `next_cursor: null`; the envelope shape is ready. Real cursor
+  encoding is a follow-up.
+- **`If-Match` etag validation on PATCH.** Etag is bumped on
+  every PATCH, but PATCH doesn't read the `If-Match` header
+  yet. Future task.
+- **Site URL/aliases uniqueness across the union.** The unique
+  constraint covers `(project_id, url)` only; aliases are
+  application-layer for v0. Partial expression-index when write
+  throughput needs it.
+- **`Creative` is a flat union, not a typed `oneOf`.** `API.md`
+  § 3.5 documents a `oneOf` discriminated by `type`; the v0
+  wire shape uses a single `kind` column with per-kind nullable
+  fields. Spec follow-up noted in 3.10's PHASES.md note.
 
 ## When in doubt
 
