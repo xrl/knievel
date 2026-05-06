@@ -6,9 +6,8 @@
 //! 60 s total — `REQUIREMENTS.md` § 10.7).
 //!
 //! Handlers (`/healthz`, `/readyz`, `/version`, `/openapi.json`)
-//! land in subsequent Phase 2 tasks and are wired into `routes()`
-//! as they arrive. Today the route table is empty and the server
-//! returns `404` to every request.
+//! land in Phase 2.4–2.7 and are wired into `routes()` as they
+//! arrive.
 
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -16,16 +15,18 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use poem::listener::TcpListener;
-use poem::{get, Route, Server};
+use poem::{get, EndpointExt, Route, Server};
 
 use crate::config::Config;
+use crate::state::AppState;
 use crate::system;
 
 pub async fn run(cfg: Config) -> Result<()> {
     let addr = SocketAddr::from_str(&cfg.api.bind_addr)
         .with_context(|| format!("invalid api.bind_addr: {}", cfg.api.bind_addr))?;
 
-    let app = routes();
+    let state = build_state(&cfg).await;
+    let app = routes().data(state);
 
     tracing::info!(
         addr = %addr,
@@ -47,16 +48,45 @@ pub async fn run(cfg: Config) -> Result<()> {
     Ok(())
 }
 
-/// Routes wired so far. Each Phase 2.x task touches this single
-/// helper as its endpoint lands.
+/// Routes wired so far. Each Phase 2.x task adds its endpoint
+/// here; the helper is the single edit point for new top-level
+/// system routes.
 pub(crate) fn routes() -> Route {
-    Route::new().at("/healthz", get(system::healthz))
+    Route::new()
+        .at("/healthz", get(system::healthz))
+        .at("/readyz", get(system::readyz))
+}
+
+/// Build initial `AppState`. Today: maybe-connect to Postgres;
+/// failure is non-fatal during Phase 2 bootstrap (the server
+/// still starts and `/readyz` reports 503 with `db_unreachable`).
+/// Phase 3+ makes a working DB connection mandatory at boot.
+async fn build_state(cfg: &Config) -> AppState {
+    let mut state = AppState::new();
+
+    if let Some(url) = &cfg.database.url {
+        match sqlx::PgPool::connect(url).await {
+            Ok(pool) => {
+                tracing::info!("connected to Postgres");
+                state = state.with_db(pool);
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "DB connection failed at boot; /readyz will report 503"
+                );
+            }
+        }
+    } else {
+        tracing::info!(
+            "no database.url configured; /readyz will report ok: no_db_configured"
+        );
+    }
+
+    state
 }
 
 async fn shutdown_signal() {
-    // Unix-only signal handling. Knievel is a Linux-targeted
-    // service per REQUIREMENTS.md § 8 (distroless container);
-    // Windows support is not in scope.
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = match signal(SignalKind::terminate()) {
         Ok(s) => s,

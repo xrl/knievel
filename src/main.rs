@@ -1,6 +1,7 @@
 mod config;
 mod observability;
 mod server;
+mod state;
 mod system;
 
 #[tokio::main]

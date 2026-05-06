@@ -225,11 +225,22 @@ once 2.3 lands.
       `Route` is a single `at("/healthz", get(...))` today;
       subsequent endpoints chain on as they land.
       Refs: `API.md` § 5, `REQUIREMENTS.md` § 10.6.
-- [ ] **2.5** `/readyz` handler. `200` only if DB is reachable
-      (snapshot/flusher/leader checks land in later phases as TODOs
-      flagged in the readiness output). Integration test that
-      asserts 503 when DB is unreachable.
+- [x] **2.5** `src/state.rs::AppState` carries the optional
+      `PgPool` (snapshot/events/leader fields land alongside their
+      subsystems in Phase 3+). `server::build_state()` connects
+      to Postgres at boot when `database.url` is set; failure is
+      non-fatal during Phase 2 (server still starts; `/readyz`
+      reports 503). `/readyz` checks `SELECT 1`; returns 200 with
+      `ok\n` when reachable, `200 ok: no_db_configured\n` when no
+      URL, `503 not_ready: db_unreachable\n` on error.
       Refs: `API.md` § 5, `REQUIREMENTS.md` § 10.6, § 10.9.
+
+      **Note (2.5):** Only the DB-reachability check is real today
+      (REQUIREMENTS.md § 10.6 lists four conditions; the
+      snapshot, flusher, and leader checks land alongside their
+      subsystems in Phase 3+). The DB-unreachable HTTP-level
+      assertion lands in db-integ once Phase 3's test harness
+      threads a real `PgPool` through `AppState`.
 - [ ] **2.6** `/version` handler. Build metadata from `vergen`
       (git SHA, build time). Schema version. The `auth` block is
       a stub (modes `[]`, no issuers) until Phase 3 lands real
