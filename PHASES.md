@@ -426,16 +426,35 @@ manager and leader election running.
       bypass: it `set_config('knievel.auth_lookup_id', $id, true)`
       on its lookup transaction, queries by primary key, and
       lets the transaction roll back when verification fails.
-- [ ] **3.3** First handler — `POST /v1/orgs/{orgId}/projects` and
-      `GET /v1/orgs/{orgId}/projects/{projectId}`. `OrgApi`
-      `OpenApiService` mounted alongside `SystemApi`. Insta-snapshot
-      contract test for `create_returns_201`. Cross-org negative
-      test asserts an org-A token receives `403 wrong_tenant` when
-      addressing org B. Manifest entry not required (org-scoped
-      paths aren't gated by `xtask check-cross-tenant`); the
-      negative test rides in `tests/api/orgs_projects.rs`. Updates
-      `openapi.yaml`.
-      Refs: `API.md` § 2.1, `TESTING.md` § 6.4, § 6.5.
+- [x] **3.3** First handler — `POST /v1/orgs/{orgId}/projects`
+      and `GET /v1/orgs/{orgId}/projects/{projectId}`. `OrgApi`
+      mounted alongside `SystemApi` via the tuple form
+      `OpenApiService::new((SystemApi, OrgApi), ...)`.
+      `BearerAuth` poem-openapi `SecurityScheme` parses opaque
+      tokens, opens a `db::begin_auth_lookup` transaction (so the
+      Phase 3.2 RLS auth-bootstrap branch unlocks one row by PK),
+      verifies argon2id, builds a `Principal`. `db::begin_bound`
+      mirrors `testlib::tenant::begin_bound` for production code.
+      Six API tests in `tests/api_projects.rs` (slice
+      `binary(/^api/)`) cover: 201 happy path; cross-org →
+      `403 wrong_tenant`; reader → `403 role_insufficient`;
+      missing auth → 401; bad secret → 401; create→GET round-trip.
+      Updates `openapi.yaml` (2508 → 6602 bytes).
+      Refs: `API.md` § 2.1, `TESTING.md` § 6.4, § 6.5,
+      `AUTH.md` "Authorization."
+
+      **Note (3.3):** Insta snapshots are not yet wired in —
+      `insta` lands as a workspace dep alongside the
+      `crud_contract!` macro in 3.8 where the snapshot suite
+      becomes the unit of repetition; for v0 of one handler the
+      structural assertions in `create_project_returns_201` cover
+      the contract. Timestamps are emitted as RFC 3339 by
+      Postgres `to_char(... AT TIME ZONE 'UTC', ...)` so the wire
+      shape doesn't depend on a sqlx time-crate feature.
+      `random_pj_id` reuses argon2's transitive `OsRng` so we
+      don't pull a direct `rand` dep. `routes()` was promoted
+      from `pub(crate)` to `pub` so the API-slice tests can
+      assemble a `TestClient` over the production routes table.
 - [ ] **3.4** Audit-log migration `0004`: `audit_log` (monthly
       range-partitioned, RLS by `org_id`, append-only enforced via
       policy — `UPDATE`/`DELETE` rejected). Integration test

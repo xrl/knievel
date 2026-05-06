@@ -9,7 +9,9 @@
 
 pub mod auth;
 pub mod config;
+pub mod db;
 pub mod observability;
+pub mod orgs;
 pub mod server;
 pub mod state;
 pub mod system;
@@ -20,6 +22,10 @@ pub mod system;
 /// (`TESTING.md` § 6.3, § 12.7).
 pub fn openapi_spec_yaml() -> String {
     use poem_openapi::OpenApiService;
-    let svc = OpenApiService::new(system::SystemApi, "knievel", env!("CARGO_PKG_VERSION"));
+    let svc = OpenApiService::new(
+        (system::SystemApi, orgs::OrgApi),
+        "knievel",
+        env!("CARGO_PKG_VERSION"),
+    );
     svc.spec_yaml()
 }

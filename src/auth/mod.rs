@@ -16,6 +16,7 @@
 pub mod opaque;
 pub mod principal;
 pub mod role;
+pub mod security;
 
 pub use principal::{Principal, Scope, TokenType};
 pub use role::Role;

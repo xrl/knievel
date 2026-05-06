@@ -20,6 +20,7 @@ use poem::{EndpointExt, Route, Server};
 use poem_openapi::OpenApiService;
 
 use crate::config::Config;
+use crate::orgs::OrgApi;
 use crate::state::AppState;
 use crate::system::SystemApi;
 
@@ -54,8 +55,8 @@ pub async fn run(cfg: Config) -> Result<()> {
 /// plus its `/openapi.json` spec endpoint; Phase 3+ adds the
 /// management + decision OpenAPI services as additional
 /// `OpenApiService` mounts.
-pub(crate) fn routes() -> Route {
-    let api = OpenApiService::new(SystemApi, "knievel", env!("CARGO_PKG_VERSION"));
+pub fn routes() -> Route {
+    let api = OpenApiService::new((SystemApi, OrgApi), "knievel", env!("CARGO_PKG_VERSION"));
     let spec = api.spec_endpoint();
 
     Route::new().nest("/", api).at("/openapi.json", spec)

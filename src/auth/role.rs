@@ -35,6 +35,20 @@ impl Role {
     }
 }
 
+impl std::str::FromStr for Role {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "reader" => Ok(Role::Reader),
+            "editor" => Ok(Role::Editor),
+            "admin" => Ok(Role::Admin),
+            "org-admin" => Ok(Role::OrgAdmin),
+            "org-owner" => Ok(Role::OrgOwner),
+            other => Err(anyhow::anyhow!("unknown role: {other}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
