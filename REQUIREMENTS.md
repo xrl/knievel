@@ -763,18 +763,93 @@ topology.kubernetes.io/zone`, `whenUnsatisfiable: DoNotSchedule`,
 values block ships in the README so new operators can copy-paste
 without learning Kubernetes-API internals.
 
-## 9. Performance Targets
+## 9. Performance and Capacity Envelope
+
+### 9.1 Target SLOs (unmeasured; aspirational)
+
+These are the SLOs we design toward. **They are not measured
+numbers.** The capacity envelope below specifies how we'll verify
+them and what to watch in the meantime.
 
 Single node, 4 vCPU / 8 GB RAM, 100 k active flights:
 
 - p50 decision latency ≤ **1 ms** (1 placement, no overrides).
 - p99 decision latency ≤ **10 ms** (4 placements).
-- Sustained throughput ≥ **20 000 decisions/sec** before saturating one
-  core.
+- Sustained throughput ≥ **20 000 decisions/sec** before saturating
+  one core.
 - Cold-start to first decision served ≤ **2 s**.
 - Event flusher keeps end-to-end ingest lag ≤ **3 s** at peak.
 
-Starting numbers; we measure and adjust.
+### 9.2 Measurement protocol
+
+Verified per major release that touches the hot path
+(decision selection, snapshot loader, event flusher) before tagging:
+
+- **Load generator:** [`vegeta`](https://github.com/tsenart/vegeta)
+  or `k6`. Synthetic project with 100 k active flights drawn from a
+  realistic distribution (priority tiers, weights, targeting
+  predicates).
+- **Workload:** mixed read (90% decision) + write (10% management
+  CRUD) at increasing concurrency until p99 breaches the SLO.
+- **DB substrate:** matches the deployment's expected Postgres
+  class. RX-style measurements use Aurora Postgres r6g.large or
+  comparable; community measurements use a self-hosted Postgres on
+  comparable hardware.
+- **Reportable artifact:** committed to `bench/results/<version>.md`
+  with knievel SHA, DB class, achieved QPS, achieved latency
+  percentiles, and observed bottleneck. Numbers in §9.1 are updated
+  to reflect the measured floor.
+
+Until §9.1 numbers are validated by an entry in `bench/results/`,
+docs and dashboards label them as **TARGET (unverified)**.
+
+### 9.3 Operator alert thresholds
+
+Independent of benchmark numbers, these thresholds are actionable
+today off the metrics described in §10.5:
+
+| Signal | Warn | Critical | Action |
+|---|---|---|---|
+| `knievel_decision_duration_seconds` p99 | 2× SLO (20 ms) | 5× SLO (50 ms) | Investigate snapshot age, DB latency, queue depth. |
+| `knievel_event_channel_depth / channel_capacity` | 50 % | 80 % | DB writer slow or down; scale flusher connections or DB tier. |
+| `knievel_event_flush_lag_seconds` | 10 s | 30 s | DB writer saturation; same as above. |
+| `knievel_snapshot_age_seconds` | 60 s | 300 s | NOTIFY queue / failover; check DB replication lag and writer endpoint. |
+| `knievel_partition_maintenance_seconds_since_last` | 6 h | 24 h | Leader health; check `/readyz` and watchdog. |
+| Postgres `pg_stat_activity` connection count for `knievel_app` | 80 % of pool | 95 % | Pool exhaustion; tune `max_connections` or scale pods. |
+
+### 9.4 Scaling decision tree
+
+When an SLO trips, the order of operations:
+
+1. **Latency degraded?** Inspect snapshot age + DB latency
+   percentiles. Stale snapshot → snapshot loader is the bottleneck;
+   investigate NOTIFY/poll path. DB-bound → scale read or writer
+   tier.
+2. **Throughput degraded?** Look at CPU utilization on knievel pods
+   *before* scaling pods. Hot-path is RAM-bound, not DB-bound; CPU
+   saturation suggests scaling out is the right move.
+3. **Event ingest lagging?** Check channel depth + flush batch
+   sizes. Channel near capacity = flusher can't keep up; scale DB
+   writer tier (this isn't a knievel-pod scaling problem).
+4. **Backups bloating?** `events_raw` is partitioned; reduce
+   `events.retention_days` (cuts retained data quickly because the
+   oldest partitions drop next maintenance run).
+
+Scaling out knievel pods is cheap (stateless except for the
+advisory-lock leader, which re-elects in ≤ 30 s); scaling Postgres
+is the real cost. Operators should bias toward "more pods, same
+DB" up to the connection budget, then "bigger DB."
+
+### 9.5 What's measured vs. what's targeted
+
+Until benchmarks land:
+
+- §9.1 numbers carry a "TARGET (unverified)" caveat in the docs and
+  in any dashboards we ship.
+- §9.3 alert thresholds are operator-actionable today regardless of
+  benchmarking status.
+- The first release that touches the hot path produces a
+  `bench/results/v0.1.md` artifact; subsequent releases append.
 
 ## 10. Operational
 
