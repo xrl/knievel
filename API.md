@@ -127,6 +127,55 @@ response with `Idempotent-Replay: true` set.
 `code` is a stable machine-readable string. `requestId` matches the
 `X-Request-Id` response header and server logs.
 
+### Write contract
+
+Every mutation — single `POST` / `PATCH` and any `:batchUpsert` —
+runs in **exactly one Postgres transaction**. There are three rules:
+
+1. **All-or-nothing per call.** If any row in a `:batchUpsert` (or
+   any cross-entity FK in a single-row write) fails validation, the
+   entire transaction rolls back. Partial state never leaks into the
+   snapshot. There are no "best-effort" semantics on any wire
+   endpoint; the gem-side `upsertWithFlightAndCreative` helper is
+   self-healing across multiple wire calls, but each individual wire
+   call is atomic.
+2. **Cross-entity FKs validated inside the transaction.** Creating
+   a flight that references a campaign, an ad referencing a
+   creative, a creative referencing a CreativeTemplate — every
+   reference is verified against the same transaction's view, so a
+   campaign created earlier in the same `:batchUpsert` is visible to
+   a flight defined later in the array. This means callers can ship
+   a logically coherent unit (advertiser → campaign → flight → ad
+   → creative) in one batch.
+3. **Per-row diagnostics.** When a batch fails, the error body lists
+   each offending row with deterministic structure:
+
+```json
+{
+  "error": {
+    "code": "batch_partial_failure",
+    "message": "1 of 12 rows failed validation",
+    "requestId": "01JABCDEF...",
+    "details": [
+      {
+        "index":   3,
+        "field":   "campaignId",
+        "code":    "fk_not_found",
+        "message": "campaignId 12345 does not exist in this project"
+      }
+    ]
+  }
+}
+```
+
+`details[].index` is the position in the request array.
+`details[].code` is one of: `fk_not_found`, `external_id_conflict`,
+`validation_failed`, `unique_violation`, `if_match_mismatch`. The
+absence of a row in `details[]` means it would have committed
+successfully; idempotent retries can skip already-applied rows by
+omitting them from the next request, since `externalId` upserts are
+already idempotent.
+
 ### Common entity fields
 
 | Field | Type | Notes |
