@@ -2258,6 +2258,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: decisions
+  /v1/projects/{project_id}/decisions:explain:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/DecisionsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ExplainResponse'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: decisionsExplain
 components:
   schemas:
     Ad:
@@ -3262,6 +3306,90 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorBody'
+    ExplainCandidate:
+      type: object
+      title: ExplainCandidate
+      required:
+      - ad_id
+      - creative_id
+      - flight_id
+      - campaign_id
+      - advertiser_id
+      - weight
+      - evaluation
+      properties:
+        ad_id:
+          type: integer
+          format: int64
+        creative_id:
+          type: integer
+          format: int64
+        flight_id:
+          type: integer
+          format: int64
+        campaign_id:
+          type: integer
+          format: int64
+        advertiser_id:
+          type: integer
+          format: int64
+        weight:
+          type: integer
+          format: int32
+        evaluation:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExplainEvaluation'
+    ExplainEvaluation:
+      type: object
+      title: ExplainEvaluation
+      required:
+      - rule
+      - result
+      properties:
+        rule:
+          type: string
+        result:
+          type: string
+        detail:
+          type: string
+    ExplainPlacement:
+      type: object
+      title: ExplainPlacement
+      required:
+      - candidates
+      properties:
+        priority_tier:
+          type: integer
+          format: int32
+        selected_ad_id:
+          type: integer
+          format: int64
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExplainCandidate'
+    ExplainResponse:
+      type: object
+      title: ExplainResponse
+      required:
+      - snapshot_version
+      - decisions
+      - explanation
+      properties:
+        snapshot_version:
+          type: integer
+          format: int64
+        decisions:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/DecisionAd'
+        explanation:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ExplainPlacement'
     Flight:
       type: object
       title: Flight

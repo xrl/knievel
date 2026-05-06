@@ -25,7 +25,7 @@ use crate::campaigns::CampaignsApi;
 use crate::config::Config;
 use crate::creative_templates::CreativeTemplatesApi;
 use crate::creatives::CreativesApi;
-use crate::decisions::DecisionsApi;
+use crate::decisions::{DecisionsApi, ExplainApi};
 use crate::flights::FlightsApi;
 use crate::orgs::OrgApi;
 use crate::sites::SitesApi;
@@ -82,6 +82,7 @@ pub fn routes() -> Route {
             ZonesApi,
             TaxonomyApi,
             DecisionsApi,
+            ExplainApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

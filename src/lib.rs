@@ -54,6 +54,7 @@ pub fn openapi_spec_yaml() -> String {
             zones::ZonesApi,
             taxonomy::TaxonomyApi,
             decisions::DecisionsApi,
+            decisions::ExplainApi,
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),

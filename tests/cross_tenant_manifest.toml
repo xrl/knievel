@@ -257,3 +257,9 @@ test   = "cross_tenant_zones_batch_upsert"
 path   = "/v1/projects/{project_id}/decisions"
 method = "POST"
 test   = "cross_tenant_decisions"
+
+# Decision explainer — Phase 3.19.
+[[entry]]
+path   = "/v1/projects/{project_id}/decisions:explain"
+method = "POST"
+test   = "cross_tenant_decisions_explain"

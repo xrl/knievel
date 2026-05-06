@@ -859,12 +859,29 @@ manager and leader election running.
       query bodies. (5) **`Principal` reference**: the
       `Principal` import is present so the audit-emit follow-up
       doesn't have to re-thread it.
-- [ ] **3.19** Decision explainer — `POST
+- [x] **3.19** Decision explainer — `POST
       /v1/projects/{projectId}/decisions:explain`. Three-control
       gate for `force.*` (`allow_force_decision` project flag,
       Project Admin role, global kill-switch); each forced call
       writes one `audit_log` row.
+      `decisions::ExplainApi` accepts the same `DecisionsRequest`
+      and returns the same `decisions` payload (with
+      `__explain_dummy__` placeholder URLs per `API.md` § 1) plus
+      a per-placement `explanation` block listing every candidate
+      with rule-by-rule pass/fail diagnostics
+      (`flight_active`, `ad_active`, `site_match`,
+      `ad_type_match`, `block_advertiser_or_campaign`,
+      `weighted_random`). Cross-tenant gate now reports 46
+      covered. `openapi.yaml` grew 94 → 97 KB.
       Refs: `API.md` § 1, `AUTH.md` "Endpoint → minimum role."
+
+      **Note (3.19):** `force.*` audit emission lands with the
+      events channel (3.21) — same dependency as 3.18. The
+      explainer never honors `force.*` itself (it's a debug
+      surface that exposes the rule application) so this is
+      safe to ship before the audit story closes. Rate-limiting
+      (60 req/min per token per `API.md`) is a 4.x concern;
+      noted as a follow-up.
 - [ ] **3.20** Events migration `0009_events_raw.sql` — partitioned
       by day on `ts`, no default partition, no secondary indexes,
       RLS by `org_id`. First leaf for today included; partition

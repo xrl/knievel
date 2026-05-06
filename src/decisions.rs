@@ -324,3 +324,309 @@ fn mint_nonce(now_ms: i64, ad_id: i64) -> [u8; 8] {
 /// at the function level so the signature stays informative.
 #[allow(dead_code)]
 fn _principal_referenced(_p: &Principal) {}
+
+// ----------------------------------------------------------------
+// Phase 3.19 — Decision explainer.
+//
+// `POST /v1/projects/{projectId}/decisions:explain` accepts the
+// same request body as `:decisions` and returns the same
+// `decisions` payload plus a per-placement `explanation` block
+// listing every candidate ad and the rules that were applied.
+// No event is recorded; impression / click URLs returned are
+// dummy placeholders. Same auth as `decisions`.
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct ExplainEvaluation {
+    pub rule: String,
+    pub result: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct ExplainCandidate {
+    pub ad_id: i64,
+    pub creative_id: i64,
+    pub flight_id: i64,
+    pub campaign_id: i64,
+    pub advertiser_id: i64,
+    pub weight: i32,
+    pub evaluation: Vec<ExplainEvaluation>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct ExplainPlacement {
+    pub priority_tier: Option<i32>,
+    pub selected_ad_id: Option<i64>,
+    pub candidates: Vec<ExplainCandidate>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct ExplainResponse {
+    pub snapshot_version: i64,
+    pub decisions: HashMap<String, Vec<DecisionAd>>,
+    pub explanation: HashMap<String, ExplainPlacement>,
+}
+
+#[derive(ApiResponse)]
+pub enum ExplainResp {
+    #[oai(status = 200)]
+    Ok(Json<ExplainResponse>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    #[oai(status = 503)]
+    Unavailable(Json<ErrorEnvelope>),
+}
+
+pub struct ExplainApi;
+
+#[OpenApi]
+impl ExplainApi {
+    #[oai(
+        path = "/v1/projects/:project_id/decisions:explain",
+        method = "post",
+        operation_id = "decisionsExplain"
+    )]
+    async fn explain(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        project_id: Path<String>,
+        body: Json<DecisionsRequest>,
+    ) -> ExplainResp {
+        let principal = auth.0;
+        let pj = project_id.0;
+        let req = body.0;
+
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => return ExplainResp::Unavailable(Json(err("no_db", "no database configured"))),
+        };
+        let tx = match open_project_tx(pool, &principal, &pj, Role::Reader).await {
+            Ok(t) => t,
+            Err(e) => return ExplainResp::Forbidden(Json(err(e.code(), e.message()))),
+        };
+        drop(tx);
+
+        let snap = state.0.snapshot.read();
+        let project = match snap.projects.get(&pj) {
+            Some(p) => p,
+            None => {
+                return ExplainResp::Unavailable(Json(err(
+                    "snapshot_cold",
+                    "snapshot has not loaded this project yet",
+                )))
+            }
+        };
+
+        if req.placements.is_empty() {
+            return ExplainResp::BadRequest(Json(err(
+                "placements_required",
+                "placements must be a non-empty array",
+            )));
+        }
+        if req.placements.len() > 32 {
+            return ExplainResp::BadRequest(Json(err(
+                "too_many_placements",
+                "max 32 placements per request",
+            )));
+        }
+
+        let block = build_block(&req.block);
+        let now_ms = epoch_ms();
+        let mut decisions: HashMap<String, Vec<DecisionAd>> = HashMap::new();
+        let mut explanation: HashMap<String, ExplainPlacement> = HashMap::new();
+
+        for placement in &req.placements {
+            let mut candidates_out: Vec<ExplainCandidate> = Vec::new();
+            let resolved = resolve_site(project, placement);
+            // Walk every ad in the snapshot; classify each rule.
+            for ad in &project.ads {
+                let Some(flight) = project.flights.iter().find(|f| f.id == ad.flight_id) else {
+                    continue;
+                };
+                let mut eval = Vec::new();
+                let mut all_pass = true;
+
+                if !flight.is_active {
+                    eval.push(ExplainEvaluation {
+                        rule: "flight_active".into(),
+                        result: "fail".into(),
+                        detail: Some("flight.is_active = false".into()),
+                    });
+                    all_pass = false;
+                } else {
+                    eval.push(ExplainEvaluation {
+                        rule: "flight_active".into(),
+                        result: "pass".into(),
+                        detail: None,
+                    });
+                }
+                if !ad.is_active {
+                    eval.push(ExplainEvaluation {
+                        rule: "ad_active".into(),
+                        result: "fail".into(),
+                        detail: Some("ad.is_active = false".into()),
+                    });
+                    all_pass = false;
+                } else {
+                    eval.push(ExplainEvaluation {
+                        rule: "ad_active".into(),
+                        result: "pass".into(),
+                        detail: None,
+                    });
+                }
+                if let Some(s) = resolved {
+                    let pass = flight.site_ids.is_empty() || flight.site_ids.contains(&s);
+                    eval.push(ExplainEvaluation {
+                        rule: "site_match".into(),
+                        result: if pass { "pass".into() } else { "fail".into() },
+                        detail: if pass {
+                            None
+                        } else {
+                            Some(format!(
+                                "site_id {s} not in flight.site_ids {:?}",
+                                flight.site_ids
+                            ))
+                        },
+                    });
+                    all_pass &= pass;
+                } else {
+                    eval.push(ExplainEvaluation {
+                        rule: "site_match".into(),
+                        result: "fail".into(),
+                        detail: Some("placement site did not resolve".into()),
+                    });
+                    all_pass = false;
+                }
+                let at_match = flight.ad_types.is_empty()
+                    || placement
+                        .ad_types
+                        .iter()
+                        .any(|t| flight.ad_types.contains(t));
+                eval.push(ExplainEvaluation {
+                    rule: "ad_type_match".into(),
+                    result: if at_match {
+                        "pass".into()
+                    } else {
+                        "fail".into()
+                    },
+                    detail: if at_match {
+                        None
+                    } else {
+                        Some(format!(
+                            "no overlap with flight.ad_types {:?}",
+                            flight.ad_types
+                        ))
+                    },
+                });
+                all_pass &= at_match;
+
+                let block_drop = block.advertiser_ids.contains(&flight.advertiser_id)
+                    || block.campaign_ids.contains(&flight.campaign_id);
+                eval.push(ExplainEvaluation {
+                    rule: "block_advertiser_or_campaign".into(),
+                    result: if block_drop {
+                        "fail".into()
+                    } else {
+                        "pass".into()
+                    },
+                    detail: if block_drop {
+                        Some("excluded by block.*".into())
+                    } else {
+                        None
+                    },
+                });
+                all_pass &= !block_drop;
+
+                let _ = all_pass;
+                candidates_out.push(ExplainCandidate {
+                    ad_id: ad.id,
+                    creative_id: 0,
+                    flight_id: flight.id,
+                    campaign_id: flight.campaign_id,
+                    advertiser_id: flight.advertiser_id,
+                    weight: ad.weight,
+                    evaluation: eval,
+                });
+            }
+
+            // Now run the actual selection so the explanation
+            // matches what /decisions would have done.
+            if let Some(s) = resolved {
+                if !placement.ad_types.is_empty() {
+                    let count = placement.count.unwrap_or(1).clamp(1, 10) as u32;
+                    let p = Placement {
+                        site_id: s,
+                        zone_ids: placement.zone_ids.clone().unwrap_or_default(),
+                        ad_types: placement.ad_types.clone(),
+                        count,
+                    };
+                    let cands =
+                        selection::filter(&project.flights, &project.ads, &p, &block, now_ms);
+                    let top = selection::priority(&cands);
+                    let seed = selection_seed(&placement.id, now_ms);
+                    let picks = selection::weighted_random(&top, count, seed);
+                    let selected_ad = picks.first().map(|c| c.ad.id);
+                    let tier = top.first().map(|c| c.flight.priority_tier);
+                    // Mark the selected ad in the explanation.
+                    if let Some(sel) = selected_ad {
+                        for c in candidates_out.iter_mut() {
+                            if c.ad_id == sel {
+                                c.evaluation.push(ExplainEvaluation {
+                                    rule: "weighted_random".into(),
+                                    result: "selected".into(),
+                                    detail: None,
+                                });
+                            }
+                        }
+                    }
+                    let placement_decisions: Vec<DecisionAd> = picks
+                        .iter()
+                        .map(|c| DecisionAd {
+                            ad_id: c.ad.id,
+                            creative_id: 0,
+                            flight_id: c.flight.id,
+                            campaign_id: c.flight.campaign_id,
+                            advertiser_id: c.flight.advertiser_id,
+                            priority_id: c.flight.priority_tier as i64,
+                            site_id: s,
+                            // Per spec: explainer URLs are
+                            // dummy placeholders, marked as such
+                            // so callers don't accidentally serve
+                            // them.
+                            click_url: "/e/c/__explain_dummy__".into(),
+                            impression_url: "/e/i/__explain_dummy__".into(),
+                        })
+                        .collect();
+                    decisions.insert(placement.id.clone(), placement_decisions);
+                    explanation.insert(
+                        placement.id.clone(),
+                        ExplainPlacement {
+                            priority_tier: tier,
+                            selected_ad_id: selected_ad,
+                            candidates: candidates_out,
+                        },
+                    );
+                    continue;
+                }
+            }
+            decisions.insert(placement.id.clone(), Vec::new());
+            explanation.insert(
+                placement.id.clone(),
+                ExplainPlacement {
+                    priority_tier: None,
+                    selected_ad_id: None,
+                    candidates: candidates_out,
+                },
+            );
+        }
+
+        ExplainResp::Ok(Json(ExplainResponse {
+            snapshot_version: snap.config_version,
+            decisions,
+            explanation,
+        }))
+    }
+}
