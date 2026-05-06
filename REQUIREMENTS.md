@@ -1221,9 +1221,6 @@ Order is rough; each item is independently shippable.
 
 ## 12. Open Questions
 
-Most of the questions raised during design have been resolved and
-folded into the spec. The remaining few:
-
 - **`poem-openapi` JSON Schema cross-reference** — `CreativeTemplate.schema`
   embeds a JSON Schema document; verify `poem-openapi` round-trips it
   through the generated OpenAPI without flattening or escaping. Spike
@@ -1234,42 +1231,6 @@ folded into the spec. The remaining few:
 - **JWT claim format default** (`object` vs `flat`). Both supported;
   `object` is the documented default. Reconfirm after first integration
   uses it in anger.
-
-### Resolved (folded in earlier)
-
-- Snapshot refresh: notify + version-poll (5 s backstop). §7.2.
-- Image hosting: S3-compatible default, 40 MB max, allow-list
-  `image/{jpeg,png,gif,webp,avif}`. §7.9.
-- `CreativeTemplate.schema`: JSON Schema. §6.
-- Cross-project ads: org-scoped Ad Library; project Ads can inline a
-  creative or reference a library item. §5.1.
-- Admin UI auth: SSO/OIDC only, no local accounts. §11 roadmap.
-- Cursor encoding: HMAC-signed blob over `(last_id, last_ts)`.
-- HMAC secret rotation: 8-hour overlap during which `n` and `n-1`
-  both verify. §6.3 / `AUTH.md`.
-- Member removal does **not** auto-revoke their tokens; documented
-  loudly. Tokens time out by their own expiry.
-- JWT principal (`iss`, `sub`, `azp`) included in tracing/log fields
-  and Sentry scope; mapping to humans is the operator's job. §10.
-- Migrations auto-run at startup; impactful migrations called out in
-  release notes for operator coordination.
-- Cold-start ordering: migrate → load snapshot → start partition
-  election → accept requests, all reflected in `/readyz`.
-- API versioning: additive-forever with explicit rules and
-  deprecation windows; OpenAPI is the contract. §6.4.
-- `ads:upsertWithFlightAndCreative` stays a self-healing gem helper
-  (no wire-side transaction).
-- Empty decision arrays count toward request volume for billing /
-  pacing purposes.
-- Project HMAC secret server-generated at project creation. §6.3.
-- `knievel-cli seed-demo` for new contributor installs.
-- Multi-AZ HA via Helm `topologySpreadConstraints` documented in
-  chart README. §8.1.
-- DR / RPO targets explicitly out of scope; inherit from the host
-  Postgres.
-- Kubernetes ServiceAccount JWTs as a first-class auth mode, with
-  per-issuer `claim_mapping` to derive principal from `sub`.
-  `AUTH.md`.
 
 ## References
 
