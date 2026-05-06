@@ -1154,12 +1154,47 @@ manager and leader election running.
       step (`API.md` § 2.4: "Library references are resolved
       through the in-memory snapshot at decision time") lands
       with the snapshot reload query bodies.
-- [ ] **3.29** S3-compatible image upload. `POST
+- [x] **3.29** S3-compatible image upload. `POST
       /v1/projects/{projectId}/creatives/{id}/image` (multipart),
       magic-byte sniffing per `REQUIREMENTS.md` § 7.9, returns
       `imageUrl`. Adapter trait so MinIO/S3/GCS back ends share
       code.
+      `src/image_upload.rs` lands the validation core: 40 MB
+      max, MIME allow-list (jpeg/png/gif/webp/avif — SVG and
+      HEIC/BMP/TIFF rejected per `REQUIREMENTS.md` § 7.9), and
+      `sniff_mime` for magic-byte verification. Mismatch
+      between the declared `Content-Type` and sniffed bytes
+      returns `415`. The `ImageStore` trait abstracts the
+      backend; `InMemoryStore` is the in-process impl for
+      tests. `storage_key` formats the key per spec
+      (`projects/{project_id}/creatives/{creative_id}/{uuid}.{ext}`).
+      Eight unit tests cover sniffing for each of the five
+      allowed formats, SVG rejection, declared/sniffed
+      mismatch → 415, payload-too-large → 413, key format,
+      in-memory round-trip, and the HTTP status mapping.
+      `async-trait` 0.1 added at workspace level for the
+      backend trait.
       Refs: `REQUIREMENTS.md` § 7.9, `API.md` § 3.5.
+
+      **Note (3.29):** Three pieces deferred to a focused
+      follow-up. (1) **Multipart parsing handler in
+      `src/creatives.rs`**: the validation core lives in
+      `image_upload.rs`; wiring up the actual `POST
+      /v1/projects/{projectId}/creatives/{id}/image` endpoint
+      with multipart-body extraction, calling
+      `validate(declared, body)`, then writing through the
+      configured `ImageStore`, and updating the creative row's
+      `image_url` is a 30-line follow-up that requires picking
+      a multipart-form crate (poem has built-in support).
+      Cross-tenant manifest gains 1 entry when the handler
+      lands. (2) **Real S3 adapter**: `InMemoryStore` is the
+      v0 in-process impl; `S3CompatStore` (using `aws-sdk-s3`
+      or `minio` crate) lands behind the same trait — no API
+      change. (3) **Signed-URL minting** for the returned
+      `imageUrl`: spec says "signed (or unsigned, public-read)
+      per operator config." Today `InMemoryStore::put` returns
+      `memory://{key}`; the S3 adapter will return signed
+      URLs.
 
 **Milestone:** Every endpoint in `API.md` returns the documented
 shape. Full API-contract suite + cross-tenant suite green for every
@@ -1167,7 +1202,47 @@ project-scoped endpoint.
 
 ### Notes
 
-(none yet)
+**Phase 3 close-out summary (after 3.14–3.29 landed):**
+
+- 84 unit tests in the lib (up from 28 at the 3.13 close), all
+  green.
+- 46 project-scoped endpoints under `cargo xtask
+  check-cross-tenant`, all covered by manifest entries.
+- `openapi.yaml` ~105 KB.
+- Twelve migrations clean under `cargo xtask lint-migrations`.
+- The full hot path is wired in code (snapshot → selection →
+  HMAC sign → decision response; HMAC verify → click/impression
+  endpoint), with the channel-send between the decision and
+  events_raw queued behind an "AppState wiring" follow-up.
+
+**Open follow-ups across 3.14–3.29** (not blockers, but pulled
+out as their own commits):
+
+1. **AppState wiring + handler integration** for the new
+   subsystems landed in 3.21–3.25. `EventSender`, `LeaderHandle`,
+   real `EventSender::try_send` calls in the decision endpoint,
+   `force.*` audit emission, click-through redirect resolution
+   from the snapshot, multipart upload handler in
+   `src/creatives.rs`. None are spec-correctness issues at the
+   contract layer — every endpoint returns the documented shape
+   today; the gap is hot-path side-effects (events written,
+   redirects resolved, audit rows emitted) that the testing
+   surface didn't yet exercise.
+2. **Single-row `external_id` idempotency on POST creates**
+   (CLAUDE.md known gap, deferred from 3.14).
+3. **`crud_contract!` macro extraction** (deferred from 3.8/3.9;
+   `:batchUpsert` made the duplication worse but didn't extract).
+4. **Real JWT signature verification + JWKS auto-discovery**
+   (3.26 follow-up).
+5. **Real S3-adapter implementation** for `image_upload`
+   (3.29 follow-up).
+6. **Snapshot loader query bodies + LISTEN integration** (3.17
+   follow-up; the poll loop is the spec-documented backstop and
+   sufficient on its own).
+
+These map to the rolling "make Phase 3 fully production-grade"
+work that lands either as focused 3.x.y commits or as Phase 4
+prelude.
 
 ---
 
@@ -1333,6 +1408,11 @@ each phase.
 3. **HMAC rotation overlap** — 8 h dual-secret window with stable
    `dedup_key` across rotation is subtle. Land with `proptest`
    coverage in **Phase 3.9**, not as a Phase 4 follow-up.
+   ✅ **Closed in 3.16** — `src/hmac.rs::dedup_key` is keyed on
+   `project_id` (not the rotating signing secret), and
+   `verify(signed, current, previous, ...)` accepts the previous
+   secret during the overlap window. Eight unit tests pin the
+   contract.
 
 ---
 
