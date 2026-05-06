@@ -44,9 +44,12 @@ Production deployments should pin to a specific image digest, not
 KNIEVEL_IMAGE=ghcr.io/xrl/knievel@sha256:... docker compose up
 ```
 
-Phase 4.3 publishes both `ghcr.io/xrl/knievel:vX.Y.Z` (semver) and
-`ghcr.io/xrl/knievel:sha-<short>` (per-commit) so you have a stable
-tag and an immutable digest available.
+Phase 4.3 publishes images **on semver tags only** (no main-branch
+pushes — every published image is a deliberate release). After
+the first release, `ghcr.io/xrl/knievel:vX.Y.Z` is the immutable
+tag; `ghcr.io/xrl/knievel:latest` re-points to the freshest semver
+release. Pre-release work pins to a digest from a `vX.Y.Z-rc.N`
+tag or builds locally via `KNIEVEL_BUILD=1`.
 
 ## Layout
 

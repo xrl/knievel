@@ -1389,19 +1389,25 @@ flows from a working binary in a real container.
       Refs: `REQUIREMENTS.md` § 8 item 4, `AUTH.md` "Local
       Development."
 - [ ] **4.3** Multi-arch container image build, **published
-      to `ghcr.io/xrl/knievel`**. `docker buildx` for
-      `linux/amd64` + `linux/arm64`, distroless base
+      to `ghcr.io/xrl/knievel`** on semver tags only — every
+      published image is a deliberate release, not a moving
+      target. `docker buildx` for `linux/amd64` +
+      `linux/arm64`, distroless base
       (`gcr.io/distroless/cc:nonroot`). Tag policy:
-      `ghcr.io/xrl/knievel:latest` from `main`,
-      `ghcr.io/xrl/knievel:vX.Y.Z` from semver tags,
-      `ghcr.io/xrl/knievel:sha-<short>` for every push to
-      `main` (immutable digest pin for compose / Helm
-      pre-release pinning). `cosign` keyless signing via
-      Sigstore Fulcio; provenance attestation included.
+      `ghcr.io/xrl/knievel:vX.Y.Z` (semver, immutable) plus
+      `ghcr.io/xrl/knievel:latest` re-pointed to the freshest
+      semver release. **No image is built or pushed for
+      main-branch commits or PRs** — pre-release deployments
+      pin to a digest from a published `vX.Y.Z-rc.N` tag, or
+      build locally via the in-tree `Dockerfile` (the compose
+      stack from 4.1 supports both). `cosign` keyless signing
+      via Sigstore Fulcio; provenance attestation included.
       Build runs in `.github/workflows/release.yml` (already
-      stubbed) for tags and `.github/workflows/main-image.yml`
-      (new) for `main`. The compose file in 4.1 and the Helm
-      chart in 4.4 reference this image directly.
+      stubbed under `on: push: tags: ['v*']`); the existing
+      `publish-image` job slot is the integration point. CI
+      still **builds** the image on every PR via
+      `.github/workflows/ci.yml` to catch Dockerfile rot, but
+      **does not push**.
       Refs: `REQUIREMENTS.md` § 8 item 5, `MIGRATION_RX.md`
       compose example, `TESTING.md` § 12.9.
 - [ ] **4.4** `charts/knievel` Helm chart; `helm lint` +
