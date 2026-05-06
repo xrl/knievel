@@ -155,11 +155,35 @@ business surface. Rails are real before any train rides them.
 
 ### Notes
 
-(none yet)
+**Post-milestone CI fixes** (caught when the workflows ran on
+GitHub Actions for the first time, fixed in two follow-up
+commits):
 
----
+- **Phase 1.4 (composite action)** — local composite actions
+  referenced as `./.github/actions/...` can't be resolved before
+  `actions/checkout@v4` runs in the calling job. The composite
+  was self-checking-out as its first step, which is a chicken-
+  and-egg: GitHub can't load `action.yml` from a path that
+  doesn't exist on disk yet. Fix in commit `41c5be9`: every
+  active job in `ci.yml` now runs `actions/checkout@v4` as its
+  first step; the composite drops its self-checkout and
+  documents the caller contract.
 
-## Phase 2 — Walking skeleton handlers
+- **Phase 1.5 / 1.9 (nextest filter + sqlx schema)** — fixed
+  together in commit `231489e`:
+  - `binary(/^api/)` filter parse-failed because no integration-
+    test binary existed yet matching that regex. Added
+    `tests/api_placeholder.rs` (comment-only) so the filter has
+    something to resolve against; combined with `--no-tests=pass`
+    the slice runs zero tests cleanly.
+  - `_sqlx_migrations` was landing in `public` instead of
+    `knievel`, because `sqlx::migrate` creates the tracking
+    table on its first connection BEFORE the migration's own
+    `SET search_path` runs. Fix: `testlib::db::ephemeral` now
+    configures `after_connect` on `PgPoolOptions` so every
+    connection has `search_path = knievel, public` from the
+    start, mirroring the production `ALTER ROLE knievel_app SET
+    search_path = ...` recipe in `MIGRATION_RX.md`.
 
 **Goal:** A reachable `knievel` process — config loaded, tracing
 emitting JSON, HTTP server bound, `/healthz` / `/readyz` /
