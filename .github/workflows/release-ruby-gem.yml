@@ -1,0 +1,100 @@
+name: Release Ruby gem
+
+# Regenerates the knievel-ads/knievel-ruby client from the
+# committed `openapi.yaml` whenever a `v*` tag is pushed on
+# this repo, then commits + tags the matching version on
+# knievel-ruby. RubyGems publish is intentionally out of scope
+# for this phase — having the regenerated source available at a
+# matching tag in knievel-ruby is sufficient for downstream
+# consumers via Bundler `git:`/`tag:` references.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-ruby-gem:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint knievel-pipelines installation token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.KNIEVEL_PIPELINES_APP_ID }}
+          private-key: ${{ secrets.KNIEVEL_PIPELINES_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            knievel
+            knievel-ruby
+
+      - name: Checkout knievel (server, for openapi.yaml + config)
+        uses: actions/checkout@v4
+        with:
+          path: knievel
+
+      - name: Checkout knievel-ruby (regeneration target)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/knievel-ruby
+          path: knievel-ruby
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Strip 'v' prefix from tag for gem version
+        id: gem_version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Seed/refresh openapi-generator config in knievel-ruby
+        run: |
+          set -eu
+          cp knievel/.github/ruby-client/openapi-generator-config.json \
+             knievel-ruby/openapi-generator-config.json
+          cp knievel/.github/ruby-client/.openapi-generator-ignore \
+             knievel-ruby/.openapi-generator-ignore
+
+      - name: Generate Ruby client from openapi.yaml
+        uses: openapi-generators/openapitools-generator-action@v1
+        with:
+          generator: ruby
+          config-file: knievel-ruby/openapi-generator-config.json
+          openapi-file: knievel/openapi.yaml
+          command-args: >-
+            --additional-properties=gemVersion=${{ steps.gem_version.outputs.value }},library=faraday
+            --output=knievel-ruby
+
+      - name: Ensure Gemfile.lock is gitignored
+        run: |
+          set -eu
+          touch knievel-ruby/.gitignore
+          if ! grep -qx 'Gemfile.lock' knievel-ruby/.gitignore; then
+            echo Gemfile.lock >> knievel-ruby/.gitignore
+          fi
+
+      - name: Commit + tag knievel-ruby
+        working-directory: knievel-ruby
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          git config user.name  "knievel-pipelines[bot]"
+          git config user.email "knievel-pipelines[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No file changes; tagging existing HEAD as $TAG"
+          else
+            git commit -m "Regenerate from knievel $TAG"
+            git push origin HEAD:main
+          fi
+          # Fail loudly if the tag already exists upstream — re-tagging
+          # a published gem version would be a footgun.
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists on knievel-ruby; refusing to overwrite." >&2
+            exit 1
+          fi
+          git tag -a "$TAG" -m "Generated from knievel $TAG"
+          git push origin "$TAG"

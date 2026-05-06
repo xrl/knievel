@@ -1,0 +1,8 @@
+# Files we don't want the OpenAPI generator to (re)create in
+# knievel-ruby. Patterns follow .gitignore syntax.
+
+# Other-CI scaffolding the Ruby template emits by default; we
+# drive everything from knievel's GitHub Actions.
+.travis.yml
+.gitlab-ci.yml
+git_push.sh

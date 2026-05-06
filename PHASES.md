@@ -1601,6 +1601,10 @@ flows from a working binary in a real container.
       with `Resource` wrappers + `Enumerable` pagination;
       gem-smoke job runs against the compose stack from 4.1.
       Refs: `REQUIREMENTS.md` § 8 item 3, `API.md` "Pagination."
+      **Partial — generator CI landed early** (see Phase 4
+      Notes "4.10 (generator CI, early)" below). Remaining for
+      this task: `Resource` wrappers, `Enumerable` pagination
+      keying off `x-knievel-paginated`, and the gem-smoke job.
 
 **Milestone:** `docker compose up` boots a working knievel against
 Postgres + MinIO + wiremock; `helm install` against a real
@@ -1632,6 +1636,27 @@ integrate" milestone language now references 4.10. The image
 registry path becomes `ghcr.io/knievel-ads/knievel` once 4.9
 lands; the `${{ github.repository[_owner] }}` workflow
 interpolations carry both halves automatically.
+
+**Note (4.10, generator CI, early):** The generator-CI half of
+4.10 landed ahead of Phase 4 proper because the empty
+`knievel-ads/knievel-ruby` repo needed scaffolding for early
+client work. `.github/workflows/release-ruby-gem.yml` triggers
+on `v*` tags, mints an installation token via the
+`knievel-pipelines` GitHub App
+(`KNIEVEL_PIPELINES_APP_ID` / `KNIEVEL_PIPELINES_PRIVATE_KEY`
+secrets, scoped to `knievel` + `knievel-ruby`), and uses
+`openapi-generators/openapitools-generator-action` to
+regenerate the Faraday-based gem from the committed
+`openapi.yaml` into a matching tag on `knievel-ruby`. The
+generator config + ignore live in
+`.github/ruby-client/` and are copied into `knievel-ruby` on
+every run (canonical config follows the spec). Deferred to
+Phase 4.10 proper: hand-written `Resource` wrappers,
+`Enumerable` pagination keying off `x-knievel-paginated`, the
+gem-smoke job, and RubyGems publish (today downstream
+consumers pin a `git:`/`tag:` reference; RubyGems push will
+land alongside the wrappers so the published gem is the
+idiomatic one, not the bare generated client).
 
 **Phase 4.1 follow-up — RLS bypass via Postgres SUPERUSER.**
 The Phase 3.30+ wiring exposed a long-standing test-harness

@@ -1,0 +1,11 @@
+{
+  "gemName": "knievel",
+  "moduleName": "Knievel",
+  "gemAuthor": "Knievel Ads",
+  "gemAuthorEmail": "engineering@knievel-ads.com",
+  "gemHomepage": "https://github.com/knievel-ads/knievel-ruby",
+  "gemSummary": "Ruby client for the Knievel ad-serving platform",
+  "gemDescription": "Generated client library for the Knievel multi-tenant ad-serving platform.",
+  "gemLicense": "Apache-2.0",
+  "gemRequiredRubyVersion": ">= 3.0"
+}
