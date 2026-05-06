@@ -322,18 +322,38 @@ DATABASE_URL=postgres://knievel_app:dev@localhost:5432/knievel \
 
 ## Push policy for this repo
 
-The user has explicitly approved **direct pushes to `main`** for
-this work. That's a non-default decision logged here so future
-sessions don't second-guess it. The pattern is:
+**Work directly on `main`.** The user has standing approval to
+commit + push directly to `main` for the duration of Phase 3
+big-feature development. No feature branches, no PRs, no asking.
+Each task = one commit prefixed `Phase X.Y: <task name>`, pushed
+to `origin/main` immediately. The PHASES.md update marking the
+task `[x]` rides along in the same commit.
 
-- Each task = one commit, prefixed `Phase X.Y: <task name>`
-- Push immediately after commit
-- PHASES.md update rides along with the work
+```bash
+git checkout main             # if not already there
+# ... edit, run gates ...
+git add <files> && git commit -m "Phase X.Y: ..."
+git push -u origin main
+```
 
-If you start a session and the user hasn't reaffirmed this,
-treat it as scope-specific and ask. The standing per-CLAUDE.md
-git rules in the harness still apply (no `--no-verify`, no
-force-push to main, etc.).
+The harness may default a session onto a feature branch
+(`claude/...`) — when that happens, do the work on that branch
+during the session, then merge fast-forward to `main` and push
+at the end. `git checkout main && git merge --ff-only <branch>
+&& git push origin main` is the expected close-out. Don't open a
+PR; don't wait for review.
+
+This standing-policy override is in effect until the user
+explicitly says otherwise. After Phase 3 ships, we'll re-evaluate
+(probably moving to PRs for Phase 4 deployable work).
+
+The harness git safety rules still apply unconditionally:
+- no `--no-verify`, no `--no-gpg-sign`
+- no force-push to main (`git push --force`/`git push +ref`)
+- no `git rebase -i` / `git add -i` (interactive flags break the
+  non-interactive harness)
+- never amend a published commit; always create a new commit
+- never `reset --hard` something pushed without checking first
 
 ## What's next when you pick this up
 
