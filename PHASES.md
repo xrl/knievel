@@ -56,10 +56,13 @@ need 1.3 (xtask) and 1.6 (migration to lint).
 ### Tasks
 
 - [x] **1.1** PHASES.md (this file).
-- [ ] **1.2** Cargo workspace + pinned deps + `rust-toolchain.toml`
-      + `.gitignore`. Move the existing `[package]` into a workspace
-      member to make room for `xtask` and `testlib`.
-      Refs: `TESTING.md` § 4 (test layout), § 12.2 (cargo cache).
+- [x] **1.2** Cargo workspace + pinned deps + `rust-toolchain.toml`
+      + `.gitignore`. Workspace root doubles as the `knievel`
+      package; `xtask` and `testlib` join as members in 1.3 and 1.9
+      (no need to relocate `src/main.rs`). Shared dep versions
+      pinned via `[workspace.dependencies]`; rust toolchain pinned
+      to `1.94`. `cargo check --workspace` green.
+      Refs: `TESTING.md` § 4, § 12.2.
 - [ ] **1.3** `xtask` crate scaffold with empty subcommands:
       `lint-migrations`, `check-cross-tenant`, `openapi`,
       `test-shape`, `check-doc-fences`, `check-api-doc`. Wired so

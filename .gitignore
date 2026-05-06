@@ -1,0 +1,18 @@
+/target
+**/*.rs.bk
+**/Cargo.lock.bak
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Local dev artefacts
+/tmp/
+/out/
+/.env
+/.env.local
