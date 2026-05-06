@@ -8,6 +8,9 @@ version.workspace    = true
 publish     = false
 
 [dependencies]
-anyhow = { workspace = true }
-clap   = { version = "4", features = ["derive"] }
-regex  = "1"
+anyhow     = { workspace = true }
+clap       = { version = "4", features = ["derive"] }
+regex      = "1"
+serde      = { workspace = true }
+serde_yaml = { workspace = true }
+toml       = "0.8"

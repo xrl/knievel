@@ -120,11 +120,14 @@ need 1.3 (xtask) and 1.6 (migration to lint).
       around string literals; if a future migration legitimately
       embeds `--` inside a single-quoted string we'll need to
       switch to `pg_query` for proper SQL parsing.
-- [ ] **1.8** `xtask check-cross-tenant` skeleton: walks the
-      OpenAPI spec (initially empty), expects every
-      `/v1/projects/{p}/...` operation to have a paired test
-      registered in `tests/cross_tenant_manifest.toml`. Passes
-      vacuously today; gate is real once endpoints land.
+- [x] **1.8** `xtask check-cross-tenant` walks `openapi.yaml`,
+      collects every `/v1/projects/{...}/...` operation, and
+      fails if any is missing from `tests/cross_tenant_manifest.toml`.
+      Today `openapi.yaml` doesn't exist (Phase 2.8 lands it), so
+      the gate runs in skip-mode and exits 0. The manifest file is
+      created with explanatory comments and zero entries. Two unit
+      tests cover the project-scoped path detection and spec
+      walking.
       Refs: `TESTING.md` § 6.5, `REQUIREMENTS.md` § 7.1.1 gate (1).
 - [ ] **1.9** `testlib::db::ephemeral` — wrapper around `sqlx::test`
       / testcontainers for tests that need a real Postgres. First

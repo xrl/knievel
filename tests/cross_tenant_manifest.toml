@@ -1,0 +1,23 @@
+# Cross-tenant test coverage manifest.
+#
+# REQUIREMENTS.md §7.1.1 gate (1) and TESTING.md §6.5 require that
+# every `/v1/projects/{projectId}/...` endpoint has a paired
+# negative test asserting that a token issued for project A cannot
+# read or mutate project B (returns `403 wrong_tenant`).
+#
+# `cargo xtask check-cross-tenant` enforces this: it walks the
+# OpenAPI spec, finds every project-scoped operation, and fails CI
+# if any is unregistered here.
+#
+# Format:
+#
+#   [[entry]]
+#   path   = "/v1/projects/{projectId}/<resource>"
+#   method = "GET"
+#   test   = "cross_tenant_<resource>_<verb>"
+#
+# `test` is diagnostic only — the gate doesn't run it. Add the
+# matching test in `tests/api/` or `tests/integration/`.
+#
+# This file is empty until Phase 3 lands the first project-scoped
+# endpoint.
