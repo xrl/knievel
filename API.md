@@ -240,7 +240,7 @@ The hot path. Returns ad selections for one or more placements.
 | `placements[].zoneIds` | int64[] | no | Restrict to specific zones. |
 | `placements[].adTypes` | int[] | yes | Non-empty. |
 | `placements[].count` | int | no | Default 1, max 10. |
-| `placements[].force.*` | int64 \| null | no | Debug overrides; bypass eligibility. Not for production. |
+| `placements[].force.*` | int64 \| null | no | Debug overrides. Three-control gate: (1) project's `allow_force_decision` flag must be true; (2) Project Admin role or higher; (3) call is recorded in `knievel.audit_log` with actor, payload hash, and reason (passed via optional top-level `force_reason` string). Knievel rejects with `403 / force_disabled` if any control fails. A global kill-switch (`decisions.force_overrides_enabled: false`) disables the path entirely. |
 | `block.creativeIds` | int64[] | no | Caller-derived suppression list. |
 | `block.advertiserIds` | int64[] | no | |
 | `block.campaignIds` | int64[] | no | |

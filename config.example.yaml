@@ -59,6 +59,18 @@ events:
   # Channel saturation surfaces as 503 on the decision endpoint.
   channel_capacity: 100000
 
+decisions:
+  # Global kill-switch for force.* decision overrides. With this off,
+  # any decision request carrying force.* fails fast at 403 even if
+  # the per-project allow_force_decision flag is on. Useful for
+  # incident response.
+  force_overrides_enabled: true
+
+audit:
+  # audit_log retention (privileged operations, separate from
+  # events_raw). Partitioned monthly.
+  retention_days: 365
+
 partitions:
   # Knievel manages its own partitions in-process from a leader-elected
   # tokio task. No pg_partman, no pg_cron, no external scheduler.

@@ -439,8 +439,16 @@ Two tables:
   retention 30 days** (conservative because backups are the operator's
   responsibility in shared-DB deployments); operator-configurable.
 - **`events_rollup`** — hourly aggregates by `(project_id, site_id,
-  zone_id, flight_id, ad_id, creative_id, kind)`. Computed by a
-  periodic job before raw partitions age out. Indefinite retention.
+  zone_id, flight_id, ad_id, creative_id, kind)`, counting only
+  non-duplicate rows. Computed by a periodic job before raw
+  partitions age out. Indefinite retention.
+- **`audit_log`** — separate from event tables. One row per
+  privileged or sensitive operation: `force.*` decision overrides,
+  HMAC-secret rotation, project deletion, member role changes, token
+  mint/revoke. Columns: `ts`, `org_id`, `project_id`, `actor`
+  (`(iss, sub, azp)` from JWT, or token name for opaque),
+  `operation`, `payload_hash`, `reason`, `request_id`. Append-only,
+  365-day retention by default, partitioned monthly.
 
 Partition policy:
 
@@ -976,10 +984,6 @@ folded into the spec. The remaining few:
   embeds a JSON Schema document; verify `poem-openapi` round-trips it
   through the generated OpenAPI without flattening or escaping. Spike
   before the first creative-templates endpoint lands.
-- **`force.*` decision-overrides permission level.** Currently any role
-  with decision access can use `force.adId`/etc. They bypass eligibility
-  filters; should probably require Project Admin. Decide before the
-  endpoint goes public.
 - **Idempotency-Key TTL longer than 24 h** for batch sync jobs that
   retry across CI runs. 24 h is plenty for online retries; consider
   bumping to 7 days for `:batchUpsert` endpoints specifically.

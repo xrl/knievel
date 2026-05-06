@@ -466,7 +466,7 @@ detail string is what differentiates for log debugging.
 |---|---|---|
 | `POST /v1/projects/{p}/decisions` | `reader` | The query path. |
 | `POST /v1/projects/{p}/decisions:explain` | `reader` | Reveals nothing the caller can't already see via flight/ad/creative GETs. |
-| Decision request with **any** `force.*` field set | `admin` | Bypasses eligibility filters and reveals validity of arbitrary IDs; admin-level capability. Server inspects the body and escalates the required role accordingly. |
+| Decision request with **any** `force.*` field set | `admin` | Three-control gate: (1) project-level `allow_force_decision` flag must be enabled; (2) caller must hold Project Admin or higher; (3) every forced call writes a row to `knievel.audit_log`. Knievel-side `decisions.force_overrides_enabled: false` is a global kill-switch that disables forced paths cluster-wide regardless of per-project state. |
 
 #### Project resources (project-scoped, all under `/v1/projects/{p}/`)
 
