@@ -43,12 +43,23 @@ pub mod taxonomy;
 pub mod tokens;
 pub mod zones;
 
+/// Default `servers:` entry stamped into the static
+/// `openapi.yaml` (and the bootstrap value of the live
+/// `/openapi.json` until the runtime override lands). Generated
+/// clients use this as their default base URL — production
+/// callers are expected to override
+/// (`Knievel::Configuration.host` in the Ruby gem and
+/// equivalents elsewhere).
+pub const DEFAULT_OPENAPI_SERVER_URL: &str = "http://localhost:8080";
+pub const DEFAULT_OPENAPI_SERVER_DESCRIPTION: &str =
+    "Local development default; override via your client's host configuration for production.";
+
 /// Generate the OpenAPI spec as YAML. Used by
 /// `cargo xtask openapi` to write `openapi.yaml` and by
 /// `cargo xtask openapi --check` to fail on drift
 /// (`TESTING.md` § 6.3, § 12.7).
 pub fn openapi_spec_yaml() -> String {
-    use poem_openapi::OpenApiService;
+    use poem_openapi::{OpenApiService, ServerObject};
     let svc = OpenApiService::new(
         (
             system::SystemApi,
@@ -69,6 +80,10 @@ pub fn openapi_spec_yaml() -> String {
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),
+    )
+    .server(
+        ServerObject::new(DEFAULT_OPENAPI_SERVER_URL)
+            .description(DEFAULT_OPENAPI_SERVER_DESCRIPTION),
     );
     svc.spec_yaml()
 }

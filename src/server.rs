@@ -18,7 +18,7 @@ use anyhow::{anyhow, Context, Result};
 use poem::get;
 use poem::listener::TcpListener;
 use poem::{EndpointExt, Route, Server};
-use poem_openapi::OpenApiService;
+use poem_openapi::{OpenApiService, ServerObject};
 
 use std::sync::Arc;
 
@@ -96,6 +96,10 @@ pub fn routes() -> Route {
         ),
         "knievel",
         env!("CARGO_PKG_VERSION"),
+    )
+    .server(
+        ServerObject::new(crate::DEFAULT_OPENAPI_SERVER_URL)
+            .description(crate::DEFAULT_OPENAPI_SERVER_DESCRIPTION),
     );
     let spec = api.spec_endpoint();
 
