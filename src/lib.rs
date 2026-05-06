@@ -10,6 +10,7 @@
 pub mod ads;
 pub mod advertisers;
 pub mod auth;
+pub mod batch;
 pub mod campaigns;
 pub mod config;
 pub mod creative_templates;

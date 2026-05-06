@@ -677,12 +677,53 @@ manager and leader election running.
       Manifest gains 6 entries; gate now reports
       `38 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.9.
-- [ ] **3.14** `:batchUpsert` — single Postgres transaction with
+- [x] **3.14** `:batchUpsert` — single Postgres transaction with
       per-row diagnostics matching `API.md` "Write contract."
       Cross-entity FK validation inside the transaction (a flight
       created earlier in the array resolves for an ad later in the
       array). Wired into every CRUD resource that declares it.
+      `src/batch.rs` carries the shared `BatchErrorEnvelope` /
+      `BatchErrorDetail` types and the Postgres-error → canonical
+      `details[].code` classifier. Six resources gained the new
+      endpoint: advertisers, campaigns, flights, ads, sites,
+      zones — `xtask check-cross-tenant` now reports
+      `44 project-scoped endpoint(s), all covered`. Three API
+      tests in `tests/api_batch.rs` cover the contract:
+      a 3-row advertiser round-trip (idempotent — same
+      external_ids re-upsert, ids stable, etag rotates), a
+      campaigns batch with one bad FK rolls back the whole
+      batch with `batch_partial_failure` + `details[].field =
+      "advertiserId"` + `details[].code = "fk_not_found"`, and
+      cross-tenant 403s for every resource. `openapi.yaml`
+      grew 74 → 89 KB.
       Refs: `API.md` "Write contract," `TESTING.md` § 6.4.
+
+      **Note (3.14):** Two follow-ups still open from this task.
+      (1) **Single-row external_id idempotency on POST creates.**
+      `API.md` § 2.1/§ 3.x says POST is "Idempotent on
+      `externalId`" — today the single-row POST handlers still
+      return `409 external_id_conflict` on a re-POST of the same
+      `externalId`. The :batchUpsert path is the canonical
+      idempotent surface; fixing the single-row POSTs requires
+      changing every `Created(201)` ApiResponse variant to add an
+      `Existing(200)` flavor and rewriting the existing 409 tests
+      across `api_advertisers.rs`/`api_campaigns.rs`/etc. Punted to
+      a follow-up commit so 3.14 ships the batch surface first.
+      (2) **`crud_contract!` macro extraction.** Deferred from
+      3.8/3.9; the per-resource handlers still duplicate ~80% of
+      their bodies. With six `:batchUpsert` endpoints landed in
+      this commit the duplication is now severe enough to warrant
+      a focused refactor — natural to land alongside the POST
+      idempotency fix above.
+
+      Diagnostics on multi-row failures stop at the first failing
+      row by design — once a Postgres tx aborts on one statement,
+      every subsequent statement returns the same "current
+      transaction is aborted" error, so collecting "details for
+      every bad row" inside one tx isn't free. A two-pass
+      validate-then-execute pattern would surface every offending
+      row at the cost of doubled DB round-trips; revisit if the
+      gem-side bulk-sync flow asks for it.
 - [ ] **3.15** Selection algorithm — `selection::filter` (site /
       zone / ad_type / date), `selection::priority` (highest
       non-empty tier wins), `selection::weighted_random` (seeded

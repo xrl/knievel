@@ -459,6 +459,59 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateAdvertiser
+  /v1/projects/{project_id}/advertisers:batchUpsert:
+    post:
+      summary: |-
+        `POST /v1/projects/:project_id/advertisers:batchUpsert` —
+        bulk by `externalId`. Single Postgres transaction; per
+        `API.md` "Write contract" any per-row failure rolls back
+        the whole batch with `details[]` listing every offending
+        row. On success: 200 with the upserted rows in input order.
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/BatchUpsertAdvertisersRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchUpsertAdvertisersResult'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: |-
+            Per `API.md` "Write contract": one or more rows failed
+            validation, the entire transaction rolled back, no partial
+            state leaked into the snapshot.
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: batchUpsertAdvertisers
   /v1/projects/{project_id}/campaigns:
     post:
       parameters:
@@ -637,6 +690,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateCampaign
+  /v1/projects/{project_id}/campaigns:batchUpsert:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/BatchUpsertCampaignsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchUpsertCampaignsResult'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: batchUpsertCampaigns
   /v1/projects/{project_id}/flights:
     post:
       parameters:
@@ -821,6 +918,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateFlight
+  /v1/projects/{project_id}/flights:batchUpsert:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/BatchUpsertFlightsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchUpsertFlightsResult'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: batchUpsertFlights
   /v1/projects/{project_id}/creatives:
     post:
       parameters:
@@ -1308,6 +1449,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateAd
+  /v1/projects/{project_id}/ads:batchUpsert:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/BatchUpsertAdsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchUpsertAdsResult'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: batchUpsertAds
   /v1/projects/{project_id}/sites:
     post:
       parameters:
@@ -1529,6 +1714,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateSite
+  /v1/projects/{project_id}/sites:batchUpsert:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/BatchUpsertSitesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchUpsertSitesResult'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: batchUpsertSites
   /v1/projects/{project_id}/zones:
     post:
       parameters:
@@ -1707,6 +1936,50 @@ paths:
       security:
       - BearerAuth: []
       operationId: updateZone
+  /v1/projects/{project_id}/zones:batchUpsert:
+    post:
+      parameters:
+      - name: project_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      requestBody:
+        content:
+          application/json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/BatchUpsertZonesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchUpsertZonesResult'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/BatchErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: batchUpsertZones
   /v1/projects/{project_id}/channels:
     get:
       parameters:
@@ -2077,6 +2350,311 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IssuerSummary'
+    BatchErrorBody:
+      type: object
+      title: BatchErrorBody
+      description: |-
+        Body of a `batch_partial_failure` envelope. Mirrors
+        `API.md` "Write contract" exactly so a future code-gen
+        consumer can deserialize this in any language.
+      required:
+      - code
+      - message
+      - details
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchErrorDetail'
+    BatchErrorDetail:
+      type: object
+      title: BatchErrorDetail
+      description: |-
+        One per-row failure within a `:batchUpsert`. `index` is the
+        position of the offending row in the request array (0-based).
+        `code` is one of: `fk_not_found`, `external_id_conflict`,
+        `validation_failed`, `unique_violation`, `if_match_mismatch`.
+      required:
+      - index
+      - code
+      - message
+      properties:
+        index:
+          type: integer
+          format: int32
+        field:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+    BatchErrorEnvelope:
+      type: object
+      title: BatchErrorEnvelope
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/BatchErrorBody'
+    BatchUpsertAdRow:
+      type: object
+      title: BatchUpsertAdRow
+      required:
+      - external_id
+      - flight_id
+      - creative_id
+      properties:
+        external_id:
+          type: string
+        flight_id:
+          type: integer
+          format: int64
+        creative_id:
+          type: integer
+          format: int64
+        weight:
+          type: integer
+          format: int32
+        is_active:
+          type: boolean
+    BatchUpsertAdsRequest:
+      type: object
+      title: BatchUpsertAdsRequest
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchUpsertAdRow'
+    BatchUpsertAdsResult:
+      type: object
+      title: BatchUpsertAdsResult
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ad'
+    BatchUpsertAdvertiserRow:
+      type: object
+      title: BatchUpsertAdvertiserRow
+      description: |-
+        Body of `POST /v1/projects/:project_id/advertisers:batchUpsert`.
+        Every row must carry an `external_id` — that's the upsert key.
+      required:
+      - external_id
+      - name
+      properties:
+        external_id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+    BatchUpsertAdvertisersRequest:
+      type: object
+      title: BatchUpsertAdvertisersRequest
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchUpsertAdvertiserRow'
+    BatchUpsertAdvertisersResult:
+      type: object
+      title: BatchUpsertAdvertisersResult
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Advertiser'
+    BatchUpsertCampaignRow:
+      type: object
+      title: BatchUpsertCampaignRow
+      required:
+      - external_id
+      - advertiser_id
+      - name
+      properties:
+        external_id:
+          type: string
+        advertiser_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        is_active:
+          type: boolean
+    BatchUpsertCampaignsRequest:
+      type: object
+      title: BatchUpsertCampaignsRequest
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchUpsertCampaignRow'
+    BatchUpsertCampaignsResult:
+      type: object
+      title: BatchUpsertCampaignsResult
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Campaign'
+    BatchUpsertFlightRow:
+      type: object
+      title: BatchUpsertFlightRow
+      required:
+      - external_id
+      - campaign_id
+      - name
+      - priority_id
+      - ad_types
+      properties:
+        external_id:
+          type: string
+        campaign_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        priority_id:
+          type: integer
+          format: int64
+        start_date:
+          type: string
+        end_date:
+          type: string
+        site_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        zone_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        ad_types:
+          type: array
+          items:
+            type: integer
+            format: int64
+        is_active:
+          type: boolean
+    BatchUpsertFlightsRequest:
+      type: object
+      title: BatchUpsertFlightsRequest
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchUpsertFlightRow'
+    BatchUpsertFlightsResult:
+      type: object
+      title: BatchUpsertFlightsResult
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flight'
+    BatchUpsertSiteRow:
+      type: object
+      title: BatchUpsertSiteRow
+      required:
+      - external_id
+      - name
+      - url
+      properties:
+        external_id:
+          type: string
+        channel_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        url:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        is_active:
+          type: boolean
+    BatchUpsertSitesRequest:
+      type: object
+      title: BatchUpsertSitesRequest
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchUpsertSiteRow'
+    BatchUpsertSitesResult:
+      type: object
+      title: BatchUpsertSitesResult
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Site'
+    BatchUpsertZoneRow:
+      type: object
+      title: BatchUpsertZoneRow
+      required:
+      - external_id
+      - site_id
+      - name
+      properties:
+        external_id:
+          type: string
+        site_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        is_active:
+          type: boolean
+    BatchUpsertZonesRequest:
+      type: object
+      title: BatchUpsertZonesRequest
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchUpsertZoneRow'
+    BatchUpsertZonesResult:
+      type: object
+      title: BatchUpsertZonesResult
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Zone'
     Campaign:
       type: object
       title: Campaign

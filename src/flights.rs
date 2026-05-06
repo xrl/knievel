@@ -18,6 +18,7 @@ use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
+use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
 use crate::handlers::{open_project_tx, AuthzError};
 use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
@@ -72,6 +73,30 @@ pub struct Flight {
 pub struct FlightList {
     pub items: Vec<Flight>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertFlightRow {
+    pub external_id: String,
+    pub campaign_id: i64,
+    pub name: String,
+    pub priority_id: i64,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub site_ids: Option<Vec<i64>>,
+    pub zone_ids: Option<Vec<i64>>,
+    pub ad_types: Vec<i64>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertFlightsRequest {
+    pub items: Vec<BatchUpsertFlightRow>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertFlightsResult {
+    pub items: Vec<Flight>,
 }
 
 const COLS: &str = r#"
@@ -133,6 +158,18 @@ pub enum UpdateResp {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
     NotFound(Json<ErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+
+#[derive(ApiResponse)]
+pub enum BatchResp {
+    #[oai(status = 200)]
+    Ok(Json<BatchUpsertFlightsResult>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    #[oai(status = 422)]
+    PartialFailure(Json<BatchErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -378,6 +415,121 @@ impl FlightsApi {
             Err(e) => {
                 tracing::error!(error = %e, "update flight failed");
                 UpdateResp::Internal(Json(err("db_error", "update failed")))
+            }
+        }
+    }
+
+    #[oai(
+        path = "/v1/projects/:project_id/flights:batchUpsert",
+        method = "post",
+        operation_id = "batchUpsertFlights"
+    )]
+    async fn batch_upsert(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        project_id: Path<String>,
+        body: Json<BatchUpsertFlightsRequest>,
+    ) -> BatchResp {
+        let principal = auth.0;
+        let pj = project_id.0;
+        let req = body.0;
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => return BatchResp::Internal(Json(err("no_db", "no database configured"))),
+        };
+        // Pre-validate ad_types non-empty per `API.md` § 3.3 BEFORE
+        // touching the DB — these are validation_failed, not
+        // FK/unique violations.
+        for (idx, row) in req.items.iter().enumerate() {
+            if row.ad_types.is_empty() {
+                return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
+                    req.items.len(),
+                    vec![BatchErrorDetail {
+                        index: idx as i32,
+                        field: Some("adTypes".into()),
+                        code: "validation_failed".into(),
+                        message: "ad_types must be a non-empty array".into(),
+                    }],
+                )));
+            }
+        }
+        let mut tx = match open_project_tx(pool, &principal, &pj, Role::Editor).await {
+            Ok(t) => t,
+            Err(e) => return forbid(BatchResp::Forbidden, e),
+        };
+        let total = req.items.len();
+        let mut out: Vec<Flight> = Vec::with_capacity(total);
+        let mut details: Vec<BatchErrorDetail> = Vec::new();
+        let sql = format!(
+            "INSERT INTO knievel.flights
+                 (org_id, project_id, campaign_id, external_id, name, priority_id,
+                  start_date, end_date, site_ids, zone_ids, ad_types, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6,
+                     $7::timestamptz, $8::timestamptz,
+                     COALESCE($9, '{{}}'::bigint[]),
+                     COALESCE($10, '{{}}'::bigint[]),
+                     $11, COALESCE($12, true))
+             ON CONFLICT (project_id, external_id) DO UPDATE SET
+                 campaign_id = EXCLUDED.campaign_id,
+                 name = EXCLUDED.name,
+                 priority_id = EXCLUDED.priority_id,
+                 start_date = EXCLUDED.start_date,
+                 end_date = EXCLUDED.end_date,
+                 site_ids = EXCLUDED.site_ids,
+                 zone_ids = EXCLUDED.zone_ids,
+                 ad_types = EXCLUDED.ad_types,
+                 is_active = COALESCE(EXCLUDED.is_active, knievel.flights.is_active),
+                 etag = encode(gen_random_bytes(8), 'hex'),
+                 updated_at = now()
+             RETURNING {COLS}"
+        );
+        for (idx, row) in req.items.iter().enumerate() {
+            let r: Result<Flight, _> = sqlx::query_as(&sql)
+                .bind(&principal.org_id)
+                .bind(&pj)
+                .bind(row.campaign_id)
+                .bind(&row.external_id)
+                .bind(&row.name)
+                .bind(row.priority_id)
+                .bind(row.start_date.as_deref())
+                .bind(row.end_date.as_deref())
+                .bind(row.site_ids.as_deref())
+                .bind(row.zone_ids.as_deref())
+                .bind(&row.ad_types)
+                .bind(row.is_active)
+                .fetch_one(&mut *tx)
+                .await;
+            match r {
+                Ok(f) => out.push(f),
+                Err(e) => {
+                    let m = format!("{e}");
+                    let (code, msg) = classify_pg_error(&m);
+                    details.push(BatchErrorDetail {
+                        index: idx as i32,
+                        field: if code == "fk_not_found" {
+                            Some("campaignId".into())
+                        } else {
+                            None
+                        },
+                        code: code.into(),
+                        message: msg.unwrap_or("row failed validation").into(),
+                    });
+                    break;
+                }
+            }
+        }
+        if !details.is_empty() {
+            let _ = tx.rollback().await;
+            return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
+                total, details,
+            )));
+        }
+        match tx.commit().await {
+            Ok(()) => BatchResp::Ok(Json(BatchUpsertFlightsResult { items: out })),
+            Err(e) => {
+                tracing::error!(error = %e, "batch upsert flights commit failed");
+                BatchResp::Internal(Json(err("db_error", "commit failed")))
             }
         }
     }

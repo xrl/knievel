@@ -219,3 +219,35 @@ test   = "cross_tenant_ad_types_list"
 path   = "/v1/projects/{project_id}/ad-types/{id}"
 method = "GET"
 test   = "cross_tenant_ad_types_get"
+
+# :batchUpsert — Phase 3.14. One per resource that declares it
+# (advertisers, campaigns, flights, ads, sites, zones).
+[[entry]]
+path   = "/v1/projects/{project_id}/advertisers:batchUpsert"
+method = "POST"
+test   = "cross_tenant_advertisers_batch_upsert"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/campaigns:batchUpsert"
+method = "POST"
+test   = "cross_tenant_campaigns_batch_upsert"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/flights:batchUpsert"
+method = "POST"
+test   = "cross_tenant_flights_batch_upsert"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/ads:batchUpsert"
+method = "POST"
+test   = "cross_tenant_ads_batch_upsert"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/sites:batchUpsert"
+method = "POST"
+test   = "cross_tenant_sites_batch_upsert"
+
+[[entry]]
+path   = "/v1/projects/{project_id}/zones:batchUpsert"
+method = "POST"
+test   = "cross_tenant_zones_batch_upsert"

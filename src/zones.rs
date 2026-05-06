@@ -12,6 +12,7 @@ use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
+use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
 use crate::handlers::{open_project_tx, AuthzError};
 use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
@@ -48,6 +49,24 @@ pub struct Zone {
 pub struct ZoneList {
     pub items: Vec<Zone>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertZoneRow {
+    pub external_id: String,
+    pub site_id: i64,
+    pub name: String,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertZonesRequest {
+    pub items: Vec<BatchUpsertZoneRow>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertZonesResult {
+    pub items: Vec<Zone>,
 }
 
 const COLS: &str = r#"
@@ -99,6 +118,17 @@ pub enum UpdateResp {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
     NotFound(Json<ErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+#[derive(ApiResponse)]
+pub enum BatchResp {
+    #[oai(status = 200)]
+    Ok(Json<BatchUpsertZonesResult>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    #[oai(status = 422)]
+    PartialFailure(Json<BatchErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -307,6 +337,88 @@ impl ZonesApi {
             Err(e) => {
                 tracing::error!(error = %e, "update zone failed");
                 UpdateResp::Internal(Json(err("db_error", "update failed")))
+            }
+        }
+    }
+
+    #[oai(
+        path = "/v1/projects/:project_id/zones:batchUpsert",
+        method = "post",
+        operation_id = "batchUpsertZones"
+    )]
+    async fn batch_upsert(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        project_id: Path<String>,
+        body: Json<BatchUpsertZonesRequest>,
+    ) -> BatchResp {
+        let principal = auth.0;
+        let pj = project_id.0;
+        let req = body.0;
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => return BatchResp::Internal(Json(err("no_db", "no database configured"))),
+        };
+        let mut tx = match open_project_tx(pool, &principal, &pj, Role::Editor).await {
+            Ok(t) => t,
+            Err(e) => return forbid(BatchResp::Forbidden, e),
+        };
+        let total = req.items.len();
+        let mut out: Vec<Zone> = Vec::with_capacity(total);
+        let mut details: Vec<BatchErrorDetail> = Vec::new();
+        let sql = format!(
+            "INSERT INTO knievel.zones
+                 (org_id, project_id, site_id, external_id, name, is_active)
+             VALUES ($1, $2, $3, $4, $5, COALESCE($6, true))
+             ON CONFLICT (project_id, external_id) DO UPDATE SET
+                 site_id = EXCLUDED.site_id,
+                 name = EXCLUDED.name,
+                 is_active = COALESCE(EXCLUDED.is_active, knievel.zones.is_active),
+                 etag = encode(gen_random_bytes(8), 'hex'),
+                 updated_at = now()
+             RETURNING {COLS}"
+        );
+        for (idx, row) in req.items.iter().enumerate() {
+            let r: Result<Zone, _> = sqlx::query_as(&sql)
+                .bind(&principal.org_id)
+                .bind(&pj)
+                .bind(row.site_id)
+                .bind(&row.external_id)
+                .bind(&row.name)
+                .bind(row.is_active)
+                .fetch_one(&mut *tx)
+                .await;
+            match r {
+                Ok(z) => out.push(z),
+                Err(e) => {
+                    let m = format!("{e}");
+                    let (code, msg) = classify_pg_error(&m);
+                    details.push(BatchErrorDetail {
+                        index: idx as i32,
+                        field: if code == "fk_not_found" {
+                            Some("siteId".into())
+                        } else {
+                            None
+                        },
+                        code: code.into(),
+                        message: msg.unwrap_or("row failed validation").into(),
+                    });
+                    break;
+                }
+            }
+        }
+        if !details.is_empty() {
+            let _ = tx.rollback().await;
+            return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
+                total, details,
+            )));
+        }
+        match tx.commit().await {
+            Ok(()) => BatchResp::Ok(Json(BatchUpsertZonesResult { items: out })),
+            Err(e) => {
+                tracing::error!(error = %e, "batch upsert zones commit failed");
+                BatchResp::Internal(Json(err("db_error", "commit failed")))
             }
         }
     }

@@ -12,6 +12,7 @@ use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
+use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
 use crate::handlers::{open_project_tx, AuthzError};
 use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
@@ -46,6 +47,25 @@ pub struct Advertiser {
 pub struct AdvertiserList {
     pub items: Vec<Advertiser>,
     pub next_cursor: Option<String>,
+}
+
+/// Body of `POST /v1/projects/:project_id/advertisers:batchUpsert`.
+/// Every row must carry an `external_id` — that's the upsert key.
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertAdvertiserRow {
+    pub external_id: String,
+    pub name: String,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertAdvertisersRequest {
+    pub items: Vec<BatchUpsertAdvertiserRow>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertAdvertisersResult {
+    pub items: Vec<Advertiser>,
 }
 
 const COLS: &str = r#"
@@ -102,6 +122,21 @@ pub enum UpdateAdvertiserResp {
     Internal(Json<ErrorEnvelope>),
 }
 
+#[derive(ApiResponse)]
+pub enum BatchUpsertAdvertisersResp {
+    #[oai(status = 200)]
+    Ok(Json<BatchUpsertAdvertisersResult>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    /// Per `API.md` "Write contract": one or more rows failed
+    /// validation, the entire transaction rolled back, no partial
+    /// state leaked into the snapshot.
+    #[oai(status = 422)]
+    PartialFailure(Json<BatchErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+
 fn err(code: &str, message: &str) -> ErrorEnvelope {
     ErrorEnvelope {
         error: ErrorBody {
@@ -122,6 +157,9 @@ fn forbidden_get(e: AuthzError) -> GetAdvertiserResp {
 }
 fn forbidden_update(e: AuthzError) -> UpdateAdvertiserResp {
     UpdateAdvertiserResp::Forbidden(Json(err(e.code(), e.message())))
+}
+fn forbidden_batch(e: AuthzError) -> BatchUpsertAdvertisersResp {
+    BatchUpsertAdvertisersResp::Forbidden(Json(err(e.code(), e.message())))
 }
 
 #[OpenApi]
@@ -329,6 +367,98 @@ impl AdvertisersApi {
             Err(e) => {
                 tracing::error!(error = %e, "update advertiser failed");
                 UpdateAdvertiserResp::Internal(Json(err("db_error", "update failed")))
+            }
+        }
+    }
+
+    /// `POST /v1/projects/:project_id/advertisers:batchUpsert` —
+    /// bulk by `externalId`. Single Postgres transaction; per
+    /// `API.md` "Write contract" any per-row failure rolls back
+    /// the whole batch with `details[]` listing every offending
+    /// row. On success: 200 with the upserted rows in input order.
+    #[oai(
+        path = "/v1/projects/:project_id/advertisers:batchUpsert",
+        method = "post",
+        operation_id = "batchUpsertAdvertisers"
+    )]
+    async fn batch_upsert(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        project_id: Path<String>,
+        body: Json<BatchUpsertAdvertisersRequest>,
+    ) -> BatchUpsertAdvertisersResp {
+        let principal = auth.0;
+        let pj = project_id.0;
+        let req = body.0;
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => {
+                return BatchUpsertAdvertisersResp::Internal(Json(err(
+                    "no_db",
+                    "no database configured",
+                )))
+            }
+        };
+        let mut tx = match open_project_tx(pool, &principal, &pj, Role::Editor).await {
+            Ok(t) => t,
+            Err(e) => return forbidden_batch(e),
+        };
+        let total = req.items.len();
+        let mut out: Vec<Advertiser> = Vec::with_capacity(total);
+        let mut details: Vec<BatchErrorDetail> = Vec::new();
+        let sql = format!(
+            "INSERT INTO knievel.advertisers
+                 (org_id, project_id, external_id, name, is_active)
+             VALUES ($1, $2, $3, $4, COALESCE($5, true))
+             ON CONFLICT (project_id, external_id) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 is_active = COALESCE(EXCLUDED.is_active, knievel.advertisers.is_active),
+                 etag = encode(gen_random_bytes(8), 'hex'),
+                 updated_at = now()
+             RETURNING {COLS}"
+        );
+        for (idx, row) in req.items.iter().enumerate() {
+            let result: Result<Advertiser, _> = sqlx::query_as(&sql)
+                .bind(&principal.org_id)
+                .bind(&pj)
+                .bind(&row.external_id)
+                .bind(&row.name)
+                .bind(row.is_active)
+                .fetch_one(&mut *tx)
+                .await;
+            match result {
+                Ok(adv) => out.push(adv),
+                Err(e) => {
+                    let m = format!("{e}");
+                    let (code, default_msg) = classify_pg_error(&m);
+                    details.push(BatchErrorDetail {
+                        index: idx as i32,
+                        field: None,
+                        code: code.into(),
+                        message: default_msg.unwrap_or("row failed validation").into(),
+                    });
+                    // Single tx: bail on first error (subsequent
+                    // statements would error against the aborted
+                    // tx anyway). Spec is "all-or-nothing".
+                    break;
+                }
+            }
+        }
+        if !details.is_empty() {
+            // Roll back the aborted transaction explicitly.
+            let _ = tx.rollback().await;
+            return BatchUpsertAdvertisersResp::PartialFailure(Json(
+                BatchErrorEnvelope::partial_failure(total, details),
+            ));
+        }
+        match tx.commit().await {
+            Ok(()) => {
+                BatchUpsertAdvertisersResp::Ok(Json(BatchUpsertAdvertisersResult { items: out }))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "batch upsert advertisers commit failed");
+                BatchUpsertAdvertisersResp::Internal(Json(err("db_error", "commit failed")))
             }
         }
     }

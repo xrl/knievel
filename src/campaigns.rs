@@ -10,6 +10,7 @@ use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
+use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
 use crate::handlers::{open_project_tx, AuthzError};
 use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
@@ -46,6 +47,24 @@ pub struct Campaign {
 pub struct CampaignList {
     pub items: Vec<Campaign>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertCampaignRow {
+    pub external_id: String,
+    pub advertiser_id: i64,
+    pub name: String,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertCampaignsRequest {
+    pub items: Vec<BatchUpsertCampaignRow>,
+}
+
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct BatchUpsertCampaignsResult {
+    pub items: Vec<Campaign>,
 }
 
 const COLS: &str = r#"
@@ -100,6 +119,18 @@ pub enum UpdateResp {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
     NotFound(Json<ErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+
+#[derive(ApiResponse)]
+pub enum BatchResp {
+    #[oai(status = 200)]
+    Ok(Json<BatchUpsertCampaignsResult>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    #[oai(status = 422)]
+    PartialFailure(Json<BatchErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -311,6 +342,88 @@ impl CampaignsApi {
             Err(e) => {
                 tracing::error!(error = %e, "update campaign failed");
                 UpdateResp::Internal(Json(err("db_error", "update failed")))
+            }
+        }
+    }
+
+    #[oai(
+        path = "/v1/projects/:project_id/campaigns:batchUpsert",
+        method = "post",
+        operation_id = "batchUpsertCampaigns"
+    )]
+    async fn batch_upsert(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        project_id: Path<String>,
+        body: Json<BatchUpsertCampaignsRequest>,
+    ) -> BatchResp {
+        let principal = auth.0;
+        let pj = project_id.0;
+        let req = body.0;
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => return BatchResp::Internal(Json(err("no_db", "no database configured"))),
+        };
+        let mut tx = match open_project_tx(pool, &principal, &pj, Role::Editor).await {
+            Ok(t) => t,
+            Err(e) => return forbid(BatchResp::Forbidden, e),
+        };
+        let total = req.items.len();
+        let mut out: Vec<Campaign> = Vec::with_capacity(total);
+        let mut details: Vec<BatchErrorDetail> = Vec::new();
+        let sql = format!(
+            "INSERT INTO knievel.campaigns
+                 (org_id, project_id, advertiser_id, external_id, name, is_active)
+             VALUES ($1, $2, $3, $4, $5, COALESCE($6, true))
+             ON CONFLICT (project_id, external_id) DO UPDATE SET
+                 advertiser_id = EXCLUDED.advertiser_id,
+                 name = EXCLUDED.name,
+                 is_active = COALESCE(EXCLUDED.is_active, knievel.campaigns.is_active),
+                 etag = encode(gen_random_bytes(8), 'hex'),
+                 updated_at = now()
+             RETURNING {COLS}"
+        );
+        for (idx, row) in req.items.iter().enumerate() {
+            let r: Result<Campaign, _> = sqlx::query_as(&sql)
+                .bind(&principal.org_id)
+                .bind(&pj)
+                .bind(row.advertiser_id)
+                .bind(&row.external_id)
+                .bind(&row.name)
+                .bind(row.is_active)
+                .fetch_one(&mut *tx)
+                .await;
+            match r {
+                Ok(c) => out.push(c),
+                Err(e) => {
+                    let m = format!("{e}");
+                    let (code, msg) = classify_pg_error(&m);
+                    details.push(BatchErrorDetail {
+                        index: idx as i32,
+                        field: if code == "fk_not_found" {
+                            Some("advertiserId".into())
+                        } else {
+                            None
+                        },
+                        code: code.into(),
+                        message: msg.unwrap_or("row failed validation").into(),
+                    });
+                    break;
+                }
+            }
+        }
+        if !details.is_empty() {
+            let _ = tx.rollback().await;
+            return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
+                total, details,
+            )));
+        }
+        match tx.commit().await {
+            Ok(()) => BatchResp::Ok(Json(BatchUpsertCampaignsResult { items: out })),
+            Err(e) => {
+                tracing::error!(error = %e, "batch upsert campaigns commit failed");
+                BatchResp::Internal(Json(err("db_error", "commit failed")))
             }
         }
     }
