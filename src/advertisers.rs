@@ -10,6 +10,7 @@
 use poem::web::Data;
 use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
+use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
@@ -162,7 +163,7 @@ fn forbidden_batch(e: AuthzError) -> BatchUpsertAdvertisersResp {
     BatchUpsertAdvertisersResp::Forbidden(Json(err(e.code(), e.message())))
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::Advertisers")]
 impl AdvertisersApi {
     #[oai(
         path = "/v1/projects/:project_id/advertisers",

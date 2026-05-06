@@ -9,6 +9,7 @@ use poem_openapi::{
     ApiResponse, Object, OpenApi,
 };
 
+use crate::api_tags::ApiTags;
 use crate::state::AppState;
 
 /// OpenAPI schema version. Lives separately from the package
@@ -74,7 +75,7 @@ pub struct IssuerSummary {
     pub jwks_url: Option<String>,
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::System")]
 impl SystemApi {
     /// Liveness — k8s liveness probe key.
     #[oai(path = "/healthz", method = "get", operation_id = "healthz")]

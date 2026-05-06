@@ -19,6 +19,7 @@ use poem_openapi::{
     ApiResponse, Object, OpenApi,
 };
 
+use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::db;
@@ -140,7 +141,7 @@ pub enum GetProjectResponse {
     Internal(Json<ErrorEnvelope>),
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::Orgs")]
 impl OrgApi {
     /// Create a project under an org. Honors `Idempotency-Key`
     /// (24 h replay window per `API.md` "Idempotency"); `409

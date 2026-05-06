@@ -10,6 +10,7 @@
 pub mod ad_library;
 pub mod ads;
 pub mod advertisers;
+pub mod api_tags;
 pub mod auth;
 pub mod batch;
 pub mod campaigns;

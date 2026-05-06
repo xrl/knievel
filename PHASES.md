@@ -1640,23 +1640,50 @@ interpolations carry both halves automatically.
 **Note (4.10, generator CI, early):** The generator-CI half of
 4.10 landed ahead of Phase 4 proper because the empty
 `knievel-ads/knievel-ruby` repo needed scaffolding for early
-client work. `.github/workflows/release-ruby-gem.yml` triggers
-on `v*` tags, mints an installation token via the
-`knievel-pipelines` GitHub App
+client work. `.github/workflows/release-ruby-gem.yml` on
+knievel triggers on `v*` tags, mints an installation token via
+the `knievel-pipelines` GitHub App
 (`KNIEVEL_PIPELINES_APP_ID` / `KNIEVEL_PIPELINES_PRIVATE_KEY`
-secrets, scoped to `knievel` + `knievel-ruby`), and uses
+secrets, scoped to `knievel` + `knievel-ruby`), uses
 `openapi-generators/openapitools-generator-action` to
 regenerate the Faraday-based gem from the committed
-`openapi.yaml` into a matching tag on `knievel-ruby`. The
-generator config + ignore live in
-`.github/ruby-client/` and are copied into `knievel-ruby` on
-every run (canonical config follows the spec). Deferred to
-Phase 4.10 proper: hand-written `Resource` wrappers,
-`Enumerable` pagination keying off `x-knievel-paginated`, the
-gem-smoke job, and RubyGems publish (today downstream
-consumers pin a `git:`/`tag:` reference; RubyGems push will
-land alongside the wrappers so the published gem is the
-idiomatic one, not the bare generated client).
+`openapi.yaml`, runs `bundle install` + `rake build` +
+load-test as a fail-fast smoke check, then commits and tags
+the matching version on `knievel-ruby` using the App token.
+The generator config + ignore live in `.github/ruby-client/`
+and are copied into `knievel-ruby` on every run (canonical
+config follows the spec). The downstream chain — App tokens
+trigger workflow runs on push (unlike `GITHUB_TOKEN`) — is
+exactly what makes the second hop work:
+`.github/workflows/publish-rubygems.yml` on knievel-ruby fires
+on the same `v*` tag, rebuilds the gem, and `gem push`es to
+RubyGems via `RUBYGEMS_ORG_API_KEY` (a knievel-ruby secret).
+First end-to-end run published `knievel 0.1.1` (squat at
+`0.1.0`).
+
+**Note (4.10, openapi tags):** Initial generator output
+collapsed every endpoint into a 3970-line `Knievel::DefaultApi`
+because no operation carried a `tags:` array. Fixed by adding
+`src/api_tags.rs` (a `#[derive(Tags)]` enum with one variant
+per resource module — `System`, `Orgs`, `Tokens`, `AdLibrary`,
+`Advertisers`, `Campaigns`, `Flights`, `Ads`, `Creatives`,
+`CreativeTemplates`, `Sites`, `Zones`, `Taxonomy`,
+`Decisions`, `Explain`) and a `#[OpenApi(tag = "ApiTags::…")]`
+attribute on each of the 15 `#[OpenApi]` impl blocks. The
+poem-openapi 5 syntax inherits the impl-level tag onto every
+operation in the block, so this was a one-attribute change per
+resource. Variant doc comments flow through to tag descriptions
+in the spec. The Ruby gem now exposes 15 focused API classes
+(`Knievel::AdvertisersApi`, `Knievel::CampaignsApi`, …)
+instead of one. Bumped to `0.1.2` since this is a Ruby-surface
+breaking change, well within the `gem 0.1.* ↔ server 0.1.*`
+compatibility window from REQUIREMENTS.md § 4.
+
+Deferred to Phase 4.10 proper: hand-written `Resource`
+wrappers, `Enumerable` pagination keying off
+`x-knievel-paginated`, the gem-smoke job against the compose
+stack, plus the spec-side polish (root `servers:` block — today
+the generated client defaults to `http://localhost`).
 
 **Phase 4.1 follow-up — RLS bypass via Postgres SUPERUSER.**
 The Phase 3.30+ wiring exposed a long-standing test-harness

@@ -19,6 +19,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::api_tags::ApiTags;
 use poem::web::Data;
 use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 use sqlx::{Postgres, Transaction};
@@ -124,7 +125,7 @@ fn forbid(e: AuthzError) -> DecisionsResp {
     DecisionsResp::Forbidden(Json(err(e.code(), e.message())))
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::Decisions")]
 impl DecisionsApi {
     #[oai(
         path = "/v1/projects/:project_id/decisions",
@@ -603,7 +604,7 @@ pub enum ExplainResp {
 
 pub struct ExplainApi;
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::Explain")]
 impl ExplainApi {
     #[oai(
         path = "/v1/projects/:project_id/decisions:explain",

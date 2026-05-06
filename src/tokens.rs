@@ -17,6 +17,7 @@
 use poem::web::Data;
 use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
+use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::db;
@@ -118,7 +119,7 @@ fn err(code: &str, message: &str) -> ErrorEnvelope {
     }
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::Tokens")]
 impl TokensApi {
     /// Mint an opaque token. Returns the plaintext secret exactly
     /// once. Min role: org-admin.

@@ -15,6 +15,7 @@
 use poem::web::Data;
 use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
+use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::db;
@@ -161,7 +162,7 @@ fn org_authz<R, F: FnOnce(Json<ErrorEnvelope>) -> R>(
     None
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::AdLibrary")]
 impl AdLibraryApi {
     #[oai(
         path = "/v1/orgs/:org_id/ad-library/items",

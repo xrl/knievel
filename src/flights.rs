@@ -16,6 +16,7 @@
 use poem::web::Data;
 use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
+use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
@@ -186,7 +187,7 @@ fn forbid<R, F: FnOnce(Json<ErrorEnvelope>) -> R>(f: F, e: AuthzError) -> R {
     f(Json(err(e.code(), e.message())))
 }
 
-#[OpenApi]
+#[OpenApi(tag = "ApiTags::Flights")]
 impl FlightsApi {
     #[oai(
         path = "/v1/projects/:project_id/flights",
