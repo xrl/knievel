@@ -25,6 +25,7 @@ pub mod orgs;
 pub mod selection;
 pub mod server;
 pub mod sites;
+pub mod snapshot;
 pub mod state;
 pub mod system;
 pub mod taxonomy;

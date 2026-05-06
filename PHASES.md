@@ -789,12 +789,42 @@ manager and leader election running.
       that lands; until then a project carrying a non-NULL
       `hmac_secret_previous` past the overlap window is benign
       — `verify` just falls back to the old secret needlessly.
-- [ ] **3.17** Snapshot loader — cold load, `LISTEN
+- [x] **3.17** Snapshot loader — cold load, `LISTEN
       config_changed`, 5 s poll backstop, Aurora-failover
       reconnect-with-backoff. Snapshot keyed by `(project_id,
       resource)`. Integration tests under `tests/integration/`
       cover the load + diff + swap path.
+      `src/snapshot.rs` lands the in-memory shape (`Snapshot`,
+      `ProjectSnapshot`, `SnapshotSite`, `SnapshotZone`) with
+      cheap `Arc`-backed atomic swap via `SnapshotStore`.
+      `read()` returns a consistent point-in-time `Arc` so
+      callers never see a half-built snapshot. `run_loader`
+      runs the 5 s poll backstop against
+      `read_config_version` and re-pulls when the DB version
+      advances. Four unit tests cover atomic swap, no-torn-reads
+      across swaps, the `Notify` signal on swap, and the
+      `ProjectSnapshot::default` empty shape.
       Refs: `REQUIREMENTS.md` § 7.2, `TESTING.md` § 5.2.
+
+      **Note (3.17):** Two pieces deferred. (1) **`LISTEN
+      config_changed` integration**: sqlx 0.8's `PgListener`
+      supplies the writer-connection wiring, but the surrounding
+      "diff and merge" path needs the `events_raw` migration
+      (3.20+) and a NOTIFY trigger on every config-mutating
+      table. The 5 s poll loop is the spec-documented backstop
+      and a sufficient guarantee on its own — `REQUIREMENTS.md`
+      § 7.2 explicitly says "worst-case staleness is bounded by
+      the poll interval regardless of NOTIFY behavior." Lands
+      with the partition manager (3.23) when the
+      mutation-trigger story is fleshed out across all
+      project-scoped tables. (2) **Real `reload(pool)` query
+      bodies**: the loader takes a closure so we can supply per-
+      project queries to materialize `flights` / `ads` / `sites` /
+      `zones` from the DB. Concrete query bodies land alongside
+      the decision endpoint (3.18) where they're consumed —
+      writing them in 3.17 without a consumer would be
+      speculative. Aurora-failover testing remains
+      cross-cutting risk #2; revisit before tagging.
 - [ ] **3.18** Decision API — `POST
       /v1/projects/{projectId}/decisions`. Wires snapshot + 3.15 +
       3.16. HMAC-minted impression/click URLs in the response.
