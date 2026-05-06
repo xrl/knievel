@@ -731,6 +731,31 @@ live in `REPORTING.md`.
 Per-consumer migration guides (e.g., `MIGRATION_RX.md`) live alongside
 the spec but are not part of the v0 platform deliverable surface.
 
+#### Platform-core vs. consumer-specific policy
+
+`REQUIREMENTS.md`, `API.md`, `AUTH.md`, and `REPORTING.md` are the
+**platform contract**. They describe knievel as a generic
+multi-tenant ad platform and must remain free of consumer-specific
+identifiers, terminology, and assumptions. RX is the first
+integration but not the only intended consumer; future consumers
+should be able to read the platform docs and integrate without
+reading RX-specific material.
+
+`MIGRATION_*.md` files are **consumer adapters**. They translate
+platform concepts into a specific consumer's domain (e.g.
+`MIGRATION_RX.md` maps Provider → Advertiser, Organization → Site).
+New consumers add their own `MIGRATION_<NAME>.md`.
+
+When a consumer's needs surface a generic platform improvement
+(e.g. the Ad Library, the post-decision `block` set), it lands in
+the platform docs as a generic feature with a generic example.
+Consumer-specific motivation goes into the consumer's migration
+guide.
+
+This separation is enforced by review: changes to the platform
+docs that introduce consumer terminology in field names, examples,
+or non-illustrative prose are rejected.
+
 ### 8.1 Helm chart
 
 `values.yaml` exposes a high-level idiomatic shape; the chart's
