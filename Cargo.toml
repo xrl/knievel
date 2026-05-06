@@ -15,7 +15,9 @@ version    = "0.1.0"
 [workspace.dependencies]
 anyhow      = "1"
 argon2      = "0.5"
+base64      = "0.22"
 hex         = "0.4"
+hmac        = "0.12"
 sha2        = "0.10"
 thiserror   = "2"
 regex       = "1"
@@ -43,8 +45,10 @@ version.workspace    = true
 [dependencies]
 anyhow       = { workspace = true }
 argon2       = { workspace = true }
+base64       = { workspace = true }
 figment      = { workspace = true }
 hex          = { workspace = true }
+hmac         = { workspace = true }
 poem         = { workspace = true }
 poem-openapi = { workspace = true }
 rand         = { workspace = true }

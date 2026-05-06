@@ -1021,8 +1021,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
+ "base64",
  "figment",
  "hex",
+ "hmac",
  "poem",
  "poem-openapi",
  "rand",

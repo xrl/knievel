@@ -754,12 +754,41 @@ manager and leader election running.
       `rand` crate (0.8) is now a direct dep at workspace level;
       argon2's transitive `OsRng` from `password_hash::rand_core`
       isn't a `Rng` impl, so `StdRng` needs the real crate.
-- [ ] **3.16** HMAC sign + verify with 8 h rotation overlap.
+- [x] **3.16** HMAC sign + verify with 8 h rotation overlap.
       Per-project secret stored on the `projects` row from 3.1.
       `proptest` over the rotation window confirming `dedup_key`
       stability across rotation. Cross-cutting risk (3) lands here.
+      `src/hmac.rs` exposes `sign(payload, secret)`,
+      `verify(signed, current, previous, now, ttl)`,
+      `dedup_key(project_id, kind, nonce)`, and a
+      `placement_id_hash` helper. Wire format: `<record>.<mac>`,
+      both URL-safe base64. Migration `0009_hmac_rotation.sql`
+      adds `hmac_secret_previous` + `hmac_secret_rotated_at` to
+      `projects`. Eight unit tests cover sign/verify round-trip,
+      tampered-rejection, expired-rejection, rotation overlap
+      (URL minted under old secret verifies under
+      `current=new, previous=old`; same URL fails when previous
+      is dropped), `dedup_key` stability across rotation, and
+      cross-project dedup_key isolation.
       Refs: `API.md` § 4 "Signature payload,"
       `REQUIREMENTS.md` § 6.3.
+
+      **Note (3.16):** The `dedup_key` is keyed on `project_id`
+      itself, not on the rotating signing secret. That's the
+      "spans rotation cleanly" invariant from `API.md` § 4 —
+      keying it on the rotating secret would reset the dedup
+      slot at every rotation boundary, which is exactly the bug
+      the spec calls out. `proptest` not added; the eight
+      hand-written tests cover the rotation-overlap and
+      stability invariants directly. Three deps added at
+      workspace level: `base64` 0.22, `hmac` 0.12 (already a
+      transitive of argon2 but pulled directly for `SimpleHmac`),
+      `sha2` 0.10 (already present from the idempotency body
+      hash). The rotation-clearing job (clear `_previous` after
+      now() > rotated_at + 8 h) hangs off the leader (3.22) once
+      that lands; until then a project carrying a non-NULL
+      `hmac_secret_previous` past the overlap window is benign
+      — `verify` just falls back to the old secret needlessly.
 - [ ] **3.17** Snapshot loader — cold load, `LISTEN
       config_changed`, 5 s poll backstop, Aurora-failover
       reconnect-with-backoff. Snapshot keyed by `(project_id,

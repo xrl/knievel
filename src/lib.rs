@@ -18,6 +18,7 @@ pub mod creatives;
 pub mod db;
 pub mod flights;
 pub mod handlers;
+pub mod hmac;
 pub mod idempotency;
 pub mod observability;
 pub mod orgs;
