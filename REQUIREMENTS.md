@@ -977,22 +977,49 @@ performance/tracing live in OTel.
 
 ### 10.5 Metrics
 
-Prometheus exposition at `/metrics`. Default labels: `project_id`,
-`org_id` (cardinality bounded — one row per active project).
+Prometheus exposition at `/metrics`. **Default cardinality is low**:
+no `project_id` label on counters or histograms. Per-tenant
+granularity lives in traces (high cardinality is fine there) and
+sampled logs (already structured with `project_id`).
 
-Required series:
+Default series (operator-friendly, ~10² series total regardless of
+project count):
 
-- `knievel_decision_requests_total{project_id, outcome}`
-- `knievel_decision_duration_seconds{project_id}` (histogram)
-- `knievel_event_flush_batch_size{project_id}` (histogram)
-- `knievel_event_channel_depth` (gauge, single global)
-- `knievel_event_channel_dropped_total{reason}` (counter)
-- `knievel_snapshot_age_seconds` (gauge, one per loader)
-- `knievel_partition_maintenance_runs_total{result}` (counter)
-- `knievel_partition_maintenance_seconds_since_last` (gauge)
-- `knievel_partitions_created_total` / `knievel_partitions_dropped_total` (counters)
-- `knievel_maintenance_leader{pod}` (gauge, 1 if this pod is leader, 0 otherwise)
-- standard `process_*`, `tokio_*`, `sqlx_pool_*` series.
+- `knievel_decision_requests_total{outcome}` — outcome ∈
+  {`hit`, `miss`, `blocked`, `forced`, `error`}.
+- `knievel_decision_duration_seconds` (histogram).
+- `knievel_event_flush_batch_size` (histogram).
+- `knievel_event_channel_depth` (gauge).
+- `knievel_event_channel_dropped_total{reason}` (counter).
+- `knievel_snapshot_age_seconds` (gauge).
+- `knievel_partition_maintenance_runs_total{result}` (counter).
+- `knievel_partition_maintenance_seconds_since_last` (gauge).
+- `knievel_partitions_created_total`, `_dropped_total` (counters).
+- `knievel_maintenance_leader` (gauge, this pod's leadership state).
+- standard `process_*`, `tokio_*`, `sqlx_pool_*`.
+
+**Per-project metrics are opt-in.** When a specific project needs
+investigation, the operator adds it to
+`metrics.per_project_projects: ["pj_AbCd...", "pj_EfGh..."]` in
+config and redeploys. While listed, knievel emits a parallel set of
+labeled series (`knievel_decision_requests_total{project_id="pj_…",
+outcome}`, etc.) only for those projects. Removing the project from
+the list stops the emission. This caps per-tenant cardinality at
+deliberate, operator-controlled investigations rather than all
+projects forever.
+
+Per-tenant breakdowns for routine analysis live in:
+
+- **Traces (OTel)** — every span carries `project_id` /
+  `org_id` as attributes; backends like Tempo, Honeycomb, Datadog
+  index them efficiently and are designed for the cardinality.
+- **Sampled logs** — JSON log lines include `project_id` /
+  `org_id`; aggregations live in the log backend (Loki, Splunk,
+  CloudWatch Logs Insights), not Prometheus.
+
+The default-low policy means "graph cluster health" works with
+plain Prometheus + Grafana on day one; "graph this one project
+right now" is a config flip away.
 
 ### 10.6 Health and readiness
 

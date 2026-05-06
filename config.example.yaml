@@ -147,6 +147,13 @@ auth:
                 org_id:  scientist-com-staging
                 role:    editor
 
+metrics:
+  # Per-project metrics are off by default to keep cardinality low.
+  # Add specific project IDs here when investigating a tenant; emit
+  # is parallel (default series stay published either way). Remove
+  # to stop the per-project labels.
+  per_project_projects: []
+
 logging:
   level: ${KNIEVEL_LOG_LEVEL:info}
   format: json
