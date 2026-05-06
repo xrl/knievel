@@ -21,6 +21,7 @@ pub mod handlers;
 pub mod idempotency;
 pub mod observability;
 pub mod orgs;
+pub mod selection;
 pub mod server;
 pub mod sites;
 pub mod state;

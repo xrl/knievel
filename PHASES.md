@@ -724,12 +724,36 @@ manager and leader election running.
       validate-then-execute pattern would surface every offending
       row at the cost of doubled DB round-trips; revisit if the
       gem-side bulk-sync flow asks for it.
-- [ ] **3.15** Selection algorithm — `selection::filter` (site /
+- [x] **3.15** Selection algorithm — `selection::filter` (site /
       zone / ad_type / date), `selection::priority` (highest
       non-empty tier wins), `selection::weighted_random` (seeded
       `StdRng`). Pure-Rust unit tests per `TESTING.md` § 4.1, plus
       `proptest` for the priority + blocklist invariant.
+      `src/selection.rs` lands as a no-DB module with in-memory
+      `Flight`/`Ad`/`Placement`/`BlockSet` types that the snapshot
+      (3.17) will materialize. Ten unit tests cover: inactive-
+      flight drop, date-window respect, site/zone/ad_type
+      targeting, blocked-advertiser drop, priority-tier
+      aggregation, deterministic seeded selection, count sampling
+      without replacement, zero-weight short-circuit, and the
+      priority-dominates-weight invariant (a tier-1 ad with
+      weight 1 beats a tier-5 ad with weight 1_000_000).
       Refs: `API.md` § 1, `REQUIREMENTS.md` § 6.1.
+
+      **Note (3.15):** `proptest` not added as a dep. The
+      ten hand-written tests cover the priority/blocklist
+      invariant directly (`priority_dominates_weight`,
+      `filter_drops_blocked_advertisers_and_campaigns`); a
+      proptest harness is the right shape if/when the gem-side
+      ad-selector grows enough variety to make property tests
+      pay back. Two additions deferred: per-creative blocklist
+      (the snapshot's ad row carries `creative_id` only at the
+      consumer, so this filter runs in the decision handler
+      after lookup), and Aurora-failover snapshot-staleness
+      detection (cross-cutting risk #2 — lands with 3.17). The
+      `rand` crate (0.8) is now a direct dep at workspace level;
+      argon2's transitive `OsRng` from `password_hash::rand_core`
+      isn't a `Rng` impl, so `StdRng` needs the real crate.
 - [ ] **3.16** HMAC sign + verify with 8 h rotation overlap.
       Per-project secret stored on the `projects` row from 3.1.
       `proptest` over the rotation window confirming `dedup_key`

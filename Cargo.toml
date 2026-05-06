@@ -25,6 +25,7 @@ serde_yaml  = "0.9"
 figment     = { version = "0.10", features = ["yaml", "env"] }
 poem        = "3"
 poem-openapi = { version = "5", features = ["swagger-ui"] }
+rand        = "0.8"
 sqlx        = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
 tokio       = { version = "1", features = ["full"] }
 tracing     = "0.1"
@@ -46,6 +47,7 @@ figment      = { workspace = true }
 hex          = { workspace = true }
 poem         = { workspace = true }
 poem-openapi = { workspace = true }
+rand         = { workspace = true }
 regex        = { workspace = true }
 serde        = { workspace = true }
 serde_json   = { workspace = true }

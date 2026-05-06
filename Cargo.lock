@@ -1025,6 +1025,7 @@ dependencies = [
  "hex",
  "poem",
  "poem-openapi",
+ "rand",
  "regex",
  "serde",
  "serde_json",
