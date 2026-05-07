@@ -2222,9 +2222,13 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       `/oidc/login` + `/oidc/callback` + `/oidc/logout`
       routes, `RequireAuth` guard, and a 401-aware fetch
       wrapper that runs a silent refresh before redirecting
-      to login. Tokens live in memory inside `UserManager`
-      with `sessionStorage` persistence; closing the tab
-      clears them. The paste-a-token form remains behind
+      to login. The fetch wrapper reads `X-Request-Id` from
+      every response and attaches it to the TanStack Query
+      result so error toasts/panels can surface it for
+      support correlation (`UI.md` "Error handling").
+      Tokens live in memory inside `UserManager` with
+      `sessionStorage` persistence; closing the tab clears
+      them. The paste-a-token form remains behind
       `admin_ui.oidc.require_oidc: false` for dev,
       bootstrap, Keycloak outages, and CI fixtures —
       identical fetch path, just a `kvl_*` Bearer instead of
@@ -2233,9 +2237,12 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       across envs (issuer + public client_id served from
       runtime config, not baked at build time). Smallest
       "who am I" endpoint lands here if it doesn't exist yet
-      and validates both Bearer flavors identically.
-      Refs: `UI.md` "Auth"; `AUTH.md` "Keycloak Setup —
-      Human Admin UI (PKCE)."
+      and validates both Bearer flavors identically. The
+      error-state matrix from `UI.md` "Error handling" lands
+      with this task — 400/401/403/404/409/422/429/5xx/
+      network-error each get the documented UX shape.
+      Refs: `UI.md` "Auth", "Error handling"; `AUTH.md`
+      "Keycloak Setup — Human Admin UI (PKCE)."
 - [ ] **7.5** Org/project browser. List + detail for `/v1/orgs`
       and `/v1/projects/{project_id}`. First end-to-end slice
       that exercises the typed client + Query + Router stack.
@@ -2252,6 +2259,25 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       (UUIDv4 minted client-side per submit), optimistic
       invalidation. Roll out per resource behind a feature
       flag so each surface gets a real review.
+      **Token-mint show-once UX:** introduces a
+      `<MintRevealModal>` component used by every endpoint
+      that returns a server-only secret (token mint +
+      HMAC secret rotation, future mint endpoints). Modal
+      shows the plaintext exactly once, dismissal gated
+      behind an explicit "I've stored this" checkbox (no
+      X-close, no Esc, no clickaway), wipes from React
+      state and Query cache on close. Per `UI.md` "Auth"
+      / "Token-mint show-once UX"; `AUTH.md` "Opaque
+      Tokens."
+      **Creative image upload:** drag-and-drop picker
+      backed by `POST /v1/projects/{p}/creatives/{id}/image`
+      (`src/image_upload.rs`), client-side validation
+      mirrors `images.upload.max_bytes` +
+      `allowed_mime_types` from the runtime config so
+      operators see the limit before submit, server still
+      enforces. Shows progress + success state; failure
+      surfaces the API error envelope (per the 7.4 error
+      matrix).
 - [ ] **7.8** Reporting + event-flow inspector. Charts on
       rollups, a tail view over `/events` (poll-based for v0;
       revisit if/when push lands). Time-bucket controls match
@@ -2313,9 +2339,35 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       bundle file.
       Refs: `UI.md` "Deployment"; `AUTH.md` "Knievel-side
       configuration."
+- [ ] **7.13** Decision tester / debugging surface. A
+      project-scoped form at `/reports/test` that lets an
+      operator construct a real
+      `POST /v1/projects/{p}/decisions` request from a
+      typed builder (zone, channel, ad-type, custom
+      targeting JSON, optional `force.*` overrides), fires
+      it, and renders the served ad alongside the response
+      from `:explain` so the operator can see *which*
+      flights/ads matched and the per-flight reason
+      strings. The single most-valuable surface for
+      "why isn't my campaign serving?" debugging — common
+      in Kevel-style admin consoles, missing from the
+      original plan. Honors the `force.*` three-control
+      gate (`API.md` § 1; `decisions.force_overrides_enabled`
+      kill-switch + per-project `allow_force_decision` flag
+      + caller's role); the UI hides the `force.*` controls
+      entirely when the role/flag combination forbids them
+      (server still enforces). Lives in the Reports rail
+      section; reuses 7.7's react-hook-form + zod machinery
+      and the 7.4 fetch wrapper. (7.12 was vacated when
+      fly.io was dropped; numbering jumps to 13 to leave
+      the audit trail visible.)
+      Refs: `API.md` § 1 "Decisions"; `UI.md` "Information
+      architecture" + "Phasing."
+
 **Milestone:** Operators can log in, browse every project-
-scoped resource, edit the editable ones, and inspect rollups
-+ event flow — all over the public OpenAPI surface, no admin
+scoped resource, edit the editable ones, inspect rollups
++ event flow, and live-test decisions with full explain
+output — all over the public OpenAPI surface, no admin
 side channels. UI + API ship as a single
 `ghcr.io/<owner>/knievel` image; the same image runs as a
 headless API when `KNIEVEL_ADMIN_UI__STATIC_DIR` is unset.

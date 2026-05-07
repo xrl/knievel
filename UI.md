@@ -60,7 +60,7 @@ breadcrumbs.
 | Demand | Project | Advertisers, Campaigns, Flights, Ads, Creatives | `/v1/projects/{p}/{resource}` |
 | Inventory | Project | Sites, Zones | `/v1/projects/{p}/{resource}` |
 | Config | Project | Creative Templates, Taxonomy (Channels, Priorities, Ad Types) | `/v1/projects/{p}/{resource}` |
-| Reports | Project | Rollups, Decision Explainer, Events tail (post-7.8) | `/v1/projects/{p}/decisions:explain`, `/events`, reporting endpoints |
+| Reports | Project | Rollups, Decision Tester, Decision Explainer, Events tail (post-7.8) | `/v1/projects/{p}/decisions`, `/v1/projects/{p}/decisions:explain`, `/events`, reporting endpoints |
 | Library | Org | Ad Library items | `/v1/orgs/{o}/ad-library/items` |
 | Settings | Org | Projects list, Members, Tokens | `/v1/orgs/{o}/{resource}` |
 
@@ -100,9 +100,10 @@ strings: `/projects/{p}/flights?campaign={c}`.
   /templates                /templates/{template_id}
   /taxonomy                 → channels / priorities / ad-types tabs
 
-  # Reports (post-7.8)
+  # Reports (post-7.8 / 7.13)
   /reports                  → rollup charts
-  /reports/explain          → decision explainer
+  /reports/test             → decision tester (live POST /decisions builder)
+  /reports/explain          → decision explainer (POST /decisions:explain)
   /reports/events           → tail of /events
 ```
 
@@ -346,6 +347,91 @@ the UI just constructs the header from a different source.
 - **No tokens baked into the bundle.** Build artifacts contain
   no secrets. The runtime config only exposes public OIDC
   metadata (issuer URL + public client ID).
+
+### Token-mint "show-once" UX
+
+Mint endpoints (`POST /v1/orgs/{org_id}/tokens` and HMAC
+secret rotation via `PATCH .../projects/{project_id}`) return
+the plaintext credential **exactly once**; knievel stores the
+argon2id hash and the value is unrecoverable thereafter
+(`AUTH.md` "Opaque Tokens"). Getting this UX wrong silently
+locks operators out, so the workflow is pinned:
+
+1. Mint form posts and the modal shows the plaintext value
+   in a monospace block, with a one-click copy-to-clipboard
+   button and a prominent "**Save this now — it will not be
+   shown again**" callout.
+2. Dismissal is gated behind an explicit checkbox: "I've
+   stored this value somewhere safe." No "X" close button,
+   no Esc-to-dismiss, no clickaway. The Done button is
+   disabled until the box is ticked.
+3. After dismissal the value is wiped from React state and
+   from the TanStack Query cache; revisiting the token in
+   the list view shows only the metadata (id, name, scope,
+   role, last-used) — never the secret.
+4. The list view's row never shows the plaintext, only the
+   `kvl_<env>_<scope>_` prefix as a visual marker so
+   operators can disambiguate without revealing anything.
+
+Same pattern applies to:
+
+- **HMAC secret rotation.** `PATCH` returns the new secret
+  exactly once; we never round-trip it again. Rotation
+  overlap (`hmac.rotation_overlap_hours`) keeps already-
+  signed URLs valid; the UI surfaces the overlap window so
+  the operator knows when old secrets stop being honored.
+- **Future mint endpoints** (project-scoped tokens,
+  member-invite codes, etc.). Whenever a server-only secret
+  is returned in a response body, the same modal pattern is
+  reused.
+
+A dedicated `<MintRevealModal>` component owns the pattern;
+all mint flows route through it so the policy can't drift.
+
+## Error handling
+
+Every API call goes through one fetch wrapper, and every
+non-2xx response goes through one error pipeline. The shape:
+
+### Request ID surfacing
+
+Knievel stamps every response with `X-Request-Id`
+(`src/observability.rs`). The fetch wrapper reads it on
+every response (success or failure) and attaches it to the
+TanStack Query result. Error toasts and error panels render
+the ID prominently with a copy button:
+
+> Failed to update advertiser. Please try again.
+> Request ID: `01J9X...` _(copy)_
+
+Operators can paste that ID into a support channel and
+on-call can correlate to server logs in one query. **This
+is the single most important debugging UX in the console**;
+without it, support tickets devolve into "what time was
+this, and which org" guessing.
+
+### State machine per failure mode
+
+| Status | UX |
+|---|---|
+| `400 validation` | Field-level errors mapped from the API's `errors[]` envelope into react-hook-form via the `setError` API. Toast for non-field errors. |
+| `401 invalid_token` | Fetch wrapper attempts one silent refresh via `oidc-client-ts`; on failure, redirect to `/oidc/login` preserving the original deep link via `?return_to=`. |
+| `403 forbidden` | Inline panel: "You don't have access to this resource. Your role is `editor`; this requires `org-admin`." Reads the `knievel.role` claim from the active session for the role hint. |
+| `404 not_found` | Inline empty-state on detail pages; toast on list-page filters that resolve to nothing. |
+| `409 conflict` | Field-level if attributable (`external_id_conflict` → highlight the externalId field); toast otherwise. |
+| `422 unprocessable` | Same shape as 400; field-level mapping. |
+| `429 rate_limited` | Toast with the `Retry-After` value, exponential backoff on the next attempt. |
+| `5xx` | Generic toast: "Knievel returned an error. Request ID: ...". Detailed error drawer from a "Show details" link revealing status, error code, message, and request ID. |
+| Network error | Toast: "Couldn't reach knievel — check your connection." Retry button. No Request ID since no response was received. |
+
+### What gets logged client-side
+
+Errors get console-logged with the request ID, the URL, the
+HTTP status, and the API's error envelope. Nothing more.
+Sentry-on-the-client is in Open Questions below — error
+tracking is arguably different from telemetry, and a real
+operator complaint should motivate it before we add another
+SDK.
 
 ## CORS
 
@@ -638,7 +724,12 @@ hot-path rail (3.21):
   envelope.
 - **Phase 7.7** — Editing: PATCH/POST forms with
   react-hook-form + zod, idempotency-key handling, optimistic
-  invalidation. Feature-flag rollout per resource.
+  invalidation. Feature-flag rollout per resource. Includes
+  the **`<MintRevealModal>`** for token mint + HMAC rotation
+  (per "Token-mint show-once UX") and the **creative image
+  upload** (`POST /creatives/{id}/image`) drag-and-drop with
+  `images.upload.max_bytes` + `allowed_mime_types`
+  validation.
 - **Phase 7.8** — Reporting + event-flow inspector: charts on
   rollups, a tail view over `/events` (poll-based for v0).
 - **Phase 7.9** — OIDC hardening: end-session integration with
@@ -660,11 +751,22 @@ hot-path rail (3.21):
   for runtime config, `cargo xtask build-image [--skip-ui]`
   wrapper for local devs. Same `ghcr.io/<owner>/knievel`
   image, no new release lane.
+- **Phase 7.13** — Decision tester / debugging surface: a
+  form that builds a real `POST /v1/projects/{p}/decisions`
+  request (zone, channel, ad-type, targeting JSON, force.*
+  overrides), fires it, and renders the served ad alongside
+  the `:explain` response showing per-flight-and-ad reasons.
+  The single most valuable surface for "why isn't my
+  campaign serving?" debugging. Lives at `/reports/test`;
+  reuses 7.7's form components and the auth fetch wrapper.
+  (7.12 was vacated when fly.io was dropped; numbering
+  jumps to 13.)
 
 Numbering is provisional — the actual phase number lands when
 this gets merged into `PHASES.md`. The point is the dependency
 order: skeleton → CORS → codegen → auth → views → editing →
-reporting → OIDC hardening → polish → single-image publish.
+reporting → OIDC hardening → polish → single-image publish
+→ decision tester.
 
 ## Open questions
 
@@ -677,6 +779,37 @@ reporting → OIDC hardening → polish → single-image publish.
   then; don't pre-build a translation pipeline.
 - **Dark mode.** Mantine ships it free; enable from day one.
   No additional spec needed.
+- **Audit-log viewer.** `audit_log` records privileged ops
+  (force.* decisions, member changes, token mints). No
+  list endpoint exists today; once one lands, surface it
+  under Settings as a paginated read-only feed. Auditors
+  will care about this; operators will not. Track when the
+  endpoint is added.
+- **CSV / JSON export from list views.** Cursor pagination
+  makes paginate-and-stream straightforward. Defer until
+  someone asks; the current "open dev tools and grab the
+  JSON" path covers ad-hoc cases.
+- **Empty-state / first-run UX.** Fresh projects with no
+  advertisers, no flights, no creatives need landing copy
+  that points at the next step. Mantine's `<Empty>` patterns
+  cover the visual shell; the copy is product work that
+  belongs alongside 7.5/7.6 once views are real.
+- **Large-table virtualization.** Ad Library and Sites can
+  reach thousands of rows. TanStack Table integrates with
+  `@tanstack/react-virtual`; defer until a real list
+  exceeds ~500 rows in practice.
+- **Client-side error tracking (Sentry).** UI.md "Stack"
+  excludes telemetry SDKs; error tracking is arguably
+  different. Defer until a real operator-side bug motivates
+  it. Server-side Sentry already covers the API path.
+- **Saved filter views.** Power users want to bookmark
+  filter combos. URL query params already support deep
+  links per route; saved views as a separate concept can
+  wait.
+- **Version footer.** A small footer or About modal showing
+  `GET /version` (knievel SHA, build timestamp, auth
+  policy). Cheap to add; do it when the first support
+  ticket starts with "what version are you on?"
 
 ## Cross-references
 
