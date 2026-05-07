@@ -2178,14 +2178,28 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       peer of `openapi-drift`. The generated file is checked
       in, not gitignored.
       Refs: `UI.md` "OpenAPI codegen"; `xtask/src/openapi.rs`.
-- [ ] **7.4** Auth in the UI. Login screen accepting a pasted
-      bearer token; validation against the smallest "who am I"
-      endpoint (whichever exists when this lands — likely a
-      lightweight `GET /v1/orgs/me` we add here if it doesn't
-      exist yet). `sessionStorage`-backed session, fetch
-      wrapper that injects `Authorization`, 401 → redirect to
-      login. `RequireAuth` route guard.
-      Refs: `UI.md` "Auth"; `AUTH.md` § 2.
+- [ ] **7.4** Auth in the UI — **OIDC Authorization Code +
+      PKCE primary, paste-a-token fallback**. Wires
+      `react-oidc-context` (over `oidc-client-ts`) against
+      Keycloak's admin-UI client (public client, PKCE
+      required, no client secret in the bundle); adds
+      `/oidc/login` + `/oidc/callback` + `/oidc/logout`
+      routes, `RequireAuth` guard, and a 401-aware fetch
+      wrapper that runs a silent refresh before redirecting
+      to login. Tokens live in memory inside `UserManager`
+      with `sessionStorage` persistence; closing the tab
+      clears them. The paste-a-token form remains behind
+      `admin_ui.oidc.require_oidc: false` for dev,
+      bootstrap, Keycloak outages, and CI fixtures —
+      identical fetch path, just a `kvl_*` Bearer instead of
+      a JWT. Adds the `admin_ui:` config block on the API
+      side plus `GET /admin/config.json` so one bundle works
+      across envs (issuer + public client_id served from
+      runtime config, not baked at build time). Smallest
+      "who am I" endpoint lands here if it doesn't exist yet
+      and validates both Bearer flavors identically.
+      Refs: `UI.md` "Auth"; `AUTH.md` "Keycloak Setup —
+      Human Admin UI (PKCE)."
 - [ ] **7.5** Org/project browser. List + detail for `/v1/orgs`
       and `/v1/projects/{project_id}`. First end-to-end slice
       that exercises the typed client + Query + Router stack.
@@ -2206,11 +2220,26 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       rollups, a tail view over `/events` (poll-based for v0;
       revisit if/when push lands). Time-bucket controls match
       `REPORTING.md`.
-- [ ] **7.9** Admin-session endpoint. New
-      `POST /v1/admin/sessions` backed by argon2id-hashed user
-      credentials, returning a short-lived bearer + refresh
-      semantics. Retire the paste-a-token login from 7.4.
-      Refs: `AUTH.md` (extension); `UI.md` "Auth" roadmap.
+- [ ] **7.9** OIDC hardening. Wires Keycloak's
+      `end_session_endpoint` into `signoutRedirect()` so
+      logout invalidates the SSO session (not just the local
+      tokens), adds an idle-warning modal driven by
+      `oidc-client-ts` events with a grace-refresh path,
+      and surfaces role-claim-driven UI gating that hides
+      admin-only surfaces from `editor` / `reader` claim
+      values. UI gating is **not** a security boundary —
+      knievel still enforces every authz check server-side;
+      this is purely cosmetic. Includes a documented
+      Keycloak admin-UI client setup (public client + PKCE
+      + group-membership claim mapper) verified end-to-end
+      against a real realm; the runbook lands in `AUTH.md`'s
+      "Keycloak Setup — Human Admin UI (PKCE)" section in
+      the same commit. (The original "custom admin-session
+      endpoint backed by argon2id user credentials" was
+      retired when OIDC became the primary flow — Keycloak
+      owns user identity; knievel doesn't.)
+      Refs: `AUTH.md` "Keycloak Setup — Human Admin UI
+      (PKCE)"; `UI.md` "Auth."
 - [ ] **7.10** Polish: Playwright e2e in `nightly.yml`,
       bundle-size budgets, accessibility sweep (axe in CI for
       the main routes). Decision on prod static hosting —

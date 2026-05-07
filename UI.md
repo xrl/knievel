@@ -36,6 +36,7 @@ for v0 and will be a separate deliverable.
 | Build | **Vite** | Fast dev server, first-class TS, no Next.js server runtime to operate. |
 | Routing | **TanStack Router** | Type-safe routes pair well with the typed API client. |
 | Data layer | **TanStack Query** + **`openapi-fetch`** (typed via **`openapi-typescript`**) | Codegen consumes `openapi.yaml` directly; no hand-written types. Cache + invalidation handled by Query. |
+| Auth | **`react-oidc-context`** (wraps **`oidc-client-ts`**) | Authorization Code + PKCE against Keycloak; silent refresh; no client secret in the SPA. Paste-a-token fallback for dev / no-Keycloak environments. |
 | Forms | **react-hook-form** + **zod** | Schemas derived from generated TS types; minimal runtime overhead. |
 | Components | **Mantine v7** (tables, modals, forms, dates) | Batteries-included audit UI primitives. shadcn/ui is the fallback if Mantine bloat becomes a problem. |
 | Tables | **TanStack Table** under Mantine wrappers | Server-side pagination/sort/filter against our cursor envelope. |
@@ -74,8 +75,10 @@ web/admin/
       generated.ts        # `openapi-typescript` output; checked in
       client.ts           # `openapi-fetch` instance, auth header
     auth/
-      session.ts          # token storage + login/logout
+      AuthProvider.tsx    # `react-oidc-context` <AuthProvider>
       RequireAuth.tsx
+      PasteTokenLogin.tsx # fallback when oidc.require_oidc is false
+      runtimeConfig.ts    # fetches /admin/config.json on boot
     routes/
       __root.tsx
       projects/
@@ -129,26 +132,112 @@ and reviewers should see when it changes.
 
 ## Auth
 
-The admin UI authenticates with the same opaque bearer tokens as
-every other client (`AUTH.md` § 2). For v0:
+**Primary flow: OIDC Authorization Code + PKCE against Keycloak.**
+Humans sign in to Keycloak; the SPA receives a short-lived
+access token (a JWT carrying the `knievel` claim); every API
+call presents it as `Authorization: Bearer <jwt>`. The API
+already validates these JWTs unchanged via the existing JWKS
+machinery — no admin-only endpoints, no custom session backend,
+no cookies. See `AUTH.md` "Keycloak Setup — Human Admin UI
+(PKCE)" for the canonical contract; this section covers the SPA
+side.
 
-- **Login screen** accepts a token string (operator pastes from
-  `tokens` API output or from their secret-store CLI) and
-  validates it by calling `GET /v1/orgs/me` (or whatever the
-  smallest "who am I" endpoint becomes — track in `PHASES.md`).
-- **Storage**: `sessionStorage`, not `localStorage`. Survives
-  tab refresh, dies on tab close. Acknowledge the XSS-exfil
-  risk in the UI README; mitigations come with the eventual
-  admin-session endpoint (next bullet).
-- **Roadmap**: a dedicated admin-session endpoint
-  (`POST /v1/admin/sessions`) backed by argon2id-hashed user
-  credentials, returning a short-lived bearer token + refresh
-  semantics. Token rotation handled client-side via TanStack
-  Query's retry-on-401. Track as a Phase 4 task; not blocking
-  for the read-only audit UI.
+### Library + flow
 
-The UI never embeds tokens at build time. There is no "service
-account baked into the SPA."
+- **`react-oidc-context`** (wraps `oidc-client-ts`) drives the
+  dance. `<AuthProvider>` at the route root; `useAuth()` hook
+  exposes `{ user, signinRedirect, signoutRedirect, ... }`.
+- **Public client + PKCE.** No client secret in the bundle; the
+  `code_verifier` is generated per-login and held in
+  `sessionStorage` only until the callback completes.
+- **Token storage.** Access token + refresh token live in
+  memory inside `UserManager`, with `sessionStorage`
+  persistence so a tab reload doesn't force re-auth. Closing
+  the tab clears them; explicit logout calls
+  `signoutRedirect()` which hits Keycloak's
+  `end_session_endpoint`.
+- **Silent refresh.** `oidc-client-ts` auto-refreshes the
+  access token via the refresh token before expiry; on
+  refresh failure (revoked session, Keycloak unreachable) the
+  fetch wrapper redirects to `/oidc/login`.
+- **`RequireAuth` route guard** wraps every protected route;
+  unauthenticated → `signinRedirect()`. The fetch wrapper
+  retries once on `401` after a silent refresh attempt.
+- **Role-claim-driven UI gating.** The `knievel.role` from the
+  JWT is read in the SPA to hide admin-only surfaces from
+  `editor` / `reader` users. **Not a security boundary** —
+  knievel still enforces every authz check server-side; this
+  is purely cosmetic.
+
+### Routes
+
+- `/oidc/login` — initiates `signinRedirect()` and returns null.
+- `/oidc/callback` — completes `signinRedirectCallback()`,
+  redirects to the deep link the user originally requested.
+- `/oidc/logout` — calls `signoutRedirect()`.
+
+### Runtime config (one bundle, multiple envs)
+
+The SPA can't bake the Keycloak issuer / client-id into the
+build because we want a single artifact to deploy across
+staging / prod / dev. On boot the SPA fetches
+`GET /admin/config.json`, served by the API from the same
+origin:
+
+```json
+{
+  "oidc": {
+    "issuer":    "https://keycloak.scientist.com/realms/scientist",
+    "client_id": "knievel-admin-ui-prod",
+    "scopes":    ["openid", "profile", "knievel"],
+    "require_oidc": true
+  }
+}
+```
+
+The API constructs this payload from the new `admin_ui:` config
+section (planned in Phase 7.4 alongside the
+`StaticFilesEndpoint` mount; see `AUTH.md` "Knievel-side
+configuration"). Empty `oidc.issuer` means OIDC is disabled and
+the UI falls through to the paste-a-token form.
+
+### Paste-a-token fallback
+
+Kept as a deliberate first-class fallback, not a dev-only
+hack:
+
+- **Dev / `docker compose up`** — the seed sidecar mints an Org
+  Editor opaque token (`AUTH.md` "Local Development"), no
+  Keycloak in the picture. Paste-token login uses it
+  unchanged.
+- **Bootstrap** — bring up a knievel cluster before Keycloak
+  is provisioned.
+- **Keycloak outage / DR** — operators with a break-glass
+  opaque token in their secret store stay unblocked.
+- **CI smoke tests** — deterministic credential, no IdP
+  dependency.
+
+The fallback is hidden when `admin_ui.oidc.require_oidc: true`
+(default in prod). The form accepts a `kvl_*` token, validates
+it against a "who am I" endpoint, and stores it in
+`sessionStorage` exactly as the JWT path does. From the API's
+perspective the request is identical to any other Bearer call;
+the UI just constructs the header from a different source.
+
+### What's intentionally not here
+
+- **No BFF / no admin-session endpoint.** The original sketch
+  had `POST /v1/admin/sessions` backed by argon2id user
+  credentials; replaced by Keycloak-as-the-IdP, which deletes
+  custom auth code we'd have to maintain and gets MFA / SSO /
+  password rotation / session policy free.
+- **No cookies for app auth.** Keeps CORS at
+  `allow_credentials: false` and removes the cookie-CSRF
+  surface. Refresh tokens go through `oidc-client-ts` directly
+  to Keycloak's token endpoint, never via knievel.
+- **No tokens baked into the bundle.** Build artifacts contain
+  no secrets. The runtime config only exposes public OIDC
+  metadata (issuer URL + public client ID).
 
 ## CORS
 
@@ -286,9 +375,17 @@ hot-path rail (3.21):
 - **Phase 7.3** — Codegen rail: `xtask ui-client [--check]`,
   `node-setup` composite action, CI wiring, generated
   `src/api/generated.ts` checked in.
-- **Phase 7.4** — Auth: login screen, session storage,
-  `RequireAuth`, 401-aware fetch wrapper, smallest "who am I"
-  endpoint on the API side if it doesn't exist yet.
+- **Phase 7.4** — Auth (OIDC PKCE primary, paste-token
+  fallback): `react-oidc-context` wired against Keycloak,
+  `/oidc/login` + `/oidc/callback` + `/oidc/logout` routes,
+  `RequireAuth`, 401-aware fetch wrapper with silent refresh,
+  paste-a-token form behind a runtime-config flag.
+  Adds the `admin_ui:` config block on the API side and
+  `GET /admin/config.json` to surface OIDC metadata to the
+  bundle. Smallest "who am I" endpoint added on the API side
+  if it doesn't exist yet (validates both JWT and opaque
+  Bearer paths identically). Refs: `AUTH.md` "Keycloak Setup
+  — Human Admin UI (PKCE)."
 - **Phase 7.5** — Org/project browser: list + detail for
   `/v1/orgs` and `/v1/projects/:project_id`. First end-to-end
   slice; proves the typed client + Query + Router stack.
@@ -301,15 +398,21 @@ hot-path rail (3.21):
   invalidation. Feature-flag rollout per resource.
 - **Phase 7.8** — Reporting + event-flow inspector: charts on
   rollups, a tail view over `/events` (poll-based for v0).
-- **Phase 7.9** — Admin-session endpoint: short-lived tokens,
-  refresh handling, retire the paste-a-token login.
+- **Phase 7.9** — OIDC hardening: end-session integration with
+  Keycloak's `end_session_endpoint`, session-timeout UX
+  (idle-warning modal + grace refresh), role-claim-driven UI
+  gating (hide admin-only surfaces from `editor` / `reader`
+  claim values; not a security boundary — knievel still
+  enforces server-side), and a documented Keycloak admin-UI
+  client setup verified end-to-end against a real realm.
+  Refs: `AUTH.md` "Keycloak Setup — Human Admin UI (PKCE)."
 - **Phase 7.10** — Playwright e2e in `nightly.yml`, bundle-size
   budgets, accessibility sweep.
 
 Numbering is provisional — the actual phase number lands when
 this gets merged into `PHASES.md`. The point is the dependency
 order: skeleton → CORS → codegen → auth → views → editing →
-reporting → admin-session → polish.
+reporting → OIDC hardening → polish.
 
 ## Open questions
 

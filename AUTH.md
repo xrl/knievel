@@ -5,8 +5,8 @@ Decision endpoints. Either or both can be enabled per deployment.
 
 | Mode | Format | When to use |
 |---|---|---|
-| **Opaque token** | `kvl_<env>_<scope>_<random>` | Bootstrap, deployments without an IdP, the eventual admin UI's session credentials. |
-| **JWT** | Three base64url segments separated by `.` | When a Keycloak / OIDC provider is already in place. Identity stays in the IdP; knievel just validates. |
+| **Opaque token** | `kvl_<env>_<scope>_<random>` | Bootstrap, deployments without an IdP, dev environments, fallback when the admin UI can't reach Keycloak. |
+| **JWT** | Three base64url segments separated by `.` | When a Keycloak / OIDC provider is in place. Service-to-service via `client_credentials`; human admins via Authorization Code + PKCE from the admin UI. Identity stays in the IdP; knievel just validates. |
 
 Detection is trivial: the prefix `kvl_` is reserved for opaque tokens;
 anything else is parsed as a JWT.
@@ -146,9 +146,13 @@ Multiple issuers are supported for federation (different envs,
 different realms, gradual migration between IdPs). The first issuer
 whose `iss` claim matches is used.
 
-## Keycloak Setup
+## Keycloak Setup — Service Accounts (`client_credentials`)
 
-For a Keycloak server at `https://keycloak.scientist.com`:
+For a Keycloak server at `https://keycloak.scientist.com`. This
+section covers **service-to-service** authentication: a backend
+client (e.g. a Rails app) obtaining tokens to call knievel.
+Human admins authenticating into the admin UI use a separate
+client described in the next section.
 
 ### 1. Create a client (per knievel environment)
 
@@ -223,6 +227,196 @@ auth:
 
 That's it. Knievel discovers the JWKS, validates incoming JWTs, and
 maps the `knievel` claim to its internal `Principal`.
+
+## Keycloak Setup — Human Admin UI (PKCE)
+
+For human operators authenticating into the admin UI (`UI.md`).
+Uses **OpenID Connect Authorization Code with PKCE** against a
+**public client** — no client secret in the SPA, no UI-side
+backend, all in-browser. The same JWKS validation the backend
+already runs for service-account JWTs handles the resulting
+access tokens unchanged; only the upstream issuance flow differs.
+
+The admin UI is the only first-party human surface in v0; if you
+add another browser-side client (a separate ops console, etc.)
+follow the same pattern with its own client ID.
+
+### 1. Create the admin-UI client (per knievel environment)
+
+Per environment, create a second Keycloak client distinct from
+the service-account one above:
+
+- **Client ID**: `knievel-admin-ui-prod` (etc.).
+- **Client authentication**: OFF (public client — PKCE replaces
+  the client secret, since a SPA can't keep one).
+- **Authentication flow**: Standard flow ON, Direct access grants
+  OFF, Service accounts OFF, Implicit flow OFF.
+- **Proof Key for Code Exchange (PKCE)**: required, method
+  `S256`. Set "Advanced → Proof Key for Code Exchange Code
+  Challenge Method" to `S256`.
+- **Valid redirect URIs**:
+  - `https://admin.knievel.example.com/oidc/callback`
+  - `http://localhost:5173/oidc/callback` (dev)
+- **Valid post-logout redirect URIs**: the admin UI's root URL.
+- **Web origins**: same hosts as the redirect URIs (Keycloak
+  uses this for its own CORS allow-list on the token endpoint).
+- **Access token lifespan**: 15 minutes (knievel's default
+  validation tolerance is fine with this).
+- **Refresh tokens**: ON. SSO Session Idle / Max set per your
+  org policy; the UI uses the refresh token for silent renewal
+  via `oidc-client-ts`.
+
+### 2. Map user identity → the `knievel` claim
+
+The service-account flow uses a hardcoded-claim mapper because
+every token from that client represents the same principal. For
+humans, the `knievel` claim has to vary per user. Two patterns,
+pick one:
+
+**a. Group-membership mapper (multi-org Keycloak realms).**
+Define groups whose path encodes org and role:
+
+```
+/knievel/scientist-com-prod/editor
+/knievel/scientist-com-prod/admin
+/knievel/example-co-staging/reader
+```
+
+Add a *Script Mapper* (or *Group Membership* + a script) on the
+`knievel-admin-ui-prod` client that emits the `knievel` claim by
+parsing the first matching group path. Result on the access
+token:
+
+```json
+{
+  "knievel": {
+    "scope":  "org",
+    "org_id": "scientist-com-prod",
+    "role":   "editor"
+  }
+}
+```
+
+A user in multiple `/knievel/*` groups gets the highest role
+across them; cross-org membership is allowed but the claim
+carries one org per token (the active one — selectable in the UI
+via a Keycloak `prompt=login` re-auth, or `acr_values` if you
+need it deterministic).
+
+**b. User-attribute mapper (single-org installs).**
+Set `knievel_org_id` and `knievel_role` as user attributes; a
+*User Attribute* mapper assembles them into the `knievel` claim
+object. Simpler than the group approach, but every user has to
+be tagged manually.
+
+Either way, the claim shape on the wire is the same one knievel
+already validates — see "The `knievel` claim" above. No
+knievel-side changes from the service-account path.
+
+### 3. Add the audience
+
+Same as the service-account flow: an *Audience* protocol mapper
+to ensure `aud` contains `knievel`. Without it, knievel rejects
+the token at boot-validated audience check.
+
+### 4. Knievel-side configuration
+
+No new config on the API side. The same `auth.jwt.issuers[]`
+entry that validates service-account tokens validates human
+tokens — same issuer, same JWKS, same algorithms, same claim
+path. The only addition is a section the **admin UI** reads at
+runtime:
+
+```yaml
+admin_ui:
+  oidc:
+    issuer:    https://keycloak.scientist.com/realms/scientist
+    client_id: knievel-admin-ui-prod
+    scopes:    [openid, profile, knievel]
+    # When false (default false in dev, true in prod), the UI
+    # hides the paste-a-token fallback login.
+    require_oidc: true
+```
+
+This block is served to the SPA at boot via a small
+`GET /admin/config.json` endpoint (one bundle, multiple envs;
+see `UI.md` "Auth"). It's not consumed by the API itself.
+
+### 5. UI flow
+
+`oidc-client-ts` (wrapped by `react-oidc-context`) drives the
+dance:
+
+1. Unauthenticated user hits any route → `RequireAuth` redirects
+   to `/oidc/login`, which calls `userManager.signinRedirect()`.
+2. Browser → Keycloak `/protocol/openid-connect/auth?...&code_challenge=...&code_challenge_method=S256`.
+3. User authenticates (with whatever Keycloak has set up — MFA,
+   SSO, social, all upstream concerns).
+4. Keycloak → `/oidc/callback?code=...`. `userManager.signinRedirectCallback()`
+   exchanges the code + PKCE verifier for `{access_token, id_token,
+   refresh_token}`.
+5. The fetch wrapper attaches `Authorization: Bearer <access_token>`
+   to every API call.
+6. Silent refresh: when the access token approaches expiry,
+   `oidc-client-ts` posts the refresh token to Keycloak's token
+   endpoint and replaces the access token in memory.
+7. Logout: UI calls `userManager.signoutRedirect()`, which hits
+   Keycloak's `end_session_endpoint` and returns to the
+   post-logout redirect URI.
+
+Tokens (access + refresh) live in memory inside the
+`UserManager`, with optional `sessionStorage` persistence so a
+tab refresh doesn't force re-auth. **No long-lived storage**;
+closing the tab or `signoutRedirect` clears them. XSS exposure
+is the standard SPA tradeoff — mitigated by short access-token
+TTL (15 min), strict CSP on the admin bundle, and the option to
+move to a BFF cookie pattern later if the threat model
+tightens. Knievel doesn't see refresh tokens; they only flow
+between the SPA and Keycloak.
+
+### 6. Paste-a-token fallback
+
+When `admin_ui.oidc.require_oidc` is `false` (or the OIDC
+metadata fetch fails — Keycloak unreachable, misconfigured), the
+UI shows a "Paste an opaque token" form alongside the OIDC
+login button. Operator pastes a `kvl_*` token minted via
+`POST /v1/orgs/{orgId}/tokens`; the rest of the UI uses it
+identically to a JWT (it's just a Bearer credential to the API).
+
+Use cases:
+
+- Bootstrap: spin up a knievel cluster before Keycloak exists.
+- Disaster recovery: Keycloak outage shouldn't lock operators
+  out of knievel.
+- Local dev: `docker compose up` doesn't include Keycloak
+  (`Local Development` section above); paste-token flow works
+  unchanged against the seeded Org Editor token.
+- CI smoke tests: deterministic credential, no IdP dependency.
+
+In production this fallback is typically disabled
+(`require_oidc: true`) so SSO/MFA/audit policy can't be
+sidestepped; operators with a legitimate need keep one
+break-glass opaque token in their secret store.
+
+### Why public client + PKCE, not BFF
+
+Two architectures could carry OIDC for the SPA:
+
+- **Public client + PKCE, all browser-side (chosen).** No UI
+  server. Tokens in memory + optional `sessionStorage`. Works
+  with the same-origin static-files deploy from `UI.md`.
+- **Backend-for-Frontend (BFF) with httpOnly session cookies.**
+  Stronger XSS posture (tokens never touch JS), but requires
+  standing up a Node/Rust BFF that holds Keycloak client
+  credentials, and means knievel grows a stateful cookie/session
+  surface — both contradict `UI.md` ("No Next.js, no SSR" and
+  "Bearer tokens, not cookies").
+
+PKCE is the industry default for SPAs in 2026, including for
+sensitive admin consoles, and the trade-off is acceptable given
+the short access-token TTL and the option to add BFF later
+without changing knievel's auth surface (the BFF would just
+present the same JWT to knievel that the SPA does today).
 
 ## Kubernetes ServiceAccount Tokens
 
@@ -820,26 +1014,20 @@ K8s ServiceAccount tokens are not a dev-mode concern. They're
 production/staging-cluster path only; the local native Rails
 process has no projected token to present.
 
-## OIDC for Humans (post-v0)
+## OIDC for Humans
 
-When the admin UI lands, humans authenticate via Keycloak using the
-authorization-code-with-PKCE flow:
+The plan sketched here originally has been promoted to a real
+spec — see **"Keycloak Setup — Human Admin UI (PKCE)"** above for
+the canonical flow, including the public-client config, the
+group-membership claim mapper, the runtime-config endpoint, and
+the paste-a-token fallback for bootstrap / Keycloak outages. The
+admin UI (`UI.md`) consumes that contract directly.
 
-1. UI redirects browser to Keycloak.
-2. User authenticates, consents.
-3. Keycloak redirects back with an auth code.
-4. UI exchanges code for tokens server-side.
-5. UI presents the access token to knievel as a Bearer JWT.
-
-The validation backend on the knievel side is **the same JWKS
-machinery we land in v0** — same crates, same cache, same claim
-mapping. The difference is upstream: instead of `client_credentials`,
-the human's access token is issued via auth-code flow, and the
-`knievel` claim is filled from the user's group/role memberships in
-Keycloak rather than a hardcoded mapper.
-
-The `openidconnect` Rust crate handles the auth-code dance on the
-admin UI's server side; we don't need it in knievel itself.
+Knievel-side, no new validation code is needed: the same JWKS
+machinery that handles `client_credentials` JWTs handles human
+PKCE tokens too. The OIDC dance lives entirely in the SPA via
+`oidc-client-ts`; knievel only sees Bearer JWTs. Implementation
+ships across Phase 7 (`PHASES.md` 7.4 and 7.9).
 
 ## References
 
