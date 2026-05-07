@@ -78,7 +78,7 @@ async fn site_upsert_by_url_returns_201_then_200() -> Result<()> {
 
     // First call: 201 Created.
     let resp = cli
-        .post("/v1/projects/pj_a/sites:upsertByUrl")
+        .post("/v1/projects/pj_a/sites/upsert-by-url")
         .header("Authorization", format!("Bearer {}", f.pj_a_editor))
         .body_json(&serde_json::json!({"url": "https://main.example", "name": "Main"}))
         .send()
@@ -90,7 +90,7 @@ async fn site_upsert_by_url_returns_201_then_200() -> Result<()> {
 
     // Second call with the same URL: 200 OK, same row id.
     let resp = cli
-        .post("/v1/projects/pj_a/sites:upsertByUrl")
+        .post("/v1/projects/pj_a/sites/upsert-by-url")
         .header("Authorization", format!("Bearer {}", f.pj_a_editor))
         .body_json(&serde_json::json!({"url": "https://main.example", "name": "Renamed"}))
         .send()

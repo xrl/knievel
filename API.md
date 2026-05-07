@@ -810,7 +810,7 @@ be created/updated via API.
 | `GET` | `/v1/projects/{project_id}/sites` | List. Filter: `channel_id`, `external_id`, `url`. |
 | `POST` | `/v1/projects/{project_id}/sites` | Create. |
 | `POST` | `/v1/projects/{project_id}/sites:batchUpsert` | Bulk by `external_id`. |
-| `POST` | `/v1/projects/{project_id}/sites:upsertByUrl` | Upsert keyed by URL — natural-key endpoint for URL-driven flows. |
+| `POST` | `/v1/projects/{project_id}/sites/upsert-by-url` | Upsert keyed by URL — natural-key endpoint for URL-driven flows. (Path uses a regular slash-segment instead of the Google-style `:upsertByUrl` custom verb because poem's path matcher routes `sites:foo` and `sites:bar` to the same pattern, which collides with `sites:batchUpsert`. Other resources use `:batchUpsert` because there's only one custom verb per resource.) |
 | `GET` | `/v1/projects/{project_id}/sites/{id}` | Read. |
 | `PATCH` | `/v1/projects/{project_id}/sites/{id}` | Update. |
 

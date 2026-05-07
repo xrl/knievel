@@ -2232,7 +2232,7 @@ paths:
       security:
       - BearerAuth: []
       operationId: listSites
-  /v1/projects/{project_id}/sites:upsertByUrl:
+  /v1/projects/{project_id}/sites/upsert-by-url:
     post:
       tags:
       - Sites
