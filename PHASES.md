@@ -2263,17 +2263,64 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       (PKCE)"; `UI.md` "Auth."
 - [ ] **7.10** Polish: Playwright e2e in `nightly.yml`,
       bundle-size budgets, accessibility sweep (axe in CI for
-      the main routes). Decision on prod static hosting —
-      either mount a `StaticFilesEndpoint` at `/admin/`
-      (same-origin, drops the CORS layer) or stand up a
-      separate static deploy. Default lean is same-origin;
-      revisit if the deploy cadence diverges.
+      the main routes).
+- [ ] **7.11** Single-image Dockerfile + ghcr publish for the
+      admin UI. Adds a `node:22-alpine` build stage to the
+      existing `Dockerfile` (`pnpm install --frozen-lockfile
+      && pnpm build` → `web/admin/dist/`), copies the bundle
+      into the distroless final image at
+      `/var/lib/knievel/admin`, lands a new
+      `admin_ui:` config block (`static_dir`, the OIDC
+      sub-block from 7.4) consumed by `src/server.rs` to
+      mount a `StaticFilesEndpoint` at `/admin/` with
+      `index.html` SPA fallback, and serves the runtime
+      config at `GET /admin/config.json` *before* the
+      static fallback so it isn't shadowed by a bundle file.
+      Empty `static_dir` → admin UI not served at all (same
+      image runs as a headless API). The existing
+      `release.yml` keeps publishing
+      `ghcr.io/<owner>/knievel` unchanged — the multi-stage
+      Dockerfile rides the same lane. CI gains pnpm-store
+      caching on the new stage. New `tests/api_admin_ui.rs`
+      slice covers: empty `static_dir` returns 404 on
+      `/admin/`; populated returns `index.html`; deep
+      paths fall back to `index.html` for SPA routing;
+      `/admin/config.json` round-trips the OIDC block.
+      Refs: `UI.md` "Deployment"; `AUTH.md` "Knievel-side
+      configuration."
+- [ ] **7.12** Fly.io sample-app deploy with
+      Keycloak-federated-to-GitHub. Lands `examples/fly/`
+      with three apps: `knievel-demo` (pulls
+      `ghcr.io/<owner>/knievel:<tag>`), `knievel-demo-pg`
+      (smallest fly Postgres tier), `knievel-demo-keycloak`
+      (Keycloak in dev mode with a `realm.json` import that
+      provisions the admin-UI client + GitHub social IdP).
+      `examples/fly/deploy.sh` orchestrates the boot order
+      (Postgres → Keycloak → knievel) and runs
+      `knievel-cli seed-demo` to plant a demo
+      Org/Project/advertiser/campaign/flight/ad/creative
+      chain so a fresh GitHub sign-in lands in a useful
+      state. Group-membership claim mapper assembles the
+      `knievel` claim per `AUTH.md` "Keycloak Setup —
+      Human Admin UI (PKCE)"; first-sign-in lands the user
+      in `/knievel/demo-org/editor`. Documents both the
+      canonical 3-app deploy and a lighter 2-app variant
+      (paste-token fallback, no Keycloak) in
+      `examples/fly/README.md`. All three apps target
+      fly.io's free tier (3 × shared-cpu-1x + small
+      Postgres). New optional GitHub Actions workflow
+      `.github/workflows/fly-demo.yml` redeploys on `main`
+      when `examples/fly/**` or the published image tag
+      changes.
+      Refs: `UI.md` "Deployment"; `AUTH.md` "Keycloak
+      Setup — Human Admin UI (PKCE)."
 
 **Milestone:** Operators can log in, browse every project-
 scoped resource, edit the editable ones, and inspect rollups
 + event flow — all over the public OpenAPI surface, no admin
-side channels. UI deploys cleanly from CI; codegen drift fails
-PRs the same way `openapi.yaml` does.
+side channels. UI + API ship as a single
+`ghcr.io/<owner>/knievel` image; an evaluator can spin up the
+whole stack on fly.io with one script and sign in via GitHub.
 
 ### Notes
 

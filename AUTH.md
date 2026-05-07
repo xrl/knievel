@@ -380,7 +380,7 @@ When `admin_ui.oidc.require_oidc` is `false` (or the OIDC
 metadata fetch fails — Keycloak unreachable, misconfigured), the
 UI shows a "Paste an opaque token" form alongside the OIDC
 login button. Operator pastes a `kvl_*` token minted via
-`POST /v1/orgs/{orgId}/tokens`; the rest of the UI uses it
+`POST /v1/orgs/{org_id}/tokens`; the rest of the UI uses it
 identically to a JWT (it's just a Bearer credential to the API).
 
 Use cases:

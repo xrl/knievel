@@ -468,6 +468,137 @@ Node version pinning, mirroring `rust-setup`. Same caveat
 applies: callers must `actions/checkout@v4` before `uses:
 ./.github/actions/node-setup` (gotcha #6 in `CLAUDE.md`).
 
+## Deployment
+
+The admin UI ships in the **same `ghcr.io/<owner>/knievel`
+image as the API**. No separate static host, no second deploy
+pipeline, no version-skew window between the two halves. UI
+version === API version === git SHA, all the way through to
+`GET /version`.
+
+### Single-image Dockerfile
+
+Extends the existing Phase 4.1 `Dockerfile` with a Node build
+stage that runs in parallel with the Rust stage and copies its
+output into the final distroless layer:
+
+```dockerfile
+# Stage 1 — UI bundle.
+FROM node:22-alpine AS ui-build
+WORKDIR /web/admin
+RUN corepack enable
+COPY web/admin/package.json web/admin/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY openapi.yaml /openapi.yaml
+COPY web/admin/ ./
+RUN pnpm build           # → /web/admin/dist/
+
+# Stage 2 — Rust binary (existing, unchanged).
+FROM rust:1-bookworm AS builder
+... (existing stages)
+
+# Stage 3 — distroless final.
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=builder  /build/target/release/knievel     /usr/local/bin/knievel
+COPY --from=builder  /build/target/release/knievel-cli /usr/local/bin/knievel-cli
+COPY --from=ui-build /web/admin/dist                   /var/lib/knievel/admin
+ENV KNIEVEL_CONFIG=/etc/knievel/config.yaml
+ENV KNIEVEL_ADMIN_UI__STATIC_DIR=/var/lib/knievel/admin
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/knievel"]
+```
+
+When `cfg.admin_ui.static_dir` is set, poem mounts it at
+`/admin/` via `StaticFilesEndpoint` with `index.html`
+fallback for SPA history routing. When unset, the admin UI
+isn't served at all — the same image runs as a headless API
+deployment, `/admin/*` returns 404. Both modes share one
+artifact; deployment chooses by setting (or not setting) the
+env var. Same-origin means the CORS layer stays disabled in
+the bundled deploy mode.
+
+`GET /admin/config.json` is served by the API **before** the
+static fallback so the SPA's runtime config (`AUTH.md`
+"Knievel-side configuration") doesn't get shadowed by a
+`config.json` file inside the bundle.
+
+CI cost is bounded:
+
+- ~1–2 minutes for the Node stage; pnpm store cached via
+  `actions/setup-node` `cache: pnpm`.
+- Layer ordering means a Rust-only edit doesn't bust the UI
+  cache and vice versa.
+- Final image grows by ~5–10 MB (gzipped JS bundle).
+
+### ghcr.io publishing
+
+The existing `release.yml` workflow already publishes
+`ghcr.io/<owner>/knievel` via `docker/build-push-action` on
+`v*` tags. No new workflow; the multi-stage Dockerfile rides
+the same lane.
+
+### Fly.io sample-app deploy
+
+A **demo target**, not the recommended production deploy
+shape — but the simplest "see knievel running with real OIDC
+and a Postgres" path for evaluators. Lives under
+`examples/fly/` (`fly.toml` per app, a `deploy.sh`, a
+realm-export JSON, a README). All three apps fit inside
+fly.io's free tier (3 × shared-cpu-1x + one small Postgres).
+
+Three fly apps:
+
+1. **`knievel-demo`** — pulls
+   `ghcr.io/<owner>/knievel:<tag>`, exposes `:8080`, one
+   `shared-cpu-1x` / 256 MB. Reads its config via env vars
+   (`KNIEVEL_*`); connects to Postgres on the internal
+   `.flycast` hostname.
+2. **`knievel-demo-pg`** — `fly postgres create` smallest
+   tier. Knievel runs its migrations at boot
+   (`database.auto_migrate: true`).
+3. **`knievel-demo-keycloak`** —
+   `quay.io/keycloak/keycloak` in dev mode (production
+   Keycloak deploys are out of scope for the demo). Realm
+   `knievel-demo` provisioned from `examples/fly/realm.json`:
+   one admin-UI client per `AUTH.md` "Keycloak Setup —
+   Human Admin UI (PKCE)", plus **GitHub configured as a
+   social identity provider** so users click "Sign in with
+   GitHub" → Keycloak federates → SPA gets a
+   `knievel`-claim JWT.
+
+Why GitHub via Keycloak, not directly: GitHub's
+`/login/oauth/authorize` returns access tokens, **not**
+OIDC ID tokens with `iss`/`sub`/`aud` that knievel's JWKS
+validator can consume. Keycloak bridges the impedance —
+GitHub is the identity provider; Keycloak is the OIDC
+issuer knievel trusts. This also keeps the demo's auth
+path **identical to production**: same
+`auth.jwt.issuers[]` config shape, same SPA PKCE flow,
+just a different upstream IdP behind Keycloak.
+
+Boot sequence (scripted in `examples/fly/deploy.sh`):
+
+1. Postgres app up; knievel migrates on first boot.
+2. Keycloak app up; realm imported from JSON; GitHub OAuth
+   `client_id`/`client_secret` injected from
+   `fly secrets set`.
+3. Knievel app up; `knievel-cli seed-demo` plants a demo
+   Org + Project + sample
+   advertiser/campaign/flight/ad/creative chain so a fresh
+   sign-in lands in a useful state.
+4. First GitHub sign-in lands the user in a Keycloak group
+   (`/knievel/demo-org/editor`); the group-membership claim
+   mapper assembles the `knievel` claim; the SPA picks up
+   the JWT and renders the project workspace.
+
+Lighter alternative (documented in `examples/fly/README.md`
+but **not the default**): skip Keycloak entirely and use the
+**paste-a-token fallback** with a seeded Org Editor token
+surfaced on the landing page. Two fly apps instead of three;
+doesn't exercise OIDC; trades "showing off SSO" for
+"two-minute boot."
+
 ## Phasing
 
 The UI is a new top-level workstream; it doesn't displace any
@@ -516,23 +647,28 @@ hot-path rail (3.21):
   Refs: `AUTH.md` "Keycloak Setup — Human Admin UI (PKCE)."
 - **Phase 7.10** — Playwright e2e in `nightly.yml`, bundle-size
   budgets, accessibility sweep.
+- **Phase 7.11** — Single-image Dockerfile + ghcr publish:
+  Node build stage in the existing `Dockerfile`, distroless
+  final layer carries the bundle at `/var/lib/knievel/admin`,
+  `admin_ui:` config block + `StaticFilesEndpoint` mount at
+  `/admin/`, `GET /admin/config.json` for runtime config.
+  Same `ghcr.io/<owner>/knievel` image, no new release lane.
+- **Phase 7.12** — Fly.io sample-app deploy:
+  `examples/fly/{fly.toml,realm.json,deploy.sh,README.md}`
+  for three apps (knievel + Postgres + Keycloak federated to
+  GitHub). `knievel-cli seed-demo` plants demo data;
+  group-membership claim mapper drops first-time GitHub
+  signups into a demo Org. Lighter 2-app variant (paste-token,
+  no Keycloak) documented as an alternative.
 
 Numbering is provisional — the actual phase number lands when
 this gets merged into `PHASES.md`. The point is the dependency
 order: skeleton → CORS → codegen → auth → views → editing →
-reporting → OIDC hardening → polish.
+reporting → OIDC hardening → polish → single-image publish →
+fly.io sample-app deploy.
 
 ## Open questions
 
-- **Static hosting in prod.** Two options:
-  1. Serve the built bundle from poem via a `StaticFilesEndpoint`
-     mounted at `/admin/`. One deploy artifact, same-origin,
-     no CORS needed. Couples UI deploys to API deploys.
-  2. Separate static host (S3 + CloudFront, or a dedicated
-     pod). Decoupled cadence, requires CORS, requires a
-     separate deploy pipeline.
-  Lean toward (1) for v0 to keep the deploy story simple;
-  revisit when the UI deploy cadence diverges from the API.
 - **`creative_template.schema` editor.** Raw textarea + JSON
   parse for v0. Monaco-based editor with JSON-Schema-aware
   IntelliSense is appealing but adds ~2 MB to the bundle —
