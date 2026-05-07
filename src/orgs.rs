@@ -158,7 +158,7 @@ impl OrgApi {
         auth: BearerAuth,
         state: Data<&AppState>,
         org_id: Path<String>,
-        idempotency_key: Header<Option<String>>,
+        #[oai(name = "Idempotency-Key")] idempotency_key: Header<Option<String>>,
         body: Json<CreateProjectRequest>,
     ) -> CreateProjectResponse {
         let principal = auth.0;

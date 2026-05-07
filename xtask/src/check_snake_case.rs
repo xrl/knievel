@@ -82,6 +82,15 @@ pub fn run() -> Result<()> {
                         // here.
                         continue;
                     }
+                    if in_kind == "header" {
+                        // HTTP headers are Title-Case-Hyphenated
+                        // by RFC convention (`Idempotency-Key`,
+                        // `If-Match`, `Authorization`). The
+                        // snake_case rule is the JSON-body wire
+                        // format; HTTP headers obey HTTP
+                        // conventions instead.
+                        continue;
+                    }
                     let Some(name) = param.get("name").and_then(Value::as_str) else {
                         continue;
                     };

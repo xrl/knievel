@@ -105,7 +105,7 @@ paths:
         required: true
         deprecated: false
         explode: true
-      - name: idempotency_key
+      - name: Idempotency-Key
         schema:
           type: string
         in: header
