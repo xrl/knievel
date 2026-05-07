@@ -1997,9 +1997,24 @@ checklist green.
       intentionally stays camelCase — that's JSON Schema, not
       knievel wire. Documented in `CONTRIBUTING.md`
       "Wire-format rule" and `DOCUMENTATION_PLAN.md` § 8.1.
-- [ ] **5.8** Release-tagging workflow — tag `v0.1.0`, multi-arch
-      image published, gem published, GitHub Release created.
-      Refs: `TESTING.md` § 12.9.
+- [ ] **5.8** Release-tagging workflow — first
+      checklist-gated cut. Multi-arch image published, gem
+      published, GitHub Release created.
+      Refs: `TESTING.md` § 12.9, `RELEASE_CHECKLIST.md`,
+      `RELEASE_PLAYBOOK.md`.
+
+      **Note (5.8 versioning):** The literal `v0.1.0` was
+      squatted on RubyGems before any code shipped (see
+      CHANGELOG `[0.1.0]`). `v0.1.1` … `v0.1.6` published as
+      the gem version ratcheted forward without bumping
+      `Cargo.toml` (every tag was a gem-ratchet, not a real
+      checklist-gated release). The first cut through
+      `RELEASE_CHECKLIST.md` is therefore **`v0.1.7`** —
+      formalized via `cargo xtask release-tag 0.1.7` (the
+      one-shot wrapper that bumps `Cargo.toml`, refreshes
+      `Cargo.lock`, rolls `CHANGELOG.md` `[Unreleased]` →
+      `[0.1.7]`, commits, tags, and prints the push commands).
+      Subsequent releases use the same wrapper.
 
 **Milestone:** `v0.1.0` tagged. Container image, Helm chart, and
 gem published.

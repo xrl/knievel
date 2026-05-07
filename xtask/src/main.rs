@@ -9,6 +9,7 @@ mod check_doc_fences;
 mod check_snake_case;
 mod lint_migrations;
 mod openapi;
+mod release_tag;
 mod test_shape;
 
 #[derive(Parser)]
@@ -45,6 +46,14 @@ enum Cmd {
     CheckApiDoc,
     /// Verify every JSON property name + query parameter in `openapi.yaml` is snake_case.
     CheckSnakeCase,
+    /// Cut a release: bump version, refresh Cargo.lock, roll CHANGELOG, commit, tag.
+    ReleaseTag {
+        /// Target version, e.g. `0.1.7`. Tag is `vX.Y.Z`.
+        version: String,
+        /// Skip the local pre-flight gate run (CI still runs them on PR).
+        #[arg(long)]
+        skip_gates: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -57,5 +66,12 @@ fn main() -> Result<()> {
         Cmd::CheckDocFences => check_doc_fences::run(),
         Cmd::CheckApiDoc => check_api_doc::run(),
         Cmd::CheckSnakeCase => check_snake_case::run(),
+        Cmd::ReleaseTag {
+            version,
+            skip_gates,
+        } => release_tag::run(release_tag::Args {
+            version,
+            skip_gates,
+        }),
     }
 }
