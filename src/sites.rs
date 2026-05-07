@@ -255,7 +255,7 @@ impl SitesApi {
     /// `API.md` § 3.7: `:upsertByUrl` is the canonical entry point
     /// for URL-driven flows.
     #[oai(
-        path = "/v1/projects/:project_id/sites:upsertByUrl",
+        path = "/v1/projects/:project_id/sites/upsert-by-url",
         method = "post",
         operation_id = "upsertSiteByUrl"
     )]
