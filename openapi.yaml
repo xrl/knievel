@@ -12,6 +12,11 @@ tags:
   description: Ad CRUD + `:batchUpsert`.
 - name: Advertisers
   description: Advertiser CRUD + `:batchUpsert`.
+- name: Auth
+  description: |-
+    Auth handshake — `/v1/whoami` and friends. Validates a
+    bearer (opaque or JWT) and echoes the principal back so
+    clients can confirm the credential before proceeding.
 - name: Campaigns
   description: Campaign CRUD + `:batchUpsert`.
 - name: CreativeTemplates
@@ -87,6 +92,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/VersionResponse'
       operationId: version
+  /v1/whoami:
+    get:
+      tags:
+      - Auth
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/WhoamiResponse'
+      security:
+      - BearerAuth: []
+      operationId: whoami
   /v1/orgs/{org_id}/projects:
     post:
       tags:
@@ -4512,6 +4531,33 @@ components:
           type: string
         auth:
           $ref: '#/components/schemas/AuthBlock'
+    WhoamiResponse:
+      type: object
+      title: WhoamiResponse
+      required:
+      - scope
+      - org_id
+      - role
+      - token_type
+      - actor_id
+      properties:
+        scope:
+          type: string
+          description: '`org` or `project`.'
+        org_id:
+          type: string
+        project_id:
+          type: string
+          description: Present only when `scope == "project"`.
+        role:
+          type: string
+          description: One of `org-owner`, `org-admin`, `admin`, `editor`, `reader`.
+        token_type:
+          type: string
+          description: '`opaque` for `kvl_*` bearers; `jwt` for OIDC bearers.'
+        actor_id:
+          type: string
+          description: Opaque actor identifier; matches `audit_log.actor`.
     Zone:
       type: object
       title: Zone

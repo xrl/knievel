@@ -193,3 +193,23 @@ errors:
 shutdown:
   drain_timeout_seconds: 30
   total_timeout_seconds: 60
+
+admin_ui:
+  # Filesystem path for the SPA bundle. When set, poem mounts it at
+  # /admin/ via StaticFilesEndpoint (Phase 7.11). Empty / unset =
+  # headless API; /admin/* returns 404. Common production override:
+  #   KNIEVEL_ADMIN_UI__STATIC_DIR=/var/lib/knievel/admin
+  static_dir: ${KNIEVEL_ADMIN_UI_STATIC_DIR:}
+
+  # OIDC public-client metadata. Surfaced verbatim to the SPA at
+  # GET /admin/config.json so one bundle works across envs. No
+  # client secret here — PKCE replaces it. See AUTH.md "Keycloak
+  # Setup — Human Admin UI (PKCE)" and UI.md "Auth".
+  oidc:
+    issuer:    ${KNIEVEL_ADMIN_UI_OIDC_ISSUER:}
+    client_id: ${KNIEVEL_ADMIN_UI_OIDC_CLIENT_ID:}
+    scopes:    [openid, profile, knievel]
+    # When true, the SPA hides the paste-a-token fallback so
+    # SSO/MFA/audit policy can't be sidestepped. Defaults to
+    # false so dev / no-Keycloak deployments still have a way in.
+    require_oidc: false

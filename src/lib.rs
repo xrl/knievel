@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub mod ad_library;
+pub mod admin_ui;
 pub mod ads;
 pub mod advertisers;
 pub mod api_tags;
@@ -42,6 +43,7 @@ pub mod state;
 pub mod system;
 pub mod taxonomy;
 pub mod tokens;
+pub mod whoami;
 pub mod zones;
 
 /// Default `servers:` entry stamped into the static
@@ -64,6 +66,7 @@ pub fn openapi_spec_yaml() -> String {
     let svc = OpenApiService::new(
         (
             system::SystemApi,
+            whoami::WhoamiApi,
             orgs::OrgApi,
             tokens::TokensApi,
             ad_library::AdLibraryApi,

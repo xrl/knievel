@@ -46,6 +46,8 @@ pub struct Config {
     pub decisions: DecisionsConfig,
     #[serde(default)]
     pub partitions: PartitionsConfig,
+    #[serde(default)]
+    pub admin_ui: AdminUiConfig,
     // Sections not yet typed are tolerated by serde via the
     // `default` attribute on the top-level struct; deeper typing
     // lands per-feature.
@@ -246,6 +248,70 @@ impl Default for PartitionsConfig {
 
 fn default_retention_days() -> i64 {
     crate::partitions::RETENTION_DAYS_DEFAULT
+}
+
+/// Admin-UI runtime config. Consumed by the Phase 7.11
+/// `StaticFilesEndpoint` mount (`static_dir`) and the Phase 7.4
+/// `GET /admin/config.json` runtime config endpoint (`oidc`).
+/// Empty / unset defaults run as a headless API with no admin
+/// console served. See `UI.md` "Auth" / "Deployment" and
+/// `AUTH.md` "Knievel-side configuration."
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct AdminUiConfig {
+    /// Filesystem path for the SPA bundle. When set, poem mounts
+    /// it at `/admin/` via `StaticFilesEndpoint` (Phase 7.11).
+    /// When `None`, `/admin/*` returns 404; the same image runs
+    /// as a headless API. `KNIEVEL_ADMIN_UI__STATIC_DIR` env-var
+    /// override fits the env-var-only deploy path documented in
+    /// `UI.md` "Deployment / Single-image Dockerfile".
+    #[serde(default)]
+    pub static_dir: Option<String>,
+    #[serde(default)]
+    pub oidc: AdminUiOidcConfig,
+}
+
+/// OIDC public-client metadata served verbatim to the SPA via
+/// `GET /admin/config.json`. Only public values appear here —
+/// no client secret (PKCE replaces it; cf. `AUTH.md` "Keycloak
+/// Setup — Human Admin UI (PKCE)").
+#[derive(Deserialize, Debug, Clone)]
+pub struct AdminUiOidcConfig {
+    /// OIDC issuer URL, e.g.
+    /// `https://keycloak.example.com/realms/scientist`. Empty /
+    /// `None` disables the OIDC flow in the SPA (the paste-a-
+    /// token fallback is the only route in).
+    #[serde(default)]
+    pub issuer: Option<String>,
+    /// Public client ID registered with Keycloak's admin-UI
+    /// client. Public — no secret.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Scopes requested at sign-in. Defaults to
+    /// `[openid, profile, knievel]`; `knievel` is the custom
+    /// scope that triggers the group-membership claim mapper.
+    #[serde(default = "default_oidc_scopes")]
+    pub scopes: Vec<String>,
+    /// When `true`, the SPA hides the paste-a-token fallback so
+    /// SSO/MFA/audit policy can't be sidestepped. Defaults to
+    /// `false` so dev / no-Keycloak deployments still have a
+    /// way in.
+    #[serde(default)]
+    pub require_oidc: bool,
+}
+
+impl Default for AdminUiOidcConfig {
+    fn default() -> Self {
+        Self {
+            issuer: None,
+            client_id: None,
+            scopes: default_oidc_scopes(),
+            require_oidc: false,
+        }
+    }
+}
+
+fn default_oidc_scopes() -> Vec<String> {
+    vec!["openid".into(), "profile".into(), "knievel".into()]
 }
 
 /// Load layered configuration. Resolves `${VAR}` interpolation in

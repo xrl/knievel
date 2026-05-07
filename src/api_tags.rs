@@ -18,6 +18,10 @@ use poem_openapi::Tags;
 pub enum ApiTags {
     /// Liveness, readiness, and build/version metadata.
     System,
+    /// Auth handshake — `/v1/whoami` and friends. Validates a
+    /// bearer (opaque or JWT) and echoes the principal back so
+    /// clients can confirm the credential before proceeding.
+    Auth,
     /// Org and project lifecycle (single resource module covers
     /// both since project lookups are scoped through the org).
     Orgs,

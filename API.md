@@ -965,6 +965,7 @@ secret the URL was signed under, so dedup spans rotation cleanly.
 | `GET` | `/readyz` | Readiness. `200` only if snapshot loaded, DB reachable, flusher healthy. |
 | `GET` | `/metrics` | Prometheus exposition. |
 | `GET` | `/version` | Build metadata (git sha, build time, schema version) plus the **effective auth policy** — enabled modes and per-issuer summary (issuer URL, audience, algorithms, claim source, JWKS URL). Secrets are never returned. See `AUTH.md` "Startup Linting and Effective-Policy Visibility". |
+| `GET` | `/v1/whoami` | Auth handshake. Validates the bearer (opaque or JWT) and echoes the `Principal` back: `{scope, org_id, project_id?, role, token_type, actor_id}`. The smallest possible auth-required endpoint; the admin SPA hits it after login to confirm the credential is valid before rendering the workspace, and to read `principal.role` for client-side UI gating (server still enforces every authz check). Returns `401 invalid_token` for missing or bad bearers. |
 
 ---
 

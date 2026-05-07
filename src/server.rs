@@ -25,6 +25,7 @@ use poem_openapi::{OpenApiService, ServerObject};
 use std::sync::Arc;
 
 use crate::ad_library::AdLibraryApi;
+use crate::admin_ui;
 use crate::ads::AdsApi;
 use crate::advertisers::AdvertisersApi;
 use crate::campaigns::CampaignsApi;
@@ -44,6 +45,7 @@ use crate::state::{AppState, DecisionFlags};
 use crate::system::SystemApi;
 use crate::taxonomy::TaxonomyApi;
 use crate::tokens::TokensApi;
+use crate::whoami::WhoamiApi;
 use crate::zones::ZonesApi;
 
 pub async fn run(cfg: Config) -> Result<()> {
@@ -138,6 +140,7 @@ pub fn routes() -> Route {
     let api = OpenApiService::new(
         (
             SystemApi,
+            WhoamiApi,
             OrgApi,
             TokensApi,
             AdLibraryApi,
@@ -165,6 +168,11 @@ pub fn routes() -> Route {
     Route::new()
         .nest("/", api)
         .at("/openapi.json", spec)
+        // Admin-UI runtime config (Phase 7.4). Registered
+        // BEFORE the Phase 7.11 `StaticFilesEndpoint` mount at
+        // `/admin/` so a `config.json` inside the SPA bundle
+        // can't shadow it. Public, unauthenticated, no secrets.
+        .at("/admin/config.json", get(admin_ui::config_json))
         // Public event-tracking endpoints (Phase 3.25).
         // Unauthenticated; the HMAC signature in the URL is the
         // authorization (`API.md` § 4).
@@ -177,6 +185,7 @@ async fn build_state(cfg: &Config) -> AppState {
         .with_decisions(DecisionFlags {
             force_overrides_enabled: cfg.decisions.force_overrides_enabled,
         })
+        .with_admin_ui(cfg.admin_ui.clone())
         // In-process store as the v0 default. The S3 / MinIO /
         // GCS-compat adapter is a 3.29 follow-up; both share the
         // `ImageStore` trait so flipping the backend is a config

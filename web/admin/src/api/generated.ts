@@ -59,6 +59,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["whoami"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{org_id}/projects": {
         parameters: {
             query?: never;
@@ -1483,6 +1499,20 @@ export interface components {
             build_timestamp: string;
             auth: components["schemas"]["AuthBlock"];
         };
+        /** WhoamiResponse */
+        WhoamiResponse: {
+            /** @description `org` or `project`. */
+            scope: string;
+            org_id: string;
+            /** @description Present only when `scope == "project"`. */
+            project_id?: string;
+            /** @description One of `org-owner`, `org-admin`, `admin`, `editor`, `reader`. */
+            role: string;
+            /** @description `opaque` for `kvl_*` bearers; `jwt` for OIDC bearers. */
+            token_type: string;
+            /** @description Opaque actor identifier; matches `audit_log.actor`. */
+            actor_id: string;
+        };
         /** Zone */
         Zone: {
             /** Format: int64 */
@@ -1573,6 +1603,25 @@ export interface operations {
                 };
                 content: {
                     "application/json; charset=utf-8": components["schemas"]["VersionResponse"];
+                };
+            };
+        };
+    };
+    whoami: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["WhoamiResponse"];
                 };
             };
         };

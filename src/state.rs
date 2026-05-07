@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use sqlx::PgPool;
 
+use crate::config::AdminUiConfig;
 use crate::events::EventSender;
 use crate::image_upload::ImageStore;
 use crate::leader::LeaderHandle;
@@ -48,6 +49,11 @@ pub struct AppState {
     /// authoritative gate; flipping the kill switch is an
     /// emergency operator action.
     pub decisions: DecisionFlags,
+    /// Admin-UI runtime config. Surfaced to the SPA via
+    /// `GET /admin/config.json` (Phase 7.4) and consumed by the
+    /// Phase 7.11 `StaticFilesEndpoint` mount. Empty defaults
+    /// run as a headless API with no admin console served.
+    pub admin_ui: AdminUiConfig,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -95,6 +101,11 @@ impl AppState {
 
     pub fn with_decisions(mut self, flags: DecisionFlags) -> Self {
         self.decisions = flags;
+        self
+    }
+
+    pub fn with_admin_ui(mut self, admin_ui: AdminUiConfig) -> Self {
+        self.admin_ui = admin_ui;
         self
     }
 }
