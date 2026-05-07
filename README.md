@@ -48,10 +48,10 @@ progress log.
 ## What's in v0
 
 **Decision API (the hot path)**
-- `POST /v1/projects/{projectId}/decisions` — multi-placement decisions
+- `POST /v1/projects/{project_id}/decisions` — multi-placement decisions
   with priority-tiered selection, weighted random, blocklists, force
   overrides (gated three ways).
-- `POST /v1/projects/{projectId}/decisions:explain` — debug companion
+- `POST /v1/projects/{project_id}/decisions:explain` — debug companion
   showing every candidate and the rules applied. Same request shape;
   no event recorded.
 - HMAC-signed `/e/i/{sig}` and `/e/c/{sig}` impression / click endpoints
@@ -219,7 +219,7 @@ curl -fsS -X POST \
 `API.md` § "Decisions" documents the full request and response shape
 including blocklists, force overrides, multi-placement, count, and the
 `:explain` companion. A documented contract gap: API.md uses camelCase
-in examples (`siteExternalId`, `adTypes`, `snapshotVersion`) but the
+in examples (`site_external_id`, `ad_types`, `snapshot_version`) but the
 generated `openapi.yaml` and the wire format are snake_case.
 Reconciling the two is a follow-up; the snake-case shape is what
 ships today.

@@ -112,6 +112,7 @@ jobs:
       - run: cargo xtask test-shape
       - run: cargo xtask check-doc-fences
       - run: cargo xtask check-api-doc
+      - run: cargo xtask check-snake-case
 
   doc-links:
     # Phase 5.6 — intra-repo link checking via lychee. External

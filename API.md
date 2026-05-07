@@ -8,15 +8,15 @@ JSON only. UTF-8 only.
 
 ## Path Structure
 
-- `/v1/orgs/{orgId}/...` — org-level operations (project provisioning,
+- `/v1/orgs/{org_id}/...` — org-level operations (project provisioning,
   tokens, members). Org token only.
-- `/v1/projects/{projectId}/...` — project-scoped resources (decisions,
+- `/v1/projects/{project_id}/...` — project-scoped resources (decisions,
   CRUD).
 - `/e/...` — public event tracking (HMAC-signed in URL, no auth).
 - `/openapi.json`, `/healthz`, `/readyz`, `/metrics`, `/version` — system.
 
-`{orgId}` and `{projectId}` accept either the server-assigned ID
-(`org_AbCd...`, `pj_EfGh...`) or the URL-safe `externalId`.
+`{org_id}` and `{project_id}` accept either the server-assigned ID
+(`org_AbCd...`, `pj_EfGh...`) or the URL-safe `external_id`.
 
 ## Conventions
 
@@ -53,7 +53,7 @@ JSON only. UTF-8 only.
 Cursor-based:
 
 ```
-GET /v1/projects/{projectId}/<resource>?limit=100&cursor=<opaque>
+GET /v1/projects/{project_id}/<resource>?limit=100&cursor=<opaque>
 ```
 
 Response envelope:
@@ -61,12 +61,12 @@ Response envelope:
 ```json,ignore
 {
   "items": [ ... ],
-  "nextCursor": "eyJ..." | null
+  "next_cursor": "eyJ..." | null
 }
 ```
 
 `limit` defaults to 50, max 500 (`limit=0` and `limit > 500` are
-rejected with `400 invalid_limit`). No `totalRecords` — counting
+rejected with `400 invalid_limit`). No `total_records` — counting
 is expensive and rarely useful at this layer.
 
 Cursors are opaque (`base64url(JSON{kind, last_id})` internally,
@@ -86,7 +86,7 @@ filters should keep the filter set stable across the walk.
 **Non-paginated list endpoints (v0):** taxonomy
 (`listChannels`, `listPriorities`, `listAdTypes`) return the
 full set in semantic order (priorities by `tier`); the response
-shape still carries `nextCursor` (always `null`) so wrappers
+shape still carries `next_cursor` (always `null`) so wrappers
 degenerate to a single-page walk. `listAdLibraryItems` and
 `listTokens` are also un-cursored in v0 because their primary
 keys are TEXT (`(created_at, id)` cursor lands in Phase 6.5).
@@ -95,7 +95,7 @@ keys are TEXT (`(created_at, id)` cursor lands in Phase 6.5).
 `REQUIREMENTS.md` §8 item 3) eventually key off
 `x-knievel-paginated: true` /
 `x-knievel-paginated-items: items` /
-`x-knievel-paginated-cursor: nextCursor` vendor extensions on
+`x-knievel-paginated-cursor: next_cursor` vendor extensions on
 each paginated operation, so a second-language binding or a
 doc-site generator can discover paginated endpoints from the
 spec alone. **Not shipped today** — poem-openapi 5 lacks an
@@ -106,12 +106,12 @@ hand-written wrapper hardcodes its paginated set.
 
 ### Filters
 
-Every list endpoint accepts `externalId=` plus resource-specific filters.
+Every list endpoint accepts `external_id=` plus resource-specific filters.
 Filters AND together. Examples:
 
 ```
-GET /v1/projects/pj_AbCd/ads?flightId=42&isActive=true
-GET /v1/projects/pj_AbCd/ads?externalId=ad-2024-spring-1
+GET /v1/projects/pj_AbCd/ads?flight_id=42&is_active=true
+GET /v1/projects/pj_AbCd/ads?external_id=ad-2024-spring-1
 ```
 
 ### Idempotency
@@ -133,7 +133,7 @@ response with `Idempotent-Replay: true` set.
 | `401` | Missing / invalid token |
 | `403` | Wrong org/project or insufficient role |
 | `404` | Not found |
-| `409` | Conflict (`externalId` collision, `If-Match` mismatch) |
+| `409` | Conflict (`external_id` collision, `If-Match` mismatch) |
 | `422` | Semantically invalid (e.g. campaign references missing advertiser) |
 | `429` | Rate limited |
 | `500` | Server error |
@@ -145,14 +145,14 @@ response with `Idempotent-Replay: true` set.
 {
   "error": {
     "code": "validation_failed",
-    "message": "siteId is required",
-    "field": "placements[0].siteId",
-    "requestId": "01JABCDEF..."
+    "message": "site_id is required",
+    "field": "placements[0].site_id",
+    "request_id": "01JABCDEF..."
   }
 }
 ```
 
-`code` is a stable machine-readable string. `requestId` matches the
+`code` is a stable machine-readable string. `request_id` matches the
 `X-Request-Id` response header and server logs.
 
 ### Write contract
@@ -183,13 +183,13 @@ runs in **exactly one Postgres transaction**. There are three rules:
   "error": {
     "code": "batch_partial_failure",
     "message": "1 of 12 rows failed validation",
-    "requestId": "01JABCDEF...",
+    "request_id": "01JABCDEF...",
     "details": [
       {
         "index":   3,
-        "field":   "campaignId",
+        "field":   "campaign_id",
         "code":    "fk_not_found",
-        "message": "campaignId 12345 does not exist in this project"
+        "message": "campaign_id 12345 does not exist in this project"
       }
     ]
   }
@@ -201,7 +201,7 @@ runs in **exactly one Postgres transaction**. There are three rules:
 `validation_failed`, `unique_violation`, `if_match_mismatch`. The
 absence of a row in `details[]` means it would have committed
 successfully; idempotent retries can skip already-applied rows by
-omitting them from the next request, since `externalId` upserts are
+omitting them from the next request, since `external_id` upserts are
 already idempotent.
 
 ### Common entity fields
@@ -209,17 +209,17 @@ already idempotent.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Server-assigned, project-scoped (or org-scoped for orgs/projects). |
-| `externalId` | string \| null | Caller-assigned, unique within `(project, resource)`. |
+| `external_id` | string \| null | Caller-assigned, unique within `(project, resource)`. |
 | `etag` | string | Pass to `If-Match` on `PATCH`. |
-| `createdAt` | RFC 3339 | |
-| `updatedAt` | RFC 3339 | |
-| `isActive` | bool | Soft-delete via `isActive: false`; v0 has no hard delete. |
+| `created_at` | RFC 3339 | |
+| `updated_at` | RFC 3339 | |
+| `is_active` | bool | Soft-delete via `is_active: false`; v0 has no hard delete. |
 
 ---
 
 ## 1. Decision API
 
-### `POST /v1/projects/{projectId}/decisions`
+### `POST /v1/projects/{project_id}/decisions`
 
 The hot path. Returns ad selections for one or more placements.
 
@@ -230,29 +230,29 @@ The hot path. Returns ad selections for one or more placements.
   "context": {
     "url":       "https://example.com/article/42",
     "referrer":  "https://www.google.com/...",
-    "userAgent": "Mozilla/5.0 ..."
+    "user_agent": "Mozilla/5.0 ..."
   },
   "placements": [
     {
       "id":            "header",
-      "siteId":        12,
-      "siteUrl":       null,
-      "siteExternalId": null,
-      "zoneIds":       [34, 35],
-      "adTypes":       [16],
+      "site_id":        12,
+      "site_url":       null,
+      "site_external_id": null,
+      "zone_ids":       [34, 35],
+      "ad_types":       [16],
       "count":         1,
       "force": {
-        "adId":        null,
-        "campaignId":  null,
-        "flightId":    null,
-        "creativeId":  null
+        "ad_id":        null,
+        "campaign_id":  null,
+        "flight_id":    null,
+        "creative_id":  null
       }
     }
   ],
   "block": {
-    "creativeIds":   [],
-    "advertiserIds": [],
-    "campaignIds":   []
+    "creative_ids":   [],
+    "advertiser_ids": [],
+    "campaign_ids":   []
   }
 }
 ```
@@ -261,17 +261,17 @@ The hot path. Returns ad selections for one or more placements.
 |---|---|---|---|
 | `context.url` | string | no | Page URL serving the ad. Stored on event rows. |
 | `context.referrer` | string | no | Referrer URL. |
-| `context.userAgent` | string | no | UA string; hashed before storage. |
+| `context.user_agent` | string | no | UA string; hashed before storage. |
 | `placements[]` | array | yes | 1–32 placements per request. |
 | `placements[].id` | string | yes | Echoed as the response key. |
-| `placements[].siteId` \| `siteUrl` \| `siteExternalId` | — | yes (one) | Identifies the site. URL match consults `Site.url` and `Site.aliases`. |
-| `placements[].zoneIds` | int64[] | no | Restrict to specific zones. |
-| `placements[].adTypes` | int[] | yes | Non-empty. |
+| `placements[].site_id` \| `site_url` \| `site_external_id` | — | yes (one) | Identifies the site. URL match consults `Site.url` and `Site.aliases`. |
+| `placements[].zone_ids` | int64[] | no | Restrict to specific zones. |
+| `placements[].ad_types` | int[] | yes | Non-empty. |
 | `placements[].count` | int | no | Default 1, max 10. |
 | `placements[].force.*` | int64 \| null | no | Debug overrides. Three-control gate: (1) project's `allow_force_decision` flag must be true; (2) Project Admin role or higher; (3) call is recorded in `knievel.audit_log` with actor, payload hash, and reason (passed via optional top-level `force_reason` string). Knievel rejects with `403 / force_disabled` if any control fails. A global kill-switch (`decisions.force_overrides_enabled: false`) disables the path entirely. |
-| `block.creativeIds` | int64[] | no | Caller-derived suppression list. |
-| `block.advertiserIds` | int64[] | no | |
-| `block.campaignIds` | int64[] | no | |
+| `block.creative_ids` | int64[] | no | Caller-derived suppression list. |
+| `block.advertiser_ids` | int64[] | no | |
+| `block.campaign_ids` | int64[] | no | |
 
 `context` is informational only — it is **never** used for tenant
 routing. The project ID in the path is the sole authoritative tenant
@@ -281,28 +281,28 @@ signal.
 
 ```json
 {
-  "snapshotVersion": 1234567,
+  "snapshot_version": 1234567,
   "decisions": {
     "header": [
       {
-        "adId":         9001,
-        "creativeId":   4242,
-        "flightId":     333,
-        "campaignId":   444,
-        "advertiserId": 555,
-        "priorityId":   1,
-        "siteId":       12,
-        "externalId":   "ad-2024-spring-1",
-        "clickUrl":     "https://ads.example.com/e/c/AbCd...",
-        "impressionUrl":"https://ads.example.com/e/i/EfGh...",
+        "ad_id":         9001,
+        "creative_id":   4242,
+        "flight_id":     333,
+        "campaign_id":   444,
+        "advertiser_id": 555,
+        "priority_id":   1,
+        "site_id":       12,
+        "external_id":   "ad-2024-spring-1",
+        "click_url":     "https://ads.example.com/e/c/AbCd...",
+        "impression_url":"https://ads.example.com/e/i/EfGh...",
         "creative": {
           "type":     "native",
           "template": "sponsored_card_v1",
           "values": {
             "title":   "...",
             "body":    "...",
-            "imageUrl":"...",
-            "ctaText": "Learn more"
+            "image_url":"...",
+            "cta_text": "Learn more"
           }
         }
       }
@@ -311,28 +311,28 @@ signal.
 }
 ```
 
-- `snapshotVersion` is the monotonic configuration version that
+- `snapshot_version` is the monotonic configuration version that
   served this request. Stamped on the corresponding `events_raw`
   rows and emitted on per-request log lines so an operator can
   reproduce a decision deterministically: same input + same
-  `snapshotVersion` → same output.
+  `snapshot_version` → same output.
 - `decisions[<id>]` is **always an array**, even when `count == 1`.
   Empty array = no eligible ad.
-- `siteId` is the resolved site (useful when caller passed `siteUrl` or
-  `siteExternalId`).
+- `site_id` is the resolved site (useful when caller passed `site_url` or
+  `site_external_id`).
 - `creative` is a `oneOf`:
-  - `{"type":"image","imageUrl":..,"width":..,"height":..,"alt":..,"clickThroughUrl":..}`
-  - `{"type":"html","body":..,"clickThroughUrl":..}` — `body` is the
+  - `{"type":"image","image_url":..,"width":..,"height":..,"alt":..,"click_through_url":..}`
+  - `{"type":"html","body":..,"click_through_url":..}` — `body` is the
     static HTML stored on the creative, returned verbatim.
-  - `{"type":"native","template":..,"values":{...},"clickThroughUrl":..}`
+  - `{"type":"native","template":..,"values":{...},"click_through_url":..}`
     — caller renders `values` client-side using its own components.
-  - `{"type":"templated","template":..,"values":{...},"body":..,"clickThroughUrl":..}`
+  - `{"type":"templated","template":..,"values":{...},"body":..,"click_through_url":..}`
     — server renders the referenced template's Liquid source against
     `values` at decision time and returns the result in `body`.
     `values` is also echoed so callers can re-render or inspect.
 - All URL fields are absolute.
 
-### `POST /v1/projects/{projectId}/decisions:explain`
+### `POST /v1/projects/{project_id}/decisions:explain`
 
 A debug companion to `decisions`. Accepts the **same request body**
 and returns the same `decisions` payload, plus a per-placement
@@ -348,19 +348,19 @@ Rate-limited more aggressively than production decisions (default
 
 ```json,ignore
 {
-  "snapshotVersion": 1234567,
+  "snapshot_version": 1234567,
   "decisions":       { "header": [ ...same shape as /decisions... ] },
   "explanation": {
     "header": {
-      "priorityTier":  1,
-      "selectedAdId":  9001,
+      "priority_tier":  1,
+      "selected_ad_id":  9001,
       "candidates": [
         {
-          "adId":         9001,
-          "creativeId":   4242,
-          "flightId":     333,
-          "campaignId":   444,
-          "advertiserId": 555,
+          "ad_id":         9001,
+          "creative_id":   4242,
+          "flight_id":     333,
+          "campaign_id":   444,
+          "advertiser_id": 555,
           "weight":       100,
           "evaluation": [
             { "rule": "flight_active",      "result": "pass" },
@@ -371,11 +371,11 @@ Rate-limited more aggressively than production decisions (default
           ]
         },
         {
-          "adId":         9002,
-          "creativeId":   4243,
-          "flightId":     333,
-          "campaignId":   444,
-          "advertiserId": 555,
+          "ad_id":         9002,
+          "creative_id":   4243,
+          "flight_id":     333,
+          "campaign_id":   444,
+          "advertiser_id": 555,
           "weight":       100,
           "evaluation": [
             { "rule": "flight_active", "result": "pass" },
@@ -406,17 +406,17 @@ Admin).
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/orgs/{orgId}/projects` | List. Filter: `externalId`, `isActive`. |
-| `POST` | `/v1/orgs/{orgId}/projects` | Create. Idempotent on `externalId`. |
-| `POST` | `/v1/orgs/{orgId}/projects:batchUpsert` | Bulk by `externalId`. |
-| `GET` | `/v1/orgs/{orgId}/projects/{projectId}` | Read. |
-| `PATCH` | `/v1/orgs/{orgId}/projects/{projectId}` | Update name / isActive / hmacSecret. |
+| `GET` | `/v1/orgs/{org_id}/projects` | List. Filter: `external_id`, `is_active`. |
+| `POST` | `/v1/orgs/{org_id}/projects` | Create. Idempotent on `external_id`. |
+| `POST` | `/v1/orgs/{org_id}/projects:batchUpsert` | Bulk by `external_id`. |
+| `GET` | `/v1/orgs/{org_id}/projects/{project_id}` | Read. |
+| `PATCH` | `/v1/orgs/{org_id}/projects/{project_id}` | Update name / is_active / hmacSecret. |
 
 Body:
 
 ```json
 {
-  "externalId": "tenant_acme",
+  "external_id": "tenant_acme",
   "name":       "Acme Marketplace"
 }
 ```
@@ -425,9 +425,9 @@ Body:
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/orgs/{orgId}/tokens` | Mint a token. Returns the secret exactly once. |
-| `GET` | `/v1/orgs/{orgId}/tokens` | List token metadata (no secrets). |
-| `DELETE` | `/v1/orgs/{orgId}/tokens/{tokenId}` | Revoke. |
+| `POST` | `/v1/orgs/{org_id}/tokens` | Mint a token. Returns the secret exactly once. |
+| `GET` | `/v1/orgs/{org_id}/tokens` | List token metadata (no secrets). |
+| `DELETE` | `/v1/orgs/{org_id}/tokens/{token_id}` | Revoke. |
 
 Create body:
 
@@ -435,20 +435,20 @@ Create body:
 {
   "name":        "prod sync",
   "scope":       "org",
-  "projectId":   null,
+  "project_id":   null,
   "role":        "editor",
-  "expiresAt":   null,
-  "ipAllowlist": []
+  "expires_at":   null,
+  "ip_allowlist": []
 }
 ```
 
 | Field | Required | Notes |
 |---|---|---|
 | `scope` | yes | `org` or `project`. |
-| `projectId` | if `scope=project` | |
+| `project_id` | if `scope=project` | |
 | `role` | yes | `org-owner`, `org-admin`, `admin`, `editor`, `reader`. Org tokens take an org-level role; project tokens take a project-level role. |
-| `expiresAt` | no | RFC 3339. Null = never. |
-| `ipAllowlist` | no | CIDR list. Empty = no restriction. |
+| `expires_at` | no | RFC 3339. Null = never. |
+| `ip_allowlist` | no | CIDR list. Empty = no restriction. |
 
 Create response (`201`):
 
@@ -459,7 +459,7 @@ Create response (`201`):
   "name":      "prod sync",
   "scope":     "org",
   "role":      "editor",
-  "createdAt": "..."
+  "created_at": "..."
 }
 ```
 
@@ -473,10 +473,10 @@ exist so the data model and auth checks are in place.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/orgs/{orgId}/members` | List org members. |
-| `POST` | `/v1/orgs/{orgId}/members` | Invite a user. |
-| `PATCH` | `/v1/orgs/{orgId}/members/{userId}` | Change org role or per-project roles. |
-| `DELETE` | `/v1/orgs/{orgId}/members/{userId}` | Remove. |
+| `GET` | `/v1/orgs/{org_id}/members` | List org members. |
+| `POST` | `/v1/orgs/{org_id}/members` | Invite a user. |
+| `PATCH` | `/v1/orgs/{org_id}/members/{user_id}` | Change org role or per-project roles. |
+| `DELETE` | `/v1/orgs/{org_id}/members/{user_id}` | Remove. |
 
 ### 2.4 Ad Library
 
@@ -486,30 +486,30 @@ reference library items in lieu of inlining a creative
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/orgs/{orgId}/ad-library/items` | List. Filter: `externalId`, `isActive`. |
-| `POST` | `/v1/orgs/{orgId}/ad-library/items` | Create. |
-| `POST` | `/v1/orgs/{orgId}/ad-library/items:batchUpsert` | Bulk by `externalId`. |
-| `GET` | `/v1/orgs/{orgId}/ad-library/items/{itemId}` | Read. |
-| `PATCH` | `/v1/orgs/{orgId}/ad-library/items/{itemId}` | Update. |
-| `GET` | `/v1/orgs/{orgId}/ad-library/items/{itemId}/references` | List the Project Ads referencing this item. |
+| `GET` | `/v1/orgs/{org_id}/ad-library/items` | List. Filter: `external_id`, `is_active`. |
+| `POST` | `/v1/orgs/{org_id}/ad-library/items` | Create. |
+| `POST` | `/v1/orgs/{org_id}/ad-library/items:batchUpsert` | Bulk by `external_id`. |
+| `GET` | `/v1/orgs/{org_id}/ad-library/items/{item_id}` | Read. |
+| `PATCH` | `/v1/orgs/{org_id}/ad-library/items/{item_id}` | Update. |
+| `GET` | `/v1/orgs/{org_id}/ad-library/items/{item_id}/references` | List the Project Ads referencing this item. |
 
 Body — same `oneOf` creative shape as Project Creatives, plus
 catalog metadata:
 
 ```json
 {
-  "externalId":  "library-spring-banner",
+  "external_id":  "library-spring-banner",
   "name":        "Spring banner — 728x90",
   "description": "Reusable cross-project spring banner",
   "creative": {
     "type":            "image",
-    "imageUrl":        "https://cdn.example.com/banner.jpg",
+    "image_url":        "https://cdn.example.com/banner.jpg",
     "width":           728,
     "height":          90,
     "alt":             "Spring sale",
-    "clickThroughUrl": "https://acme.example.com/sale"
+    "click_through_url": "https://acme.example.com/sale"
   },
-  "isActive": true
+  "is_active": true
 }
 ```
 
@@ -532,25 +532,25 @@ introspected in the admin UI).
 ## 3. Project Resources
 
 All endpoints in this section accept either an **Org token** (with
-sufficient role) or a **Project token** scoped to `{projectId}`.
+sufficient role) or a **Project token** scoped to `{project_id}`.
 
 ### 3.1 Advertisers
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/advertisers` | List. Filter: `externalId`, `isActive`. |
-| `POST` | `/v1/projects/{projectId}/advertisers` | Create. |
-| `POST` | `/v1/projects/{projectId}/advertisers:batchUpsert` | Bulk by `externalId`. |
-| `GET` | `/v1/projects/{projectId}/advertisers/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/advertisers/{id}` | Update. |
+| `GET` | `/v1/projects/{project_id}/advertisers` | List. Filter: `external_id`, `is_active`. |
+| `POST` | `/v1/projects/{project_id}/advertisers` | Create. |
+| `POST` | `/v1/projects/{project_id}/advertisers:batchUpsert` | Bulk by `external_id`. |
+| `GET` | `/v1/projects/{project_id}/advertisers/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/advertisers/{id}` | Update. |
 
 Body:
 
 ```json
 {
-  "externalId": "advertiser-acme",
+  "external_id": "advertiser-acme",
   "name":       "Acme Corp",
-  "isActive":   true
+  "is_active":   true
 }
 ```
 
@@ -558,20 +558,20 @@ Body:
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/campaigns` | List. Filter: `advertiserId`, `externalId`, `isActive`. |
-| `POST` | `/v1/projects/{projectId}/campaigns` | Create. |
-| `POST` | `/v1/projects/{projectId}/campaigns:batchUpsert` | Bulk. |
-| `GET` | `/v1/projects/{projectId}/campaigns/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/campaigns/{id}` | Update. |
+| `GET` | `/v1/projects/{project_id}/campaigns` | List. Filter: `advertiser_id`, `external_id`, `is_active`. |
+| `POST` | `/v1/projects/{project_id}/campaigns` | Create. |
+| `POST` | `/v1/projects/{project_id}/campaigns:batchUpsert` | Bulk. |
+| `GET` | `/v1/projects/{project_id}/campaigns/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/campaigns/{id}` | Update. |
 
 Body:
 
 ```json
 {
-  "externalId":   "campaign-spring-2026",
-  "advertiserId": 555,
+  "external_id":   "campaign-spring-2026",
+  "advertiser_id": 555,
   "name":         "Spring Promo",
-  "isActive":     true
+  "is_active":     true
 }
 ```
 
@@ -581,31 +581,31 @@ The unit of delivery. Carries dates, priority, and inventory targeting.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/flights` | List. Filter: `campaignId`, `priorityId`, `externalId`, `isActive`, `activeAt=<RFC3339>`. |
-| `POST` | `/v1/projects/{projectId}/flights` | Create. |
-| `POST` | `/v1/projects/{projectId}/flights:batchUpsert` | Bulk. |
-| `GET` | `/v1/projects/{projectId}/flights/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/flights/{id}` | Update. |
+| `GET` | `/v1/projects/{project_id}/flights` | List. Filter: `campaign_id`, `priority_id`, `external_id`, `is_active`, `activeAt=<RFC3339>`. |
+| `POST` | `/v1/projects/{project_id}/flights` | Create. |
+| `POST` | `/v1/projects/{project_id}/flights:batchUpsert` | Bulk. |
+| `GET` | `/v1/projects/{project_id}/flights/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/flights/{id}` | Update. |
 
 Body:
 
 ```json
 {
-  "externalId":  "flight-spring-2026-cardio",
-  "campaignId":  444,
+  "external_id":  "flight-spring-2026-cardio",
+  "campaign_id":  444,
   "name":        "Spring Promo — Cardiology",
-  "priorityId":  1,
-  "startDate":   "2026-05-01T00:00:00Z",
-  "endDate":     "2026-06-01T00:00:00Z",
-  "siteIds":     [12],
-  "zoneIds":     [34],
-  "adTypes":     [16],
-  "isActive":    true
+  "priority_id":  1,
+  "start_date":   "2026-05-01T00:00:00Z",
+  "end_date":     "2026-06-01T00:00:00Z",
+  "site_ids":     [12],
+  "zone_ids":     [34],
+  "ad_types":     [16],
+  "is_active":    true
 }
 ```
 
-`siteIds` / `zoneIds` empty means "any site/zone in the project."
-`adTypes` is required and non-empty.
+`site_ids` / `zone_ids` empty means "any site/zone in the project."
+`ad_types` is required and non-empty.
 
 ### 3.4 Ads
 
@@ -615,34 +615,34 @@ the org's Ad Library (§2.4).
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/ads` | List. Filter: `flightId`, `creativeId`, `adLibraryItemId`, `externalId`, `isActive`. |
-| `POST` | `/v1/projects/{projectId}/ads` | Create. |
-| `POST` | `/v1/projects/{projectId}/ads:batchUpsert` | Bulk. The hot management path for sync jobs. |
-| `GET` | `/v1/projects/{projectId}/ads/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/ads/{id}` | Update. |
+| `GET` | `/v1/projects/{project_id}/ads` | List. Filter: `flight_id`, `creative_id`, `ad_library_item_id`, `external_id`, `is_active`. |
+| `POST` | `/v1/projects/{project_id}/ads` | Create. |
+| `POST` | `/v1/projects/{project_id}/ads:batchUpsert` | Bulk. The hot management path for sync jobs. |
+| `GET` | `/v1/projects/{project_id}/ads/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/ads/{id}` | Update. |
 
-Body — `oneOf` on `creativeId` vs `adLibraryItemId` (exactly one
+Body — `oneOf` on `creative_id` vs `ad_library_item_id` (exactly one
 required):
 
 ```json,ignore
 // Inline creative.
 {
-  "externalId": "ad-2024-spring-1",
-  "flightId":   333,
-  "creativeId": 4242,
+  "external_id": "ad-2024-spring-1",
+  "flight_id":   333,
+  "creative_id": 4242,
   "weight":     100,
-  "isActive":   true
+  "is_active":   true
 }
 ```
 
 ```json,ignore
 // Reference an org-shared library item.
 {
-  "externalId":      "ad-2024-spring-1",
-  "flightId":        333,
-  "adLibraryItemId": "ali_AbCd...",
+  "external_id":      "ad-2024-spring-1",
+  "flight_id":        333,
+  "ad_library_item_id": "ali_AbCd...",
   "weight":          100,
-  "isActive":        true
+  "is_active":        true
 }
 ```
 
@@ -654,25 +654,25 @@ all referencing Ads after the next snapshot swap.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/creatives` | List. Filter: `advertiserId`, `type`, `externalId`, `isActive`. |
-| `POST` | `/v1/projects/{projectId}/creatives` | Create. |
-| `GET` | `/v1/projects/{projectId}/creatives/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/creatives/{id}` | Update. |
-| `POST` | `/v1/projects/{projectId}/creatives/{id}/image` | Upload image (multipart). Returns `{ "imageUrl": "..." }`. |
+| `GET` | `/v1/projects/{project_id}/creatives` | List. Filter: `advertiser_id`, `type`, `external_id`, `is_active`. |
+| `POST` | `/v1/projects/{project_id}/creatives` | Create. |
+| `GET` | `/v1/projects/{project_id}/creatives/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/creatives/{id}` | Update. |
+| `POST` | `/v1/projects/{project_id}/creatives/{id}/image` | Upload image (multipart). Returns `{ "image_url": "..." }`. |
 
 Body (`oneOf` on `type`):
 
 ```json
 {
-  "externalId":      "creative-banner-728x90",
-  "advertiserId":    555,
+  "external_id":      "creative-banner-728x90",
+  "advertiser_id":    555,
   "name":            "Spring banner — 728x90",
   "type":            "image",
-  "imageUrl":        "https://cdn.example.com/banner.jpg",
+  "image_url":        "https://cdn.example.com/banner.jpg",
   "width":           728,
   "height":          90,
   "alt":             "Acme Spring Sale",
-  "clickThroughUrl": "https://acme.example.com/sale"
+  "click_through_url": "https://acme.example.com/sale"
 }
 ```
 
@@ -680,35 +680,35 @@ Body (`oneOf` on `type`):
 {
   "type":            "html",
   "body":            "<div>...</div>",
-  "clickThroughUrl": "https://..."
+  "click_through_url": "https://..."
 }
 ```
 
 ```json
 {
   "type":            "native",
-  "templateId":      7,
+  "template_id":      7,
   "values": {
     "title":    "...",
     "body":     "...",
-    "imageUrl": "...",
-    "ctaText":  "Learn more"
+    "image_url": "...",
+    "cta_text":  "Learn more"
   },
-  "clickThroughUrl": "https://..."
+  "click_through_url": "https://..."
 }
 ```
 
 ```json
 {
   "type":            "templated",
-  "templateId":      7,
+  "template_id":      7,
   "values": {
     "title":    "...",
     "body":     "...",
-    "imageUrl": "...",
-    "ctaText":  "Learn more"
+    "image_url": "...",
+    "cta_text":  "Learn more"
   },
-  "clickThroughUrl": "https://..."
+  "click_through_url": "https://..."
 }
 ```
 
@@ -729,7 +729,7 @@ input-validation-only.
   to its own renderer or display debug info.
 
 Templated rendering happens only on the decision path (`POST
-/v1/projects/{projectId}/decisions`); the creative resource itself
+/v1/projects/{project_id}/decisions`); the creative resource itself
 stores nothing rendered — the `body` field on the wire is not
 persisted on the creative row.
 
@@ -737,30 +737,30 @@ persisted on the creative row.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/creative-templates` | List. Filter: `name`, `externalId`. |
-| `POST` | `/v1/projects/{projectId}/creative-templates` | Create. |
-| `GET` | `/v1/projects/{projectId}/creative-templates/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/creative-templates/{id}` | Update; bumps `version`. |
+| `GET` | `/v1/projects/{project_id}/creative-templates` | List. Filter: `name`, `external_id`. |
+| `POST` | `/v1/projects/{project_id}/creative-templates` | Create. |
+| `GET` | `/v1/projects/{project_id}/creative-templates/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/creative-templates/{id}` | Update; bumps `version`. |
 
 Body:
 
 ```json
 {
-  "externalId": "template-sponsored-card-v1",
+  "external_id": "template-sponsored-card-v1",
   "name":       "sponsored_card_v1",
   "schema": {
     "type": "object",
-    "required": ["title", "body", "ctaText"],
+    "required": ["title", "body", "cta_text"],
     "properties": {
       "title":    { "type": "string", "maxLength": 80 },
       "body":     { "type": "string", "maxLength": 240 },
-      "imageUrl": { "type": "string", "format": "uri" },
-      "ctaText":  { "type": "string", "maxLength": 24 }
+      "image_url": { "type": "string", "format": "uri" },
+      "cta_text":  { "type": "string", "maxLength": 24 }
     },
     "additionalProperties": false
   },
-  "template":       "<a href=\"{{ad.clickUrl}}\"><img src=\"{{values.imageUrl}}\" alt=\"{{values.title}}\"><span>{{values.title}}</span><p>{{values.body}}</p><span class=\"cta\">{{values.ctaText}}</span><img src=\"{{ad.impressionUrl}}\" width=\"1\" height=\"1\"></a>",
-  "templateEngine": "liquid"
+  "template":       "<a href=\"{{ad.click_url}}\"><img src=\"{{values.image_url}}\" alt=\"{{values.title}}\"><span>{{values.title}}</span><p>{{values.body}}</p><span class=\"cta\">{{values.cta_text}}</span><img src=\"{{ad.impression_url}}\" width=\"1\" height=\"1\"></a>",
+  "template_engine": "liquid"
 }
 ```
 
@@ -774,18 +774,18 @@ input-validation-only and can only be referenced by `native`
 creatives. `template` is parsed and rejected with `422 /
 template_parse_error` at write time if it does not parse.
 
-`templateEngine` is required when `template` is present; today the
+`template_engine` is required when `template` is present; today the
 only accepted value is `"liquid"` (DotLiquid-compatible). The field
 exists so additional engines can be added later without a breaking
 schema change.
 
 Helpers exposed inside `template`:
 
-- `ad.id`, `ad.clickUrl`, `ad.impressionUrl` — engine-injected at
+- `ad.id`, `ad.click_url`, `ad.impression_url` — engine-injected at
   decision time; the URLs are the same signed values returned at the
   top level of the decision response.
 - `placement.id` — echo of the request placement key.
-- `decision.snapshotVersion` — the current `snapshotVersion`.
+- `decision.snapshot_version` — the current `snapshot_version`.
 - `values.*` — the creative's `values` object, after JSON-Schema
   validation.
 
@@ -806,19 +806,19 @@ be created/updated via API.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/sites` | List. Filter: `channelId`, `externalId`, `url`. |
-| `POST` | `/v1/projects/{projectId}/sites` | Create. |
-| `POST` | `/v1/projects/{projectId}/sites:batchUpsert` | Bulk by `externalId`. |
-| `POST` | `/v1/projects/{projectId}/sites:upsertByUrl` | Upsert keyed by URL — natural-key endpoint for URL-driven flows. |
-| `GET` | `/v1/projects/{projectId}/sites/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/sites/{id}` | Update. |
+| `GET` | `/v1/projects/{project_id}/sites` | List. Filter: `channel_id`, `external_id`, `url`. |
+| `POST` | `/v1/projects/{project_id}/sites` | Create. |
+| `POST` | `/v1/projects/{project_id}/sites:batchUpsert` | Bulk by `external_id`. |
+| `POST` | `/v1/projects/{project_id}/sites:upsertByUrl` | Upsert keyed by URL — natural-key endpoint for URL-driven flows. |
+| `GET` | `/v1/projects/{project_id}/sites/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/sites/{id}` | Update. |
 
 Body:
 
 ```json
 {
-  "externalId": "site-main",
-  "channelId":  null,
+  "external_id": "site-main",
+  "channel_id":  null,
   "name":       "Main Property",
   "url":        "https://example.com",
   "aliases":    ["https://www.example.com", "https://m.example.com"]
@@ -840,18 +840,18 @@ Returns the existing or newly-created site.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/zones` | List. Filter: `siteId`, `externalId`. |
-| `POST` | `/v1/projects/{projectId}/zones` | Create. |
-| `POST` | `/v1/projects/{projectId}/zones:batchUpsert` | Bulk. |
-| `GET` | `/v1/projects/{projectId}/zones/{id}` | Read. |
-| `PATCH` | `/v1/projects/{projectId}/zones/{id}` | Update. |
+| `GET` | `/v1/projects/{project_id}/zones` | List. Filter: `site_id`, `external_id`. |
+| `POST` | `/v1/projects/{project_id}/zones` | Create. |
+| `POST` | `/v1/projects/{project_id}/zones:batchUpsert` | Bulk. |
+| `GET` | `/v1/projects/{project_id}/zones/{id}` | Read. |
+| `PATCH` | `/v1/projects/{project_id}/zones/{id}` | Update. |
 
 Body:
 
 ```json
 {
-  "externalId": "zone-header",
-  "siteId":     12,
+  "external_id": "zone-header",
+  "site_id":     12,
   "name":       "Header"
 }
 ```
@@ -863,12 +863,12 @@ via CLI/SQL or seeded at project creation.
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/projects/{projectId}/channels` | List. |
-| `GET` | `/v1/projects/{projectId}/channels/{id}` | Read. |
-| `GET` | `/v1/projects/{projectId}/priorities` | List. Ordered by tier. |
-| `GET` | `/v1/projects/{projectId}/priorities/{id}` | Read. |
-| `GET` | `/v1/projects/{projectId}/ad-types` | List. |
-| `GET` | `/v1/projects/{projectId}/ad-types/{id}` | Read. |
+| `GET` | `/v1/projects/{project_id}/channels` | List. |
+| `GET` | `/v1/projects/{project_id}/channels/{id}` | Read. |
+| `GET` | `/v1/projects/{project_id}/priorities` | List. Ordered by tier. |
+| `GET` | `/v1/projects/{project_id}/priorities/{id}` | Read. |
+| `GET` | `/v1/projects/{project_id}/ad-types` | List. |
+| `GET` | `/v1/projects/{project_id}/ad-types/{id}` | Read. |
 
 Write endpoints for these resources are post-v0 (see roadmap).
 
@@ -893,7 +893,7 @@ Impression ping.
 Click ping.
 
 - Records the click, `302` redirect to the creative's
-  `clickThroughUrl`.
+  `click_through_url`.
 - Tampered or expired signature: `400`.
 - Optional `?u=<url>` overrides the redirect target only if signed into
   the payload (prevents open-redirect abuse).
@@ -972,35 +972,35 @@ secret the URL was signed under, so dedup spans rotation cleanly.
 
 ```
 Org-level (Org token)
-  POST   /v1/orgs/{orgId}/projects                    — provision a project
-  GET    /v1/orgs/{orgId}/projects
-  POST   /v1/orgs/{orgId}/projects:batchUpsert
-  GET    /v1/orgs/{orgId}/projects/{projectId}
-  PATCH  /v1/orgs/{orgId}/projects/{projectId}
-  POST   /v1/orgs/{orgId}/tokens                      — mint API token
-  GET    /v1/orgs/{orgId}/tokens
-  DELETE /v1/orgs/{orgId}/tokens/{tokenId}
-  GET/POST/PATCH/DELETE /v1/orgs/{orgId}/members
+  POST   /v1/orgs/{org_id}/projects                    — provision a project
+  GET    /v1/orgs/{org_id}/projects
+  POST   /v1/orgs/{org_id}/projects:batchUpsert
+  GET    /v1/orgs/{org_id}/projects/{project_id}
+  PATCH  /v1/orgs/{org_id}/projects/{project_id}
+  POST   /v1/orgs/{org_id}/tokens                      — mint API token
+  GET    /v1/orgs/{org_id}/tokens
+  DELETE /v1/orgs/{org_id}/tokens/{token_id}
+  GET/POST/PATCH/DELETE /v1/orgs/{org_id}/members
 
 Decision (Org or Project token)
-  POST   /v1/projects/{projectId}/decisions
+  POST   /v1/projects/{project_id}/decisions
 
 Demand-side (full CRUD + batchUpsert)
-  /v1/projects/{projectId}/advertisers
-  /v1/projects/{projectId}/campaigns
-  /v1/projects/{projectId}/flights
-  /v1/projects/{projectId}/ads
-  /v1/projects/{projectId}/creatives             (+ /image upload)
-  /v1/projects/{projectId}/creative-templates
+  /v1/projects/{project_id}/advertisers
+  /v1/projects/{project_id}/campaigns
+  /v1/projects/{project_id}/flights
+  /v1/projects/{project_id}/ads
+  /v1/projects/{project_id}/creatives             (+ /image upload)
+  /v1/projects/{project_id}/creative-templates
 
 Inventory (full CRUD; sites also support :upsertByUrl)
-  /v1/projects/{projectId}/sites
-  /v1/projects/{projectId}/zones
+  /v1/projects/{project_id}/sites
+  /v1/projects/{project_id}/zones
 
 Read-only inventory taxonomy
-  /v1/projects/{projectId}/channels
-  /v1/projects/{projectId}/priorities
-  /v1/projects/{projectId}/ad-types
+  /v1/projects/{project_id}/channels
+  /v1/projects/{project_id}/priorities
+  /v1/projects/{project_id}/ad-types
 
 Events (public, HMAC-signed)
   GET    /e/i/{signed}
@@ -1022,10 +1022,10 @@ The following endpoints are explicitly **not** in v0 — they map onto
 the roadmap items in `REQUIREMENTS.md` §11. Calls return `404` with
 `code: "not_implemented"`.
 
-- `POST /v1/projects/{projectId}/users/*` — UserDB.
+- `POST /v1/projects/{project_id}/users/*` — UserDB.
 - Frequency-cap configuration on flights.
 - Geo / IP / day-parting / keyword / custom-property targeting fields.
-- `POST /v1/projects/{projectId}/reports/*` — Reporting API.
+- `POST /v1/projects/{project_id}/reports/*` — Reporting API.
 - Webhook subscription endpoints.
 - Custom event types beyond impression/click (`/e/x/{signed}`).
 - Write endpoints for channels / priorities / ad-types.

@@ -24,7 +24,7 @@ Recap of what's described in `REQUIREMENTS.md` §4.3:
 - Stored argon2id-hashed; never recoverable after creation.
 - Scoped to an Org or a Project, with a role (`org-owner`, `org-admin`,
   `admin`, `editor`, `reader`).
-- Minted via `POST /v1/orgs/{orgId}/tokens`. Revocable. Last-used
+- Minted via `POST /v1/orgs/{org_id}/tokens`. Revocable. Last-used
   timestamp tracked.
 
 Use opaque tokens when: there's no IdP available; you're bootstrapping
@@ -81,8 +81,8 @@ Fields:
 | Field | Required | Notes |
 |---|---|---|
 | `scope` | yes | `org` or `project`. |
-| `org_id` | yes | Knievel Org ID or `externalId`. |
-| `project_id` | when `scope=project` | Knievel Project ID or `externalId`. |
+| `org_id` | yes | Knievel Org ID or `external_id`. |
+| `project_id` | when `scope=project` | Knievel Project ID or `external_id`. |
 | `role` | yes | One of `org-owner`, `org-admin`, `admin`, `editor`, `reader` (see role table below). |
 
 The claim path is configurable (`auth.jwt.issuers[].claim`). Default
@@ -626,12 +626,12 @@ For every authenticated request, in order:
    `project_id` is `Some` only for Project-scoped tokens.
 2. **Org match.** Compare the principal's `org_id` to the org
    implied by the request path:
-   - `/v1/orgs/{orgId}/...` → must equal `principal.org_id`.
-   - `/v1/projects/{projectId}/...` → look up the project's parent
+   - `/v1/orgs/{org_id}/...` → must equal `principal.org_id`.
+   - `/v1/projects/{project_id}/...` → look up the project's parent
      org from the snapshot; must equal `principal.org_id`.
    Mismatch → `403 forbidden / wrong_tenant`.
 3. **Project match** (only for project-scoped paths).
-   - Project-scoped tokens: path `{projectId}` must equal the
+   - Project-scoped tokens: path `{project_id}` must equal the
      token's `project_id`. Mismatch → `403 forbidden / wrong_project`.
    - Org-scoped tokens: any project in the org is fine (org_id check
      in step 2 already covered this).
@@ -716,12 +716,12 @@ Read-only inventory (Channels, Priorities, AdTypes):
 ### Cross-cutting rules
 
 - **Project Editor + Ad Library references.** A Project Editor can
-  create an Ad that references `adLibraryItemId` (the library is
+  create an Ad that references `ad_library_item_id` (the library is
   org-scoped, but referencing it from a project Ad is just a
   validated foreign key). The library content itself remains
   read-only to project-only tokens; mutation requires an org-scoped
   Editor or higher.
-- **Ad Library item deletion (via `isActive: false`)** with
+- **Ad Library item deletion (via `is_active: false`)** with
   references still present succeeds (soft delete) but emits a
   warning header (`X-Knievel-Warning: dangling_references`) listing
   the project Ads that reference it. References continue to resolve

@@ -368,8 +368,14 @@ These apply to every file in § 3.
   needs to discuss both — only ever in `MIGRATION_*.md` files —
   qualify explicitly: "RX Organization" vs. "knievel Org".
 - **`project_id`, `org_id`** in code blocks; "Project ID" / "Org
-  ID" in prose. Snake-case in JSON; camelCase in TypeScript-shape
-  examples. JSON wire format is camelCase per `API.md`.
+  ID" in prose. **JSON wire format is `snake_case` everywhere** —
+  every JSON property name and every query parameter is
+  `snake_case`. Generated client SDKs follow each language's
+  idiom (Ruby reads `obj.is_active`, Python reads `obj.is_active`,
+  TypeScript readers transcribe to `isActive` if they want, but
+  the wire and any platform-doc example stays `snake_case`).
+  Enforced by `cargo xtask check-snake-case` in CI; see
+  `xtask/src/check_snake_case.rs`.
 
 ### 8.2 Example values
 

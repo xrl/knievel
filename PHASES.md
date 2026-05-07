@@ -426,8 +426,8 @@ manager and leader election running.
       bypass: it `set_config('knievel.auth_lookup_id', $id, true)`
       on its lookup transaction, queries by primary key, and
       lets the transaction roll back when verification fails.
-- [x] **3.3** First handler — `POST /v1/orgs/{orgId}/projects`
-      and `GET /v1/orgs/{orgId}/projects/{projectId}`. `OrgApi`
+- [x] **3.3** First handler — `POST /v1/orgs/{org_id}/projects`
+      and `GET /v1/orgs/{org_id}/projects/{project_id}`. `OrgApi`
       mounted alongside `SystemApi` via the tuple form
       `OpenApiService::new((SystemApi, OrgApi), ...)`.
       `BearerAuth` poem-openapi `SecurityScheme` parses opaque
@@ -503,7 +503,7 @@ manager and leader election running.
       actually requires. Added `sha2` and `hex` to workspace
       deps.
 - [x] **3.6** Org-level Tokens API — `POST/GET/DELETE
-      /v1/orgs/{orgId}/tokens`. `src/tokens.rs::TokensApi`:
+      /v1/orgs/{org_id}/tokens`. `src/tokens.rs::TokensApi`:
       mint generates `kvl_prod_<scope>_<id_short>_<secret>`,
       stores argon2id hash, returns plaintext exactly once;
       list returns metadata only (no secrets) up to 500 rows
@@ -560,7 +560,7 @@ manager and leader election running.
       project-scoped handler — auth check, project-lookup against
       RLS, role gate, returns a tenant-bound transaction.
       `src/advertisers.rs::AdvertisersApi` wires
-      `POST/GET/PATCH /v1/projects/{projectId}/advertisers[/{id}]`.
+      `POST/GET/PATCH /v1/projects/{project_id}/advertisers[/{id}]`.
       Five API tests cover: 201 happy, 409
       `external_id_conflict`, cross-tenant 403 `wrong_tenant`,
       reader 403 `role_insufficient`, list+get+patch round-trip
@@ -810,7 +810,7 @@ manager and leader election running.
       speculative. Aurora-failover testing remains
       cross-cutting risk #2; revisit before tagging.
 - [x] **3.18** Decision API — `POST
-      /v1/projects/{projectId}/decisions`. Wires snapshot + 3.15 +
+      /v1/projects/{project_id}/decisions`. Wires snapshot + 3.15 +
       3.16. HMAC-minted impression/click URLs in the response.
       `src/decisions.rs::DecisionsApi` runs the prologue auth +
       project lookup, then snaps the in-memory snapshot, runs
@@ -844,7 +844,7 @@ manager and leader election running.
       `Principal` import is present so the audit-emit follow-up
       doesn't have to re-thread it.
 - [x] **3.19** Decision explainer — `POST
-      /v1/projects/{projectId}/decisions:explain`. Three-control
+      /v1/projects/{project_id}/decisions:explain`. Three-control
       gate for `force.*` (`allow_force_decision` project flag,
       Project Admin role, global kill-switch); each forced call
       writes one `audit_log` row.
@@ -1110,7 +1110,7 @@ manager and leader election running.
       0011 was the events_rollup migration). Schema mirrors
       `API.md` § 2.4: `id` is `ali_<12 hex>`, RLS bound on
       `org_id`. `src/ad_library.rs::AdLibraryApi` exposes
-      POST/GET/PATCH `/v1/orgs/{orgId}/ad-library/items[/{itemId}]`.
+      POST/GET/PATCH `/v1/orgs/{org_id}/ad-library/items[/{item_id}]`.
       The `kind` discriminator matches Project Creatives (`image`/
       `html`/`native`) so the wire shape is identical. The
       project-side `ads.ad_library_item_id` column was reserved
@@ -1128,7 +1128,7 @@ manager and leader election running.
       library items** is on the API.md table but not in this
       commit — moved to **Phase 6.4** (post-v0; the upsert
       pattern from 3.14 generalizes cleanly). (3)
-      **`/v1/orgs/{orgId}/ad-library/items/{itemId}/references`
+      **`/v1/orgs/{org_id}/ad-library/items/{item_id}/references`
       endpoint** that lists the project ads referencing an item
       lands when the cross-tenant story for that endpoint is
       designed (the path crosses the org/project boundary).
@@ -1139,7 +1139,7 @@ manager and leader election running.
       through the in-memory snapshot at decision time") lands
       with the snapshot reload query bodies.
 - [x] **3.29** S3-compatible image upload. `POST
-      /v1/projects/{projectId}/creatives/{id}/image` (multipart),
+      /v1/projects/{project_id}/creatives/{id}/image` (multipart),
       magic-byte sniffing per `REQUIREMENTS.md` § 7.9, returns
       `imageUrl`. Adapter trait so MinIO/S3/GCS back ends share
       code.
@@ -1164,7 +1164,7 @@ manager and leader election running.
       follow-up. (1) **Multipart parsing handler in
       `src/creatives.rs`**: the validation core lives in
       `image_upload.rs`; wiring up the actual `POST
-      /v1/projects/{projectId}/creatives/{id}/image` endpoint
+      /v1/projects/{project_id}/creatives/{id}/image` endpoint
       with multipart-body extraction, calling
       `validate(declared, body)`, then writing through the
       configured `ImageStore`, and updating the creative row's
@@ -1181,7 +1181,7 @@ manager and leader election running.
       URLs.
 
 - [x] **3.32** Multipart upload handler in `src/creatives.rs`.
-      `POST /v1/projects/{projectId}/creatives/{id}/image`
+      `POST /v1/projects/{project_id}/creatives/{id}/image`
       accepts a multipart body via `poem-openapi`'s `Multipart`
       derive, runs the body through `image_upload::validate`,
       writes through the configured `ImageStore`, and updates
@@ -1517,7 +1517,7 @@ flows from a working binary in a real container.
       creative variant). Adds the fourth `creative` `oneOf` arm
       defined in `API.md` § 1 / § 3.5, and extends
       `CreativeTemplate` (`API.md` § 3.6) with optional `template`
-      (Liquid source) + `templateEngine: "liquid"` fields. Sub-tasks:
+      (Liquid source) + `template_engine: "liquid"` fields. Sub-tasks:
       - `creative_templates.template TEXT NULL` +
         `template_engine TEXT NULL` migration with the four RLS
         rules; parse-on-write rejects malformed Liquid with
@@ -1563,7 +1563,7 @@ flows from a working binary in a real container.
           explicit `| raw` escape hatch for trusted fields.
       Refs: `API.md` § 1 (decision response `oneOf`), § 3.5
       (creative `oneOf`), § 3.6 (CreativeTemplate `template` /
-      `templateEngine`); `REQUIREMENTS.md` § 7.1.1 (RLS rules),
+      `template_engine`); `REQUIREMENTS.md` § 7.1.1 (RLS rules),
       § 10 (release security).
 - [x] **4.9** Rehome the repo to the `knievel-ads` GitHub org.
       Mechanical move + a sweep of the hardcoded paths the
@@ -1976,6 +1976,27 @@ checklist green.
 - [x] **5.7** First benchmark run; `bench/results/v0.1.md`
       committed.
       Refs: `REQUIREMENTS.md` § 9.2, `TESTING.md` § 8.
+
+      **Note (5.7-followup, snake_case wire-format rule):** The
+      camelCase ↔ snake_case drift surfaced in 5.1 (`API.md`
+      examples were camelCase; `openapi.yaml` was snake_case)
+      hardened into a hard rule: **JSON wire format is
+      `snake_case` everywhere**. New gate
+      `cargo xtask check-snake-case` walks the spec's component
+      schemas + operation parameters and fails CI on any
+      violation (383 property names + 17 parameter names
+      verified at landing). Doc sweep brought every platform
+      doc (`API.md`, `AUTH.md`, `REQUIREMENTS.md`,
+      `REPORTING.md`, `TESTING.md`, `MIGRATION_RX.md`,
+      `README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`,
+      `DOCUMENTATION_PLAN.md`) into agreement; path-template
+      params normalized to `{org_id}` / `{project_id}` /
+      `{token_id}` / `{item_id}` / `{user_id}`.
+      JSON-Schema-vocabulary inside `creative_template.schema`
+      payloads (`maxLength`, `additionalProperties`, etc.)
+      intentionally stays camelCase — that's JSON Schema, not
+      knievel wire. Documented in `CONTRIBUTING.md`
+      "Wire-format rule" and `DOCUMENTATION_PLAN.md` § 8.1.
 - [ ] **5.8** Release-tagging workflow — tag `v0.1.0`, multi-arch
       image published, gem published, GitHub Release created.
       Refs: `TESTING.md` § 12.9.

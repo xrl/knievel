@@ -119,7 +119,7 @@ Why proxy-first:
   app's own infrastructure, not a known ad-network domain.
 - **Server-side enrichment.** The calling app can enrich the request with
   trusted context (auth state, A/B bucket, subscription tier).
-- **Caller-driven post-filtering** via `block.creativeIds` / etc., for
+- **Caller-driven post-filtering** via `block.creative_ids` / etc., for
   state knievel doesn't model (e.g., "this listing was just unpublished").
 - **Simpler auth.** One Bearer token, not per-browser bot filtering +
   signed requests + CORS preflights.
@@ -150,7 +150,7 @@ opaque to JWT is a flag flip.
 **Token scopes (both modes):**
 
 - **Org-scoped** — addresses any Project in the Org via
-  `/v1/projects/{projectId}/...`. The calling app's primary credential.
+  `/v1/projects/{project_id}/...`. The calling app's primary credential.
 - **Project-scoped** — single Project. For per-tenant access (eventual
   admin UI; per-customer integrations).
 
@@ -218,11 +218,11 @@ catalog metadata (name, description, default ad type hints).
 Project-scoped `Ad` rows take one of two shapes (a `oneOf` in the
 spec):
 
-- **Inline** — embeds a project-local `creativeId` directly. The
+- **Inline** — embeds a project-local `creative_id` directly. The
   current/default shape; what you use when the ad lives entirely
   within one project.
-- **Reference** — `{ adLibraryItemId: ... }` instead of
-  `creativeId`. The Ad inherits the library item's creative content
+- **Reference** — `{ ad_library_item_id: ... }` instead of
+  `creative_id`. The Ad inherits the library item's creative content
   at decision time. The Project supplies the flight binding,
   weight, and Project-scoped advertiser context.
 
@@ -236,11 +236,11 @@ Every persistable entity carries:
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Server-assigned, project-scoped (or org-scoped for orgs/projects). |
-| `externalId` | string \| null | Caller-assigned, unique within `(project, resource)`. |
+| `external_id` | string \| null | Caller-assigned, unique within `(project, resource)`. |
 | `etag` | string | Opaque concurrency token for `If-Match`. |
-| `createdAt` | RFC 3339 | |
-| `updatedAt` | RFC 3339 | |
-| `isActive` | bool | Soft-delete via `isActive: false`; v0 has no hard delete. |
+| `created_at` | RFC 3339 | |
+| `updated_at` | RFC 3339 | |
+| `is_active` | bool | Soft-delete via `is_active: false`; v0 has no hard delete. |
 
 Sites additionally carry:
 
@@ -249,17 +249,17 @@ Sites additionally carry:
 | `url` | string | Unique within the project (across `url` + `aliases`). |
 | `aliases` | string[] | Additional URLs that resolve to this site. |
 
-The Decision API can resolve a placement's site by `siteId`, `siteUrl`,
-or `siteExternalId`. URL lookup matches `url` and `aliases`.
+The Decision API can resolve a placement's site by `site_id`, `site_url`,
+or `site_external_id`. URL lookup matches `url` and `aliases`.
 
 ## 6. API Surface (v0)
 
 OpenAPI 3.1, served at `/openapi.json`. Bearer auth. Cursor pagination.
 `Idempotency-Key` documented as part of the spec. Path-prefixed:
 
-- `/v1/orgs/{orgId}/...` — org-level operations (provisioning, tokens,
+- `/v1/orgs/{org_id}/...` — org-level operations (provisioning, tokens,
   members).
-- `/v1/projects/{projectId}/...` — everything else (resources, decisions).
+- `/v1/projects/{project_id}/...` — everything else (resources, decisions).
 - `/e/...` — public event tracking (HMAC-signed, no auth).
 - `/healthz`, `/readyz`, `/metrics`, `/openapi.json`, `/version` — system.
 
@@ -268,28 +268,28 @@ Full endpoint list, request/response shapes, and conventions live in
 
 ### 6.1 Decision API summary
 
-`POST /v1/projects/{projectId}/decisions`
+`POST /v1/projects/{project_id}/decisions`
 
 ```json
 {
   "context": {
     "url":       "https://example.com/article/42",
     "referrer":  "https://www.google.com/...",
-    "userAgent": "Mozilla/5.0 ..."
+    "user_agent": "Mozilla/5.0 ..."
   },
   "placements": [
     {
       "id":      "header",
-      "siteUrl": "https://example.com",
-      "zoneIds": [34],
-      "adTypes": [16],
+      "site_url": "https://example.com",
+      "zone_ids": [34],
+      "ad_types": [16],
       "count":   1
     }
   ],
   "block": {
-    "creativeIds":   [],
-    "advertiserIds": [],
-    "campaignIds":   []
+    "creative_ids":   [],
+    "advertiser_ids": [],
+    "campaign_ids":   []
   }
 }
 ```
@@ -297,7 +297,7 @@ Full endpoint list, request/response shapes, and conventions live in
 Selection algorithm:
 
 1. Filter to flights active at request time (date window).
-2. Filter to ads matching `siteId`/`zoneIds`/`adTypes`.
+2. Filter to ads matching `site_id`/`zone_ids`/`ad_types`.
 3. Apply `force.*` overrides (debug only; not for production traffic).
 4. Apply `block.*` exclusions (caller-derived state).
 5. Group by priority tier; highest non-empty tier wins.
@@ -339,7 +339,7 @@ Read-only inventory taxonomy (per-project but rarely changed):
 | AdType | List, Get |
 
 All write endpoints accept `Idempotency-Key`. Bulk upserts are atomic
-per batch and keyed on `externalId`. Sites' `:upsertByUrl` is a
+per batch and keyed on `external_id`. Sites' `:upsertByUrl` is a
 first-class natural-key endpoint for URL-driven flows.
 
 ### 6.3 Event tracking
@@ -347,7 +347,7 @@ first-class natural-key endpoint for URL-driven flows.
 - `GET /e/i/{signed}` — impression. `204 No Content` (or 1×1 GIF if
   `?fmt=gif`).
 - `GET /e/c/{signed}` — click. `302` to the creative's
-  `clickThroughUrl`.
+  `click_through_url`.
 
 HMAC-SHA256 signatures over `(project_id, ad_id, creative_id,
 placement_id_hash, issued_at, nonce)` with a per-project secret. TTL
@@ -355,7 +355,7 @@ configurable per project (default 24 h).
 
 The per-project secret is **server-generated** at project creation
 (via `crypto.rand_bytes`); the operator never supplies one. Rotation
-via `PATCH /v1/orgs/{orgId}/projects/{projectId}` keeps the previous
+via `PATCH /v1/orgs/{org_id}/projects/{project_id}` keeps the previous
 secret valid as a verifier for **8 hours** so already-minted
 impression/click URLs continue to work during the overlap. After the
 overlap, only the new secret is accepted. Documented in `AUTH.md`
@@ -651,7 +651,7 @@ Upload constraints (defaults; operator-tunable):
   them correctly.
 - **Naming:** stored under
   `{bucket}/projects/{project_id}/creatives/{creative_id}/{uuid}.{ext}`.
-  Returned `imageUrl` is signed (or unsigned, public-read) per
+  Returned `image_url` is signed (or unsigned, public-read) per
   operator config.
 - **No virus scanning in v0.** Operators that need it wrap the
   upload endpoint with their own scanner. Documented as a known gap.
@@ -1178,7 +1178,7 @@ status code returned, and the operator action.
 | **Snapshot stale > critical** (default 300 s) | `snapshot_age_seconds` > 300 | Decisions still served (stale); `/readyz` returns 503 (k8s pulls pod from rotation); management writes fail | `503 / snapshot_critically_stale` on writes; `200` on decisions (with stale header) | Caller can keep trying decisions; writes need backoff | Same as above; this is operator-actionable |
 | **Event channel saturation** | `event_channel_depth == channel_capacity` | Decision endpoint **fails fast** at 503 — events would otherwise drop silently. Pings (`/e/...`) still succeed at signature-verify level but may be dropped if the channel is fully wedged | `503 / event_channel_saturated` | Backoff with jitter; the cluster is over capacity | Scale DB writer tier; the flusher can't keep up |
 | **Leader maintenance failure** (partition or rollup) | watchdog assertion: no successful run in `watchdog_hours` | Process exits with non-zero status; k8s reschedules; advisory lock released; another pod elects | n/a (process death is external) | n/a | `/readyz` reports the watchdog state; investigate the underlying SQL error in Sentry |
-| **Idempotency cache miss / corruption** | Internal | Replays of `Idempotency-Key` produce a fresh execution rather than a cached response | `200`/`201` as if first call (effects are idempotent at the row level via `externalId`) | None | None — degrades gracefully; investigate if frequent |
+| **Idempotency cache miss / corruption** | Internal | Replays of `Idempotency-Key` produce a fresh execution rather than a cached response | `200`/`201` as if first call (effects are idempotent at the row level via `external_id`) | None | None — degrades gracefully; investigate if frequent |
 | **Both auth modes misconfigured at boot** | Linter (§ AUTH.md) | Process refuses to start | n/a | n/a | Fix config, restart |
 | **JWKS endpoint unreachable** | HTTP failure on cache refresh | Cached keys serve until TTL expires, then JWT validation starts failing for that issuer (other issuers unaffected); cache refresh attempts continue at backoff | `401` for tokens whose `kid` is missing | Use a token from another issuer or wait for JWKS to be reachable | Check IdP availability and network |
 | **All Postgres connections exhausted** | `sqlx_pool_*` saturation | All endpoints return 503 except `/healthz` and `/metrics` | `503 / db_pool_exhausted` | Backoff with jitter | Scale connections, scale pods, or scale DB tier |

@@ -108,7 +108,7 @@ itself still uses the writer endpoint for `LISTEN/NOTIFY`.)
   costs one round-trip.
 - One **Org Editor token** per environment, held by the Rails app.
   Used for both sync and decision calls. Project ID is supplied per
-  call (`/v1/projects/{projectId}/...`).
+  call (`/v1/projects/{project_id}/...`).
 
 ## Concept Map
 
@@ -119,13 +119,13 @@ itself still uses the writer endpoint for `LISTEN/NOTIFY`.)
 | Provider | Advertiser | Advertiser |
 | `KevelAdConfiguration.campaign_name` | Campaign name | Campaign |
 | `KevelAd` (one per ad) | 1 Flight + 1 Ad + 1 Creative | 1 Flight + 1 Ad + 1 Creative (orchestrated by gem helper) |
-| `KevelAd.site_urls` | siteIds via URL lookup | (implicit per-project; sites scoped to the Project) |
-| Provider published / Org archived (post-filter) | `blockedCreatives` | `block.creativeIds` |
+| `KevelAd.site_urls` | site_ids via URL lookup | (implicit per-project; sites scoped to the Project) |
+| Provider published / Org archived (post-filter) | `blockedCreatives` | `block.creative_ids` |
 | `AdConfiguration.priority_id` | Priority | Priority |
 | `AdConfiguration.ad_type_id` | AdType | AdType |
 | `AdConfiguration.zone_id` | Zone | Zone |
 | `AdConfiguration.creative_template_id` | CreativeTemplate | CreativeTemplate |
-| `current_organization.host` | site lookup → `siteId` | project routing in caller; optional `siteUrl` shorthand |
+| `current_organization.host` | site lookup → `site_id` | project routing in caller; optional `site_url` shorthand |
 
 ## Data Model Additions on the RX Side
 
@@ -536,7 +536,7 @@ What RX's Rails app needs to set, to talk to knievel:
 | Old (Kevel) | New (Knievel) |
 |---|---|
 | `KEVEL_API_KEY` | (replaced by Keycloak client credentials below) |
-| `KEVEL_NETWORK_ID` | (replaced by per-call `projectId`) |
+| `KEVEL_NETWORK_ID` | (replaced by per-call `project_id`) |
 | `https://e-{network}.adzerk.net/api/v2` | `KNIEVEL_BASE_URL` (e.g. `https://ads.scientist.com`) |
 | (none) | `KEYCLOAK_TOKEN_URL` (e.g. `https://keycloak.scientist.com/realms/scientist/protocol/openid-connect/token`) |
 | (none) | `KNIEVEL_KC_CLIENT_ID` (`knievel-prod` / `knievel-staging`) |
@@ -639,6 +639,6 @@ concerns:
 - The `blocked_creative_ids` computation — RX state (publish status,
   archival).
 
-Knievel exposes the primitives (`block.creativeIds`, etc.) that let RX
+Knievel exposes the primitives (`block.creative_ids`, etc.) that let RX
 keep all of the above on the RX side without knievel needing to know
 about Providers, Organizations, subscriptions, or archival.

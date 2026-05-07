@@ -236,15 +236,15 @@ macro:
 
 | Test | Property |
 |---|---|
-| `create_returns_201` | Server-assigned `id`, echoed `externalId`, `etag`, `createdAt`/`updatedAt`. |
-| `create_idempotent_on_external_id` | Second create with same `externalId` is a no-op returning the first row. |
+| `create_returns_201` | Server-assigned `id`, echoed `external_id`, `etag`, `created_at`/`updated_at`. |
+| `create_idempotent_on_external_id` | Second create with same `external_id` is a no-op returning the first row. |
 | `create_idempotency_key_replay` | Same `Idempotency-Key` returns cached body with `Idempotent-Replay: true`. |
 | `create_idempotency_key_mismatch_body` | Same key + different body → `409 idempotency_conflict`. |
-| `read_404_unknown_id` | Unknown `id` and unknown `externalId` both 404. |
+| `read_404_unknown_id` | Unknown `id` and unknown `external_id` both 404. |
 | `update_etag_match` | `If-Match: <etag>` succeeds; stale etag → `409 if_match_mismatch`. |
-| `list_paginates` | `limit` honored; `nextCursor` returns the next page; cursor stable across writes. |
-| `filter_by_external_id` | `?externalId=...` filter narrows to one row. |
-| `soft_delete` | `isActive: false` round-trips; `GET` still returns the row. |
+| `list_paginates` | `limit` honored; `next_cursor` returns the next page; cursor stable across writes. |
+| `filter_by_external_id` | `?external_id=...` filter narrows to one row. |
+| `soft_delete` | `is_active: false` round-trips; `GET` still returns the row. |
 | `batch_upsert_atomic` | One bad row in a batch rolls back all rows; `details[]` reports the offending index. |
 | `cross_entity_fks_in_batch` | A flight referencing a campaign created earlier in the same batch resolves. |
 
@@ -324,10 +324,10 @@ generic CRUD harness:
 | `decisions_force_admin_only` | Editor → 403; admin without flag → 403; admin with flag → 200 + audit row. |
 | `decisions_force_global_kill_switch` | `decisions.force_overrides_enabled: false` → 403 cluster-wide. |
 | `decisions_force_audit_row` | Forced decision writes one and only one `audit_log` row with actor, payload hash, reason. |
-| `decisions_site_resolution` | `siteId`, `siteUrl`, and `siteExternalId` all resolve to the same `siteId` in the response. |
+| `decisions_site_resolution` | `site_id`, `site_url`, and `site_external_id` all resolve to the same `site_id` in the response. |
 | `decisions_url_alias_match` | Site `aliases` resolve identically to canonical `url`. |
 | `decisions_signed_urls_round_trip` | Minted impression/click URLs verify with the per-project secret and TTL. |
-| `decisions_snapshot_version_stamp` | Response `snapshotVersion` matches the snapshot at request time and ends up on the corresponding `events_raw` row. |
+| `decisions_snapshot_version_stamp` | Response `snapshot_version` matches the snapshot at request time and ends up on the corresponding `events_raw` row. |
 | `decisions_explain_no_event_recorded` | `:explain` mints dummy URLs and writes no events. |
 | `decisions_explain_evaluation_shape` | Every candidate has a deterministic `evaluation` array. |
 
@@ -338,7 +338,7 @@ generic CRUD harness:
 | `impression_204_default` | `GET /e/i/<sig>` → 204 on a fresh sig. |
 | `impression_gif_when_requested` | `?fmt=gif` → 200 with the 43-byte transparent GIF. |
 | `impression_tampered_204_silent` | Tampered sig → 204, internal `tampered` counter increments. |
-| `click_302_redirect` | `GET /e/c/<sig>` → 302 to the creative's `clickThroughUrl`. |
+| `click_302_redirect` | `GET /e/c/<sig>` → 302 to the creative's `click_through_url`. |
 | `click_open_redirect_blocked` | `?u=<url>` is honored only when signed in. |
 | `dedup_first_hit_countable` | First hit lands `is_duplicate = false`. |
 | `dedup_second_hit_marked` | Second hit with same sig lands `is_duplicate = true`; click still 302s. |
@@ -382,12 +382,12 @@ No reaching into knievel internals.
 |---|---|---|
 | ACC-01 | Provision an Org and a Project, mint an Org Editor token, list the empty project. | `API.md` § 2.1, 2.2 |
 | ACC-02 | Full demand chain: Advertiser → Campaign → Flight → Ad → Creative; issue a decision; assert the response shape and HMAC URLs. | `API.md` § 1, 3.1–3.5 |
-| ACC-03 | Site lookup via `siteUrl` and `siteExternalId` returns the same `siteId`. | `API.md` § 1, 3.7 |
+| ACC-03 | Site lookup via `site_url` and `site_external_id` returns the same `site_id`. | `API.md` § 1, 3.7 |
 | ACC-04 | URL aliases: a site with two aliases resolves all three URLs identically. | `API.md` § 3.7 |
 | ACC-05 | Bulk sync: a single `:batchUpsert` call lands a coherent advertiser/campaign/flight/ad/creative graph. | `API.md` § 4 "Write contract" |
 | ACC-06 | Bulk sync failure: one bad row rolls back the whole batch with per-row diagnostics. | `API.md` § 4 |
 | ACC-07 | Idempotency: replay returns cached, body-mismatch is `409`. | `API.md` § "Idempotency" |
-| ACC-08 | Soft delete via `isActive: false` round-trips. | `API.md` § "Common entity fields" |
+| ACC-08 | Soft delete via `is_active: false` round-trips. | `API.md` § "Common entity fields" |
 | ACC-09 | Hot path: 1 000 sequential decisions; p99 < 50 ms (informational; SLO bench is § 8). | `REQUIREMENTS.md` § 9 |
 | ACC-10 | Snapshot refresh: management write → `NOTIFY` → next decision sees new state within 5 s. | `REQUIREMENTS.md` § 7.2 |
 | ACC-11 | Snapshot poll backstop: management write with NOTIFY suppressed → next decision sees new state within 6 s (poll interval + slack). | `REQUIREMENTS.md` § 7.2 |

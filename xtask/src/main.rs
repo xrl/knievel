@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 mod check_api_doc;
 mod check_cross_tenant;
 mod check_doc_fences;
+mod check_snake_case;
 mod lint_migrations;
 mod openapi;
 mod test_shape;
@@ -42,6 +43,8 @@ enum Cmd {
     CheckDocFences,
     /// Verify every OpenAPI operation has a row in API.md (DOCUMENTATION_PLAN.md §11.2).
     CheckApiDoc,
+    /// Verify every JSON property name + query parameter in `openapi.yaml` is snake_case.
+    CheckSnakeCase,
 }
 
 fn main() -> Result<()> {
@@ -53,5 +56,6 @@ fn main() -> Result<()> {
         Cmd::TestShape => test_shape::run(),
         Cmd::CheckDocFences => check_doc_fences::run(),
         Cmd::CheckApiDoc => check_api_doc::run(),
+        Cmd::CheckSnakeCase => check_snake_case::run(),
     }
 }

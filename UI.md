@@ -83,8 +83,8 @@ web/admin/
       __root.tsx
       projects/
         index.tsx
-        $projectId.tsx
-        $projectId.advertisers.tsx
+        $project_id.tsx
+        $project_id.advertisers.tsx
         ...
     components/
       DataTable.tsx       # Mantine + TanStack Table wrapper

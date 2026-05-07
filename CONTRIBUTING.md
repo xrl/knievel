@@ -57,6 +57,38 @@ tasks — `[x]` lines are the audit trail.
 - **No squash-merge for spec changes.** Doc changes that explain the
   spec rationale stay as their own commits in history.
 
+## Wire-format rule
+
+**JSON wire format is `snake_case`. Hard rule, enforced in CI.**
+
+Every JSON property name and every query parameter in
+`openapi.yaml` is `snake_case` — `site_id`, not `siteId`;
+`next_cursor`, not `nextCursor`; `is_active`, not `isActive`.
+The rule applies to both new endpoints and any documentation
+example that purports to show wire JSON.
+
+`cargo xtask check-snake-case` walks `openapi.yaml`'s component
+schemas and operation parameters and fails CI on any violation.
+The check ignores OpenAPI structural metadata
+(`operationId`, `additionalProperties`, etc. — those follow
+OpenAPI's own conventions) and JSON-Schema-vocabulary fields
+inside `creative_template.schema` payloads (`maxLength`,
+`additionalProperties`, etc. — those are JSON Schema, not
+knievel wire).
+
+Generated SDKs follow each language's idiom:
+
+- Ruby: `obj.is_active` (snake_case method names — generator
+  transliterates from the spec).
+- Python: `obj.is_active`.
+- TypeScript: free to expose `isActive` if the project prefers,
+  but the wire JSON it sends and receives stays snake_case.
+
+When you add a new endpoint or schema, the gate is automatic;
+when you add a doc example that includes JSON, copy snake_case
+from a real spec example or run a quick `cargo xtask openapi` +
+spot-check.
+
 ## Test expectations
 
 Every change carries proportional test coverage. Specifics:
