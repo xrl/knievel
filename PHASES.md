@@ -2278,7 +2278,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       enforces. Shows progress + success state; failure
       surfaces the API error envelope (per the 7.4 error
       matrix).
-- [ ] **7.8** Reporting + event-flow inspector. Charts on
+- [x] **7.8** Reporting + event-flow inspector. Charts on
       rollups, a tail view over `/events` (poll-based for v0;
       revisit if/when push lands). Time-bucket controls match
       `REPORTING.md`.
