@@ -22,5 +22,13 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // TanStack Router file-based routes use dot-segments
+    // (`reports.test.tsx` → `/reports/test`), which collide
+    // with vitest's default `*.test.tsx` glob. Constrain
+    // the test discovery to files explicitly under `test/`
+    // OR matching `*.spec.{ts,tsx}` so route filenames
+    // can't accidentally be picked up as test suites.
+    include: ['src/**/*.{spec,test}.{ts,tsx}'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'src/routes/**'],
   },
 });

@@ -2339,7 +2339,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       bundle file.
       Refs: `UI.md` "Deployment"; `AUTH.md` "Knievel-side
       configuration."
-- [ ] **7.13** Decision tester / debugging surface. A
+- [x] **7.13** Decision tester / debugging surface. A
       project-scoped form at `/reports/test` that lets an
       operator construct a real
       `POST /v1/projects/{p}/decisions` request from a
