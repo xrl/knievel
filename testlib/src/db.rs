@@ -224,7 +224,8 @@ pub async fn ephemeral_drop(db: EphemeralDb) -> Result<()> {
         .await?;
     sqlx::query(
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-         WHERE datname = $1 AND pid <> pg_backend_pid()",
+         WHERE datname = $1 AND pid <> pg_backend_pid() \
+           AND usename = current_user",
     )
     .bind(&db.name)
     .execute(&admin)
