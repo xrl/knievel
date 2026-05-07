@@ -89,6 +89,109 @@ async fn list_projects_returns_envelope_with_null_cursor() -> Result<()> {
 }
 
 #[tokio::test]
+async fn list_projects_filtered_by_external_id_returns_only_match() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let db = testlib::db::ephemeral().await?;
+    seed_org(&db.pool, "org_a", "Org Alpha").await?;
+    seed_project_with_external_id(
+        &db.pool,
+        "org_a",
+        "pj_one",
+        Some("rx_org:42"),
+        "Project One",
+    )
+    .await?;
+    seed_project_with_external_id(
+        &db.pool,
+        "org_a",
+        "pj_two",
+        Some("rx_org:43"),
+        "Project Two",
+    )
+    .await?;
+    seed_project_with_external_id(&db.pool, "org_a", "pj_three", None, "Project Three").await?;
+    let token = mint_token(&db.pool, "tok_aread", "org_a", "reader").await?;
+
+    let cli = TestClient::new(build_app(db.pool.clone()));
+    let resp = cli
+        .get("/v1/orgs/org_a/projects?external_id=rx_org%3A42")
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await;
+    resp.assert_status_is_ok();
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], "pj_one");
+    assert_eq!(items[0]["external_id"], "rx_org:42");
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_projects_filtered_by_external_id_returns_empty_when_no_match() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let db = testlib::db::ephemeral().await?;
+    seed_org(&db.pool, "org_a", "Org Alpha").await?;
+    seed_project_with_external_id(
+        &db.pool,
+        "org_a",
+        "pj_one",
+        Some("rx_org:42"),
+        "Project One",
+    )
+    .await?;
+    let token = mint_token(&db.pool, "tok_aread", "org_a", "reader").await?;
+
+    let cli = TestClient::new(build_app(db.pool.clone()));
+    let resp = cli
+        .get("/v1/orgs/org_a/projects?external_id=rx_org%3A99")
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .await;
+    resp.assert_status_is_ok();
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    let items = body["items"].as_array().expect("items array");
+    assert!(items.is_empty());
+    assert!(body["next_cursor"].is_null());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_projects_filtered_by_external_id_respects_org_isolation() -> Result<()> {
+    // Same external_id in two orgs — the RLS-bound query
+    // returns only the row in the principal's org.
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let db = testlib::db::ephemeral().await?;
+    seed_org(&db.pool, "org_a", "Org Alpha").await?;
+    seed_org(&db.pool, "org_b", "Org Bravo").await?;
+    seed_project_with_external_id(&db.pool, "org_a", "pj_a", Some("shared"), "A's Project").await?;
+    seed_project_with_external_id(&db.pool, "org_b", "pj_b", Some("shared"), "B's Project").await?;
+    let token_a = mint_token(&db.pool, "tok_aread", "org_a", "reader").await?;
+
+    let cli = TestClient::new(build_app(db.pool.clone()));
+    let resp = cli
+        .get("/v1/orgs/org_a/projects?external_id=shared")
+        .header("authorization", format!("Bearer {token_a}"))
+        .send()
+        .await;
+    resp.assert_status_is_ok();
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], "pj_a");
+    Ok(())
+}
+
+#[tokio::test]
 async fn list_projects_other_org_returns_403() -> Result<()> {
     if std::env::var("DATABASE_URL").is_err() {
         eprintln!("DATABASE_URL not set; skipping.");
@@ -128,13 +231,26 @@ async fn seed_project(
     project_id: &str,
     name: &str,
 ) -> Result<()> {
+    seed_project_with_external_id(pool, org_id, project_id, None, name).await
+}
+
+async fn seed_project_with_external_id(
+    pool: &sqlx::PgPool,
+    org_id: &str,
+    project_id: &str,
+    external_id: Option<&str>,
+    name: &str,
+) -> Result<()> {
     let mut tx = testlib::tenant::begin_bound(pool, org_id, None).await?;
-    sqlx::query("INSERT INTO knievel.projects (id, org_id, name) VALUES ($1, $2, $3)")
-        .bind(project_id)
-        .bind(org_id)
-        .bind(name)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO knievel.projects (id, org_id, external_id, name) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(project_id)
+    .bind(org_id)
+    .bind(external_id)
+    .bind(name)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
