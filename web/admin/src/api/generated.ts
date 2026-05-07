@@ -1630,7 +1630,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                idempotency_key?: string;
+                "Idempotency-Key"?: string;
             };
             path: {
                 org_id: string;
