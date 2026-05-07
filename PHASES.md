@@ -1624,14 +1624,30 @@ flows from a working binary in a real container.
       Refs: `REQUIREMENTS.md` § 8 item 5 (image registry
       pinning), `MIGRATION_RX.md` compose example.
 
-- [ ] **4.10** `openapi-generator-cli` wired into CI; Ruby gem
+- [x] **4.10** `openapi-generator-cli` wired into CI; Ruby gem
       with `Resource` wrappers + `Enumerable` pagination;
       gem-smoke job runs against the compose stack from 4.1.
       Refs: `REQUIREMENTS.md` § 8 item 3, `API.md` "Pagination."
-      **Partial — generator CI landed early** (see Phase 4
-      Notes "4.10 (generator CI, early)" below). Remaining for
-      this task: `Resource` wrappers, `Enumerable` pagination
-      keying off `x-knievel-paginated`, and the gem-smoke job.
+
+      Generator CI shipped early as v0.1.1 → v0.1.5 (see Phase
+      4 Notes "4.10 (generator CI, early)" below). Wrappers +
+      Enumerable pagination shipped in knievel-ruby `f6938cb`
+      (gem 0.1.5) — `Knievel::Resources::Base` is the cursor
+      walk + page_size validation; eight subclasses (one per
+      paginated resource) + a `Knievel::Client` facade that
+      parses full URLs. 24 rspec examples cover the wrapper
+      contract (cursor walk, `lazy.first(n)` short-circuit,
+      `take_while`, page_size bounds, filter forwarding). The
+      `x-knievel-paginated*` vendor extensions API.md
+      originally promised got redirected to **Phase 6.6** —
+      hand-written wrappers know their own paginated set, and
+      we're upstreaming extension support to poem-openapi
+      rather than carrying a `cargo xtask openapi`
+      post-processor. The compose-based gem-smoke job runs as
+      a step in `release-ruby-gem.yml` between gem build and
+      tag-push, gating every release on a real Knievel server
+      + the freshly built gem actually round-tripping the
+      Enumerable contract end-to-end.
 
 **Milestone:** `docker compose up` boots a working knievel against
 Postgres + MinIO + wiremock; `helm install` against a real
