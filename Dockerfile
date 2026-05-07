@@ -47,6 +47,7 @@ COPY migrations migrations
 COPY src src
 COPY xtask/src xtask/src
 COPY testlib/src testlib/src
+COPY benches benches
 RUN cargo build --release --locked --bin knievel --bin knievel-cli \
  && strip target/release/knievel target/release/knievel-cli
 

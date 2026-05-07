@@ -101,7 +101,30 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
                     .await
                     .context("re-checking role state after ALTER failed")?;
                     if still {
-                        return Err(e).context("downgrading admin role from SUPERUSER");
+                        // Diagnostic dump — Postgres is rejecting
+                        // self-alter despite rolsuper=true. Most
+                        // Postgres-tier configurations should let
+                        // a SUPERUSER ALTER themselves; if this
+                        // fires we want to see the actual session
+                        // state to debug.
+                        let diag: (String, String, bool, bool, bool, bool, String, String) =
+                            sqlx::query_as(
+                                "SELECT current_user::text, session_user::text,
+                                    rolsuper, rolinherit, rolcreaterole, rolcreatedb,
+                                    current_setting('is_superuser')::text,
+                                    version()::text
+                             FROM pg_roles WHERE rolname = current_user",
+                            )
+                            .fetch_one(&mut *tx)
+                            .await
+                            .unwrap_or_default();
+                        return Err(e).context(format!(
+                            "downgrading admin role from SUPERUSER \
+                             (current_user={}, session_user={}, \
+                             rolsuper={}, rolinherit={}, rolcreaterole={}, rolcreatedb={}, \
+                             is_superuser_guc={}, pg_version={:?})",
+                            diag.0, diag.1, diag.2, diag.3, diag.4, diag.5, diag.6, diag.7
+                        ));
                     }
                     // Else: the role is NOSUPERUSER (somehow
                     // already in the right state — a parallel
