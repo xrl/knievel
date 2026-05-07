@@ -11,6 +11,7 @@ mod lint_migrations;
 mod openapi;
 mod release_tag;
 mod test_shape;
+mod ui_client;
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +55,12 @@ enum Cmd {
         #[arg(long)]
         skip_gates: bool,
     },
+    /// Generate or check the admin-UI typed client (web/admin/src/api/generated.ts).
+    UiClient {
+        /// Fail if the committed client differs from a fresh codegen.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -73,5 +80,6 @@ fn main() -> Result<()> {
             version,
             skip_gates,
         }),
+        Cmd::UiClient { check } => ui_client::run(check),
     }
 }

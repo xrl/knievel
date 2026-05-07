@@ -1,0 +1,35 @@
+name: 'node-setup'
+description: >-
+  Install pnpm + Node pinned to web/admin's expectations and warm
+  the pnpm store cache. The CALLER must run `actions/checkout@v4`
+  before invoking this composite — local composite actions
+  (`./.github/actions/...`) can't be located until the repo is on
+  disk. Mirrors `rust-setup` (gotcha #6 in CLAUDE.md).
+
+inputs:
+  node-version:
+    description: 'Node major version (matches web/admin/package.json engines.node)'
+    required: false
+    default: '22'
+  pnpm-version:
+    description: 'pnpm version (matches web/admin/package.json packageManager)'
+    required: false
+    default: '10'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: 'pnpm'
+        cache-dependency-path: 'web/admin/pnpm-lock.yaml'
+
+    - name: pnpm install (web/admin)
+      shell: bash
+      working-directory: web/admin
+      run: pnpm install --frozen-lockfile

@@ -161,6 +161,60 @@ jobs:
       - uses: ./.github/actions/rust-setup
       - run: cargo xtask openapi --check
 
+  # Admin-UI gates (Phase 7.3). Each job sets up Node + pnpm
+  # via the local node-setup composite (caller checks out
+  # first, mirrors gotcha #6). Path-filtering happens at
+  # repo scope via `paths-filter` would add cycle complexity;
+  # for now every PR runs them — the pnpm-store cache hit
+  # makes a no-op run cheap.
+
+  ui-client-drift:
+    name: ui client drift
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+      - uses: ./.github/actions/node-setup
+      - run: cargo xtask ui-client --check
+
+  ui-typecheck:
+    name: ui typecheck
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin typecheck
+
+  ui-lint:
+    name: ui lint
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin lint
+      - run: pnpm --dir web/admin format:check
+
+  ui-test:
+    name: ui test
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin test --run
+
+  ui-build:
+    name: ui build
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin build
+
   helm-lint:
     name: helm lint + kubeconform
     needs: prime

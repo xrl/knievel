@@ -2204,7 +2204,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       middleware at all (no preflight overhead, no
       `Access-Control-Allow-Origin` on responses).
       Refs: `UI.md` "CORS"; pre-staged config field.
-- [ ] **7.3** OpenAPI codegen rail. New
+- [x] **7.3** OpenAPI codegen rail. New
       `xtask/src/ui_client.rs` shelling out to `pnpm --dir
       web/admin exec openapi-typescript ../../openapi.yaml -o
       src/api/generated.ts`; `--check` mirrors
@@ -2373,6 +2373,34 @@ side channels. UI + API ship as a single
 headless API when `KNIEVEL_ADMIN_UI__STATIC_DIR` is unset.
 
 ### Notes
+
+**Note (7.3):** `xtask ui-client --check` writes the fresh
+codegen to `target/xtask-ui-client-check.ts` (gitignored
+under `target/`) instead of bringing in a `tempfile` dep on
+xtask — same drift behavior, one less crate. The output
+path passed to `pnpm exec openapi-typescript` is
+absolutized before the `cwd → web/admin` shell-out, so
+both the canonical `web/admin/src/api/generated.ts` and the
+drift-check temp resolve correctly regardless of where the
+caller pointed them.
+
+`generated.ts` is checked in (130 KB, ~4400 lines of typed
+bindings) for the same reason `openapi.yaml` is — it's part
+of the contract surface; reviewers see when it changes.
+Excluded from prettier (`.prettierignore`) and ESLint
+(`eslint.config.js` ignores) since linting auto-generated
+code is just rot.
+
+CI gains five UI jobs gated on `prime`: `ui-client-drift`
+(peer of `openapi-drift`), `ui-typecheck`, `ui-lint` (also
+runs `pnpm format:check`), `ui-test`, `ui-build`. They share
+the new `.github/actions/node-setup/` composite which mirrors
+`rust-setup` (caller checks out first; pnpm action setup +
+`actions/setup-node` `cache: pnpm` + `pnpm install
+--frozen-lockfile` against `web/admin/pnpm-lock.yaml`).
+Path-filtering on `web/admin/**` was considered and dropped:
+the cache hit makes a no-op job cheap, and the cycle
+complexity isn't worth saving ~20 s on Rust-only PRs.
 
 **Note (7.2):** poem 3.1's `Cors` requires the
 `MakeRouter`-style `.with(cors)` chaining. The conditional
