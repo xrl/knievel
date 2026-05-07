@@ -110,6 +110,27 @@ jobs:
       - run: cargo xtask lint-migrations
       - run: cargo xtask check-cross-tenant
       - run: cargo xtask test-shape
+      - run: cargo xtask check-doc-fences
+      - run: cargo xtask check-api-doc
+
+  doc-links:
+    # Phase 5.6 — intra-repo link checking via lychee. External
+    # URLs are checked nightly only (rate-limited APIs make
+    # per-PR hostile); intra-repo paths run per PR. See
+    # `DOCUMENTATION_PLAN.md` § 11.2.
+    name: doc link check (lychee)
+    needs: prime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --offline
+            --no-progress
+            --include-fragments
+            './**/*.md'
+          fail: true
 
   openapi-drift:
     name: openapi drift

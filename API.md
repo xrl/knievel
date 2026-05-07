@@ -58,7 +58,7 @@ GET /v1/projects/{projectId}/<resource>?limit=100&cursor=<opaque>
 
 Response envelope:
 
-```json
+```json,ignore
 {
   "items": [ ... ],
   "nextCursor": "eyJ..." | null
@@ -346,7 +346,7 @@ Rate-limited more aggressively than production decisions (default
 
 **Response (200):**
 
-```json
+```json,ignore
 {
   "snapshotVersion": 1234567,
   "decisions":       { "header": [ ...same shape as /decisions... ] },
@@ -624,7 +624,7 @@ the org's Ad Library (§2.4).
 Body — `oneOf` on `creativeId` vs `adLibraryItemId` (exactly one
 required):
 
-```json
+```json,ignore
 // Inline creative.
 {
   "externalId": "ad-2024-spring-1",
@@ -635,7 +635,7 @@ required):
 }
 ```
 
-```json
+```json,ignore
 // Reference an org-shared library item.
 {
   "externalId":      "ad-2024-spring-1",

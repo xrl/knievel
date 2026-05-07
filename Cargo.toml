@@ -79,8 +79,20 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 anyhow      = { workspace = true }
+criterion   = "0.5"
 poem        = { workspace = true, features = ["test"] }
 serde_json  = { workspace = true }
 sqlx        = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate"] }
 testlib     = { path = "testlib" }
 tokio       = { workspace = true }
+
+# Phase 5.7 — criterion micro-benchmarks for the hot inner loops.
+# Macro load tests against a running knievel are documented in
+# `bench/macro/README.md`; they are operator-run, not CI.
+[[bench]]
+name    = "selection_pick"
+harness = false
+
+[[bench]]
+name    = "hmac_verify"
+harness = false

@@ -187,7 +187,7 @@ hop.
 
 ### 6.1 Test client + auth fixtures
 
-```rust
+```rust,ignore
 let app = knievel::test_app(pool).await;
 let resp = app
     .post("/v1/projects/pj_demo/decisions")
@@ -558,7 +558,7 @@ Inside the test suite, fixtures are constructed by small typed
 factories (`testlib::factory::*`) rather than sql files. Each
 factory accepts overrides:
 
-```rust
+```rust,ignore
 let advertiser = factory::advertiser(&pool, &project)
     .with_external_id("acme")
     .with_active(false)

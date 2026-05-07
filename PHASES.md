@@ -1962,18 +1962,18 @@ checklist green.
 
 - [x] **5.1** `README.md` — landing page with working quickstart.
       Refs: `DOCUMENTATION_PLAN.md` § 4.
-- [ ] **5.2** `ARCHITECTURE.md`.
+- [x] **5.2** `ARCHITECTURE.md`.
       Refs: `DOCUMENTATION_PLAN.md` § 5.
-- [ ] **5.3** `DEPLOYMENT.md`.
+- [x] **5.3** `DEPLOYMENT.md`.
       Refs: `DOCUMENTATION_PLAN.md` § 6.
-- [ ] **5.4** `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.
+- [x] **5.4** `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.
       Refs: `DOCUMENTATION_PLAN.md` § 7.
-- [ ] **5.5** `RELEASE_CHECKLIST.md`, `RELEASE_PLAYBOOK.md`.
+- [x] **5.5** `RELEASE_CHECKLIST.md`, `RELEASE_PLAYBOOK.md`.
       Refs: `DOCUMENTATION_PLAN.md` § 7.4, § 7.5.
-- [ ] **5.6** `xtask check-doc-fences`, `check-api-doc`, lychee
+- [x] **5.6** `xtask check-doc-fences`, `check-api-doc`, lychee
       link checking in CI.
       Refs: `DOCUMENTATION_PLAN.md` § 11.2.
-- [ ] **5.7** First benchmark run; `bench/results/v0.1.md`
+- [x] **5.7** First benchmark run; `bench/results/v0.1.md`
       committed.
       Refs: `REQUIREMENTS.md` § 9.2, `TESTING.md` § 8.
 - [ ] **5.8** Release-tagging workflow — tag `v0.1.0`, multi-arch

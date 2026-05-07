@@ -543,7 +543,7 @@ Read-only inventory (Channels, Priorities, AdTypes):
 
 The plan is per-handler role guards via a `poem-openapi` extractor:
 
-```rust
+```rust,ignore
 #[handler]
 async fn upsert_advertiser(
     Principal(p): Principal<RequireProject<Editor>>,

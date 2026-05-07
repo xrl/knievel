@@ -164,7 +164,7 @@ preflighted).
 
 Add to `src/config.rs::ApiConfig`:
 
-```rust
+```rust,ignore
 /// Origins permitted to make cross-origin requests. Empty
 /// (default) disables the CORS layer entirely — same-origin
 /// only. Each entry is a literal origin like
