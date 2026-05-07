@@ -1960,7 +1960,7 @@ checklist green.
 
 **Tasks (broad strokes):**
 
-- [ ] **5.1** `README.md` — landing page with working quickstart.
+- [x] **5.1** `README.md` — landing page with working quickstart.
       Refs: `DOCUMENTATION_PLAN.md` § 4.
 - [ ] **5.2** `ARCHITECTURE.md`.
       Refs: `DOCUMENTATION_PLAN.md` § 5.
