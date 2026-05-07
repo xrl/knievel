@@ -2248,7 +2248,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       that exercises the typed client + Query + Router stack.
       Cursor pagination wired even though `next_cursor` is
       still `null` server-side (envelope is real today).
-- [ ] **7.6** Resource audit views (read-only). Tables for
+- [x] **7.6** Resource audit views (read-only). Tables for
       advertisers, campaigns, flights, ads, creatives, sites,
       zones, taxonomy, creative templates, ad library. Server-
       side pagination/sort/filter against the cursor envelope.
