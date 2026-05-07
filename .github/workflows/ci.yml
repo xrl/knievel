@@ -50,11 +50,11 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: knievel_app
-          POSTGRES_PASSWORD: dev
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: knievel
         options: >-
-          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-cmd "pg_isready -U postgres -d knievel"
           --health-interval 2s
           --health-timeout 2s
           --health-retries 30
@@ -66,6 +66,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
+      - name: Provision knievel_app (NOSUPERUSER) for RLS-honest tests
+        # Postgres 16.13 rejects ALTER ROLE-self-NOSUPERUSER even
+        # for verified superusers (rolsuper=true, is_superuser=on)
+        # — see PHASES.md follow-up note below for the diagnostic.
+        # Workaround: use `postgres` as the bootstrap superuser
+        # and create knievel_app as NOSUPERUSER from the start.
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d knievel <<'EOSQL'
+            CREATE ROLE knievel_app WITH NOSUPERUSER CREATEDB LOGIN PASSWORD 'dev';
+            GRANT ALL PRIVILEGES ON DATABASE knievel TO knievel_app;
+            GRANT ALL PRIVILEGES ON SCHEMA public TO knievel_app;
+          EOSQL
       - run: |
           cargo nextest run --workspace --locked \
             -E 'kind(test) & binary(/^integration/)' \
@@ -79,11 +91,11 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: knievel_app
-          POSTGRES_PASSWORD: dev
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: knievel
         options: >-
-          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-cmd "pg_isready -U postgres -d knievel"
           --health-interval 2s
           --health-timeout 2s
           --health-retries 30
@@ -95,6 +107,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
+      - name: Provision knievel_app (NOSUPERUSER) for RLS-honest tests
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d knievel <<'EOSQL'
+            CREATE ROLE knievel_app WITH NOSUPERUSER CREATEDB LOGIN PASSWORD 'dev';
+            GRANT ALL PRIVILEGES ON DATABASE knievel TO knievel_app;
+            GRANT ALL PRIVILEGES ON SCHEMA public TO knievel_app;
+          EOSQL
       - run: |
           cargo nextest run --workspace --locked \
             -E 'kind(test) & binary(/^api/)' \
@@ -220,11 +239,11 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: knievel_app
-          POSTGRES_PASSWORD: dev
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: knievel
         options: >-
-          --health-cmd "pg_isready -U knievel_app -d knievel"
+          --health-cmd "pg_isready -U postgres -d knievel"
           --health-interval 2s
           --health-timeout 2s
           --health-retries 30
@@ -236,6 +255,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-setup
       - uses: taiki-e/install-action@nextest
+      - name: Provision knievel_app (NOSUPERUSER) for RLS-honest tests
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d knievel <<'EOSQL'
+            CREATE ROLE knievel_app WITH NOSUPERUSER CREATEDB LOGIN PASSWORD 'dev';
+            GRANT ALL PRIVILEGES ON DATABASE knievel TO knievel_app;
+            GRANT ALL PRIVILEGES ON SCHEMA public TO knievel_app;
+          EOSQL
       - name: Run shard ${{ matrix.shard }}/4
         run: |
           cargo nextest run --workspace --locked \
