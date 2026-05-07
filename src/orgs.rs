@@ -14,7 +14,7 @@
 
 use poem::web::Data;
 use poem_openapi::{
-    param::{Header, Path},
+    param::{Header, Path, Query},
     payload::Json,
     ApiResponse, Object, OpenApi,
 };
@@ -85,6 +85,66 @@ pub struct ProjectResponse {
     pub updated_at: String,
 }
 
+/// Cursor-paginated envelope for `listProjects` (Phase 7.5).
+/// Mirrors the shape from `listAdvertisers` etc.; `next_cursor`
+/// is null today (orgs typically host single-digit project
+/// counts, so the bounded-list path returns everything in one
+/// page). Wired anyway so the SPA's pagination plumbing is
+/// real now.
+#[derive(Object, serde::Serialize, serde::Deserialize)]
+pub struct ProjectList {
+    pub items: Vec<ProjectResponse>,
+    pub next_cursor: Option<String>,
+}
+
+/// Org metadata, returned by `getOrg` (Phase 7.5). Same shape
+/// as `ProjectResponse` since the columns mirror — orgs and
+/// projects share the `id / external_id / name / is_active /
+/// etag / created_at / updated_at` core.
+#[derive(Object, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OrgResponse {
+    pub id: String,
+    pub external_id: Option<String>,
+    pub name: String,
+    pub is_active: bool,
+    pub etag: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct OrgRow {
+    id: String,
+    external_id: Option<String>,
+    name: String,
+    is_active: bool,
+    etag: String,
+    created_at: String,
+    updated_at: String,
+}
+
+const ORG_SELECT_COLS: &str = r#"
+    id, external_id, name, is_active, etag,
+    to_char(created_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+    to_char(updated_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at
+"#;
+
+impl From<OrgRow> for OrgResponse {
+    fn from(r: OrgRow) -> Self {
+        Self {
+            id: r.id,
+            external_id: r.external_id,
+            name: r.name,
+            is_active: r.is_active,
+            etag: r.etag,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
 #[derive(Object)]
 pub struct ErrorEnvelope {
     pub error: ErrorBody,
@@ -137,6 +197,30 @@ pub enum GetProjectResponse {
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
     NotFound(Json<ErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+
+#[derive(ApiResponse)]
+pub enum GetOrgResponse {
+    #[oai(status = 200)]
+    Ok(Json<OrgResponse>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
+    #[oai(status = 404)]
+    NotFound(Json<ErrorEnvelope>),
+    #[oai(status = 500)]
+    Internal(Json<ErrorEnvelope>),
+}
+
+#[derive(ApiResponse)]
+pub enum ListProjectsResponse {
+    #[oai(status = 200)]
+    Ok(Json<ProjectList>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
+    #[oai(status = 403)]
+    Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 500)]
     Internal(Json<ErrorEnvelope>),
 }
@@ -424,6 +508,151 @@ impl OrgApi {
             Err(e) => {
                 tracing::error!(error = %e, "get_project select failed");
                 GetProjectResponse::Internal(Json(ErrorEnvelope::of("db_error", "select failed")))
+            }
+        }
+    }
+
+    /// Org metadata (Phase 7.5). Powers the admin SPA's
+    /// org-dashboard breadcrumbs + project-list page header.
+    /// Multi-org access isn't a real feature yet; the auth
+    /// check rejects when the principal's `org_id` doesn't
+    /// match the path, so this is effectively "fetch my org."
+    #[oai(path = "/v1/orgs/:org_id", method = "get", operation_id = "getOrg")]
+    async fn get_org(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        org_id: Path<String>,
+    ) -> GetOrgResponse {
+        let principal = auth.0;
+        let path_org_id = org_id.0;
+
+        if principal.org_id != path_org_id {
+            return GetOrgResponse::Forbidden(Json(ErrorEnvelope::of(
+                "wrong_tenant",
+                "principal's org_id does not match the path",
+            )));
+        }
+        if !principal.has_role_at_least(Role::Reader) {
+            return GetOrgResponse::Forbidden(Json(ErrorEnvelope::of(
+                "role_insufficient",
+                "reading org metadata requires reader or higher",
+            )));
+        }
+
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => {
+                return GetOrgResponse::Internal(Json(ErrorEnvelope::of(
+                    "no_db",
+                    "no database configured",
+                )))
+            }
+        };
+
+        let mut tx = match db::begin_bound(pool, &path_org_id, None).await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!(error = %e, "begin_bound failed");
+                return GetOrgResponse::Internal(Json(ErrorEnvelope::of(
+                    "db_error",
+                    "could not begin transaction",
+                )));
+            }
+        };
+
+        let select_sql =
+            format!("SELECT {ORG_SELECT_COLS} FROM knievel.organizations WHERE id = $1");
+        let row: Result<Option<OrgRow>, _> = sqlx::query_as(&select_sql)
+            .bind(&path_org_id)
+            .fetch_optional(&mut *tx)
+            .await;
+        match row {
+            Ok(Some(row)) => GetOrgResponse::Ok(Json(row.into())),
+            Ok(None) => {
+                GetOrgResponse::NotFound(Json(ErrorEnvelope::of("not_found", "org not found")))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "get_org select failed");
+                GetOrgResponse::Internal(Json(ErrorEnvelope::of("db_error", "select failed")))
+            }
+        }
+    }
+
+    /// List projects under an org (Phase 7.5). The cursor
+    /// envelope is wired so the SPA's pagination plumbing is
+    /// real, but `next_cursor` is always `null` today — the
+    /// `(created_at, id)` tuple-cursor that TEXT-id endpoints
+    /// need is deferred to Phase 6.5 (per CLAUDE.md "Open
+    /// known gaps"). For now an org's full project set comes
+    /// back in one page; orgs typically host single-digit
+    /// project counts, so this is fine.
+    #[oai(
+        path = "/v1/orgs/:org_id/projects",
+        method = "get",
+        operation_id = "listProjects"
+    )]
+    async fn list_projects(
+        &self,
+        auth: BearerAuth,
+        state: Data<&AppState>,
+        org_id: Path<String>,
+        // `limit` accepted but capped (DoS protection); the
+        // cursor envelope is non-paginating today.
+        limit: Query<Option<i64>>,
+    ) -> ListProjectsResponse {
+        let principal = auth.0;
+        let path_org_id = org_id.0;
+
+        if principal.org_id != path_org_id {
+            return ListProjectsResponse::Forbidden(Json(ErrorEnvelope::of(
+                "wrong_tenant",
+                "principal's org_id does not match the path",
+            )));
+        }
+        if !principal.has_role_at_least(Role::Reader) {
+            return ListProjectsResponse::Forbidden(Json(ErrorEnvelope::of(
+                "role_insufficient",
+                "listing projects requires reader or higher",
+            )));
+        }
+
+        let limit_value = limit.0.unwrap_or(500).clamp(1, 500);
+
+        let pool = match state.0.db.as_ref() {
+            Some(p) => p,
+            None => {
+                return ListProjectsResponse::Internal(Json(ErrorEnvelope::of(
+                    "no_db",
+                    "no database configured",
+                )))
+            }
+        };
+
+        let mut tx = match db::begin_bound(pool, &path_org_id, None).await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!(error = %e, "begin_bound failed");
+                return ListProjectsResponse::Internal(Json(ErrorEnvelope::of(
+                    "db_error",
+                    "could not begin transaction",
+                )));
+            }
+        };
+
+        let sql = format!(
+            "SELECT {PROJECT_SELECT_COLS} FROM knievel.projects \
+             ORDER BY created_at DESC, id DESC LIMIT $1"
+        );
+        let q = sqlx::query_as::<_, ProjectRow>(&sql).bind(limit_value);
+        match q.fetch_all(&mut *tx).await {
+            Ok(rows) => ListProjectsResponse::Ok(Json(ProjectList {
+                items: rows.into_iter().map(Into::into).collect(),
+                next_cursor: None,
+            })),
+            Err(e) => {
+                tracing::error!(error = %e, "list_projects select failed");
+                ListProjectsResponse::Internal(Json(ErrorEnvelope::of("db_error", "select failed")))
             }
         }
     }

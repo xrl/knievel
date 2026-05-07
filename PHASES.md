@@ -2243,7 +2243,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       network-error each get the documented UX shape.
       Refs: `UI.md` "Auth", "Error handling"; `AUTH.md`
       "Keycloak Setup — Human Admin UI (PKCE)."
-- [ ] **7.5** Org/project browser. List + detail for `/v1/orgs`
+- [x] **7.5** Org/project browser. List + detail for `/v1/orgs`
       and `/v1/projects/{project_id}`. First end-to-end slice
       that exercises the typed client + Query + Router stack.
       Cursor pagination wired even though `next_cursor` is

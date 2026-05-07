@@ -1,56 +1,36 @@
-import { useEffect } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
-import { Anchor, Code, Container, Group, Stack, Text, Title } from '@mantine/core';
+// `/` — entry redirect. Every signed-in user has exactly one
+// org (per the v0 principal model); we send them straight to
+// `/orgs/{org_id}` so the breadcrumb is grounded from the
+// first navigation. Auth guard runs first; if no credential
+// is present, RequireAuth bounces to /oidc/login or /login.
 
-import { apiClient } from '../api/client';
-import { notifyApiError } from '../api/errors';
+import { useEffect } from 'react';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Center, Loader } from '@mantine/core';
+
+import { useWhoami } from '../auth/whoamiQuery';
 import { RequireAuth } from '../auth/RequireAuth';
 
 export const Route = createFileRoute('/')({
   component: () => (
     <RequireAuth>
-      <PlaceholderHome />
+      <HomeRedirect />
     </RequireAuth>
   ),
 });
 
-function PlaceholderHome() {
-  // First end-to-end exercise of the typed client: hit
-  // /v1/whoami and render the principal. Phase 7.5 replaces
-  // this with the real org/project browser.
-  const { data, error } = useQuery({
-    queryKey: ['whoami'],
-    queryFn: async () => {
-      const { data, error } = await apiClient.GET('/v1/whoami');
-      if (error) throw error;
-      return data;
-    },
-  });
-
+function HomeRedirect() {
+  const { data } = useWhoami();
+  const navigate = useNavigate();
   useEffect(() => {
-    if (error) notifyApiError(error);
-  }, [error]);
+    if (data) {
+      navigate({ to: `/orgs/${data.org_id}`, replace: true });
+    }
+  }, [data, navigate]);
 
   return (
-    <Container size="md" py="xl">
-      <Stack gap="md">
-        <Group justify="space-between" align="center">
-          <Title order={1}>Knievel Admin</Title>
-          <Anchor href="/oidc/logout">Sign out</Anchor>
-        </Group>
-        <Text c="dimmed">
-          Phase 7.4 placeholder. Real routes land in 7.5+. See <Code>UI.md</Code> and{' '}
-          <Code>PHASES.md</Code> for the plan.
-        </Text>
-        {data && (
-          <Stack gap="xs">
-            <Text fw={600}>Signed in as</Text>
-            <Code block>{JSON.stringify(data, null, 2)}</Code>
-          </Stack>
-        )}
-        {error && <Text c="red">Failed to load whoami: {(error as Error).message}</Text>}
-      </Stack>
-    </Container>
+    <Center mih={200}>
+      <Loader />
+    </Center>
   );
 }

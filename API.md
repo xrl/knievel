@@ -406,7 +406,8 @@ Admin).
 
 | Verb | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/orgs/{org_id}/projects` | List. Filter: `external_id`, `is_active`. |
+| `GET` | `/v1/orgs/{org_id}` | Read org metadata (id, external_id, name, is_active, etag, created_at, updated_at). Powers the admin SPA's org-dashboard breadcrumbs (`UI.md` "Information architecture"). Min role: `reader`. |
+| `GET` | `/v1/orgs/{org_id}/projects` | List. Filter: `external_id`, `is_active`. Cursor envelope wired (Phase 7.5); `next_cursor` is `null` today — TEXT-id cursor pagination is deferred to Phase 6.5. |
 | `POST` | `/v1/orgs/{org_id}/projects` | Create. Idempotent on `external_id`. |
 | `POST` | `/v1/orgs/{org_id}/projects:batchUpsert` | Bulk by `external_id`. |
 | `GET` | `/v1/orgs/{org_id}/projects/{project_id}` | Read. |

@@ -176,6 +176,62 @@ paths:
       security:
       - BearerAuth: []
       operationId: createProject
+    get:
+      tags:
+      - Orgs
+      summary: |-
+        List projects under an org (Phase 7.5). The cursor
+        envelope is wired so the SPA's pagination plumbing is
+        real, but `next_cursor` is always `null` today — the
+        `(created_at, id)` tuple-cursor that TEXT-id endpoints
+        need is deferred to Phase 6.5 (per CLAUDE.md "Open
+        known gaps"). For now an org's full project set comes
+        back in one page; orgs typically host single-digit
+        project counts, so this is fine.
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      - name: limit
+        schema:
+          type: integer
+          format: int64
+        in: query
+        required: false
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: listProjects
   /v1/orgs/{org_id}/projects/{project_id}:
     get:
       tags:
@@ -224,6 +280,52 @@ paths:
       security:
       - BearerAuth: []
       operationId: getProject
+  /v1/orgs/{org_id}:
+    get:
+      tags:
+      - Orgs
+      summary: |-
+        Org metadata (Phase 7.5). Powers the admin SPA's
+        org-dashboard breadcrumbs + project-list page header.
+        Multi-org access isn't a real feature yet; the auth
+        check rejects when the principal's `org_id` doesn't
+        match the path, so this is effectively "fetch my org."
+      parameters:
+      - name: org_id
+        schema:
+          type: string
+        in: path
+        required: true
+        deprecated: false
+        explode: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/OrgResponse'
+        '403':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      operationId: getOrg
   /v1/orgs/{org_id}/tokens:
     post:
       tags:
@@ -4223,6 +4325,36 @@ components:
             shape.
         jwks_url:
           type: string
+    OrgResponse:
+      type: object
+      title: OrgResponse
+      description: |-
+        Org metadata, returned by `getOrg` (Phase 7.5). Same shape
+        as `ProjectResponse` since the columns mirror — orgs and
+        projects share the `id / external_id / name / is_active /
+        etag / created_at / updated_at` core.
+      required:
+      - id
+      - name
+      - is_active
+      - etag
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        external_id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+        etag:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
     Priority:
       type: object
       title: Priority
@@ -4252,6 +4384,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Priority'
+        next_cursor:
+          type: string
+    ProjectList:
+      type: object
+      title: ProjectList
+      description: |-
+        Cursor-paginated envelope for `listProjects` (Phase 7.5).
+        Mirrors the shape from `listAdvertisers` etc.; `next_cursor`
+        is null today (orgs typically host single-digit project
+        counts, so the bounded-list path returns everything in one
+        page). Wired anyway so the SPA's pagination plumbing is
+        real now.
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectResponse'
         next_cursor:
           type: string
     ProjectResponse:

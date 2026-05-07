@@ -82,7 +82,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List projects under an org (Phase 7.5). The cursor
+         *     envelope is wired so the SPA's pagination plumbing is
+         *     real, but `next_cursor` is always `null` today — the
+         *     `(created_at, id)` tuple-cursor that TEXT-id endpoints
+         *     need is deferred to Phase 6.5 (per CLAUDE.md "Open
+         *     known gaps"). For now an org's full project set comes
+         *     back in one page; orgs typically host single-digit
+         *     project counts, so this is fine.
+         */
+        get: operations["listProjects"];
         put?: never;
         /**
          * Create a project under an org. Honors `Idempotency-Key`
@@ -107,6 +117,29 @@ export interface paths {
         };
         /** Read a single project by id (path). */
         get: operations["getProject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{org_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Org metadata (Phase 7.5). Powers the admin SPA's
+         *     org-dashboard breadcrumbs + project-list page header.
+         *     Multi-org access isn't a real feature yet; the auth
+         *     check rejects when the principal's `org_id` doesn't
+         *     match the path, so this is effectively "fetch my org."
+         */
+        get: operations["getOrg"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1346,6 +1379,22 @@ export interface components {
             claim_source: string;
             jwks_url?: string;
         };
+        /**
+         * OrgResponse
+         * @description Org metadata, returned by `getOrg` (Phase 7.5). Same shape
+         *     as `ProjectResponse` since the columns mirror — orgs and
+         *     projects share the `id / external_id / name / is_active /
+         *     etag / created_at / updated_at` core.
+         */
+        OrgResponse: {
+            id: string;
+            external_id?: string;
+            name: string;
+            is_active: boolean;
+            etag: string;
+            created_at: string;
+            updated_at: string;
+        };
         /** Priority */
         Priority: {
             /** Format: int64 */
@@ -1358,6 +1407,19 @@ export interface components {
         /** PriorityList */
         PriorityList: {
             items: components["schemas"]["Priority"][];
+            next_cursor?: string;
+        };
+        /**
+         * ProjectList
+         * @description Cursor-paginated envelope for `listProjects` (Phase 7.5).
+         *     Mirrors the shape from `listAdvertisers` etc.; `next_cursor`
+         *     is null today (orgs typically host single-digit project
+         *     counts, so the bounded-list path returns everything in one
+         *     page). Wired anyway so the SPA's pagination plumbing is
+         *     real now.
+         */
+        ProjectList: {
+            items: components["schemas"]["ProjectResponse"][];
             next_cursor?: string;
         };
         /** ProjectResponse */
@@ -1626,6 +1688,53 @@ export interface operations {
             };
         };
     };
+    listProjects: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ProjectList"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     createProject: {
         parameters: {
             query?: never;
@@ -1707,6 +1816,51 @@ export interface operations {
                 };
                 content: {
                     "application/json; charset=utf-8": components["schemas"]["ProjectResponse"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getOrg: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["OrgResponse"];
                 };
             };
             403: {
