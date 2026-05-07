@@ -37,7 +37,7 @@ control-plane + kubelet on the runner, no cloud dependency.
 | `kind` | 0.24+ | Single-node cluster, ~30 s boot. |
 | `kubectl` | 1.30+ | Whatever ships with the runner. |
 | `helm` | 3.16+ | Same version pinned in `ci.yml` for `helm-lint`. |
-| Container image | `ghcr.io/knievel-ads/knievel:<tag>` | Loaded into the kind node via `kind load docker-image`. |
+| Container image | `knievel:ci` | Built in-job from the in-tree `Dockerfile` and loaded into the kind node via `kind load docker-image`. Main-branch pushes don't publish to ghcr (Phase 4.3 tag-only policy), so the image is local-only. |
 | Postgres | `postgres:16` | Same image as compose; no operator/CRD. |
 
 No cloud creds, no DNS, no TLS — kind runs locally on the
@@ -48,9 +48,9 @@ the post-v0 chaos suite (`REQUIREMENTS.md` § 10.9).
 ## 3. Cluster + namespace setup
 
 ```sh
+docker build -t knievel:ci .
 kind create cluster --name knievel-e2e --wait 60s
-kind load docker-image ghcr.io/knievel-ads/knievel:<tag> \
-  --name knievel-e2e
+kind load docker-image knievel:ci --name knievel-e2e
 kubectl create namespace knievel
 kubectl config set-context --current --namespace knievel
 ```
@@ -112,8 +112,8 @@ self-alter even from a verified superuser).
 ```sh
 helm install knievel charts/knievel \
   --namespace knievel \
-  --set image.repository=ghcr.io/knievel-ads/knievel \
-  --set image.tag=<tag> \
+  --set image.repository=knievel \
+  --set image.tag=ci \
   --set image.pullPolicy=Never \
   --set database.url='postgres://knievel_app:dev@knievel-postgres:5432/knievel' \
   --set hmac.defaultSecret=test-hmac-secret-32-bytes-of-data!! \
@@ -145,15 +145,18 @@ sleep 2  # let the forwarder bind
 ### 6.1 `/version` returns the running build
 
 ```sh
-curl -fsS http://localhost:8080/version | jq -e '
-  .package_version == "<tag-without-v>"
-  and .git_sha != null
-  and .build_timestamp != null
+curl -fsS http://localhost:8080/version \
+  | jq -e --arg sha "$GITHUB_SHA" '
+    .git_sha == $sha
+    and .package_version != null
+    and .build_timestamp != null
 '
 ```
 
-Catches: image-tag-doesn't-match-what-Helm-installed, or the
-binary inside the image was built without `build.rs` running.
+Catches: the chart didn't roll out the freshly-built image
+(stale ConfigMap, an `imagePullPolicy: Always` quietly
+falling back to ghcr instead of the loaded local image), or
+the binary was built without `build.rs` running.
 
 ### 6.2 `/healthz` and `/readyz` are reachable
 
@@ -182,12 +185,14 @@ lands, this assertion goes from "should serve a page" to
 
 ```sh
 curl -fsS http://localhost:8080/openapi.json \
-  | jq -e '.info.version == "<tag-without-v>"'
+  | jq -e '.info.version != null and (.paths | length) > 0'
 ```
 
-Catches: the spec served by the running binary doesn't
-match the tag (image-rebuild was skipped, or the tag was
-re-pushed onto a different commit).
+Catches: the spec endpoint isn't wired in this build, or
+the binary booted with an empty router. Spec drift against
+the committed `openapi.yaml` is gated separately by
+`xtask openapi --check`; this assertion only proves the
+running binary serves *a* spec.
 
 ### 6.5 Migrations took over Postgres
 
@@ -253,26 +258,39 @@ run leaves no orphan-images on the runner's pruning policy.
 
 New workflow `.github/workflows/kind-e2e.yml`:
 
-- Trigger: on `v*` tag push (after `release.yml` publishes
-  the image); also `workflow_dispatch` for manual exercise.
+- Trigger: on `push` (branches: `[main]`) and on
+  `pull_request`; also `workflow_dispatch` for manual
+  exercise. Tag-time runs aren't needed — `release.yml`
+  republishes the same image whose chart we already proved
+  good on the merge to main, so the chart-correctness signal
+  belongs at PR / main-push time, not at tag time.
 - Job sequence:
-  1. Wait for `release.yml`'s `publish-image` job (via
-     `workflow_run` predicate, or repeat-until-image-resolves
-     loop with a 5-min ceiling).
-  2. `kind create cluster`.
-  3. Apply manifests + helm install + curl checks above.
-  4. Capture `kubectl describe pod -A` and the Deployment's
+  1. Build the image in-runner via `docker build -t
+     knievel:ci .`. The `Swatinem/rust-cache@v2` layer the
+     `prime` job already populates keeps cargo's deps warm
+     across runs; the dependency-prefetch stage in the
+     `Dockerfile` (Phase 4.1) means an iterative source
+     change rebuilds only the binary.
+  2. `kind create cluster --name knievel-e2e`.
+  3. `kind load docker-image knievel:ci`.
+  4. Apply manifests + helm install + curl checks above.
+  5. Capture `kubectl describe pod -A` and the Deployment's
      events on failure as workflow artifacts (debugging into
      CI without a kubectl shell is otherwise miserable).
-  5. Delete cluster on success or failure.
-- Wall-time budget: 4 minutes. Cluster boot is the dominant
-  cost (~30 s); image pull is ~10 s after `kind load`; helm
-  install is ~20 s; the assertion script is ~30 s.
+  6. Delete cluster on success or failure.
+- Wall-time budget: 8 minutes from a warm cache. Image build
+  dominates (~3 min warm, ~30 s if only source changed);
+  cluster boot ~30 s; `kind load` ~10 s; helm install ~20 s;
+  the assertion script ~30 s. Cold-cache builds (first run
+  after a major dep bump) can hit ~10 min; budget the
+  runner timeout at 15 min.
 
-Failure of this workflow blocks the GitHub Release flag from
-flipping to "ready" but doesn't yank a published image — the
-release-readiness signal lives in
-`RELEASE_CHECKLIST.md`.
+Failure of this workflow fails the per-PR check, blocking
+the merge in the same way `xtask-lints` and `openapi-drift`
+do. Tag-time release readiness still gates on
+`RELEASE_CHECKLIST.md`; the kind-helm signal flows into
+that gate transitively (every release tag is built from a
+main commit that already passed kind-e2e).
 
 ## 9. Out of scope (and why)
 

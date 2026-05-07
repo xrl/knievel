@@ -1649,6 +1649,37 @@ flows from a working binary in a real container.
       + the freshly built gem actually round-tripping the
       Enumerable contract end-to-end.
 
+- [ ] **4.11** Kind-helm chart-correctness e2e gate. New
+      `.github/workflows/kind-e2e.yml` fires on `push`
+      (branches: `[main]`) + `pull_request` + `workflow_dispatch`
+      — not on tags; chart correctness is a per-commit signal,
+      not a release-time one. Job builds `knievel:ci` in-runner
+      (main pushes don't publish to ghcr per 4.3's tag-only
+      policy), boots a single-node `kind` cluster, loads the
+      image, applies a minimal Postgres `Deployment`+`Service`
+      under `examples/kind-e2e/`, runs `helm install
+      charts/knievel` against the loaded image, and walks the
+      assertion script in `E2E.md` § 6 (`/version` git_sha
+      matches `${{ github.sha }}`, `/healthz` + `/readyz`,
+      admin SPA at `/admin/`, `/openapi.json` parses,
+      migrations populated `knievel.*`, decision round-trip
+      against a seeded org/project). Wall-time budget 8 min
+      warm / 15 min cold; failure captures
+      `kubectl describe pod -A` + Deployment events as
+      artifacts before tearing the cluster down.
+
+      **Dependency:** the `/admin/` assertion (E2E.md § 6.3)
+      only goes live once **7.11** ships the SPA bundle into
+      the image. Until 7.11 lands, that single check should
+      land `if: false`-gated with a comment naming 7.11; the
+      rest of the assertion set runs unconditionally.
+
+      Refs: `E2E.md` (whole file — the canonical plan),
+      `REQUIREMENTS.md` § 8.1, `TESTING.md` § 7,
+      `RELEASE_CHECKLIST.md` (transitive release-readiness
+      signal: every tag is cut from a main commit that
+      already passed this gate).
+
 **Milestone:** `docker compose up` boots a working knievel against
 Postgres + MinIO + wiremock; `helm install` against a real
 cluster pulls the published `ghcr.io/knievel-ads/knievel` image;
