@@ -569,7 +569,7 @@ poem = { workspace = true, features = ["static-files"] }
 
 The mount in `src/server.rs`:
 
-```rust
+```rust,ignore
 use poem::endpoint::StaticFilesEndpoint;
 
 if let Some(dir) = &cfg.admin_ui.static_dir {
