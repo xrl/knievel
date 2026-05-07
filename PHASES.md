@@ -2214,7 +2214,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       peer of `openapi-drift`. The generated file is checked
       in, not gitignored.
       Refs: `UI.md` "OpenAPI codegen"; `xtask/src/openapi.rs`.
-- [ ] **7.4** Auth in the UI — **OIDC Authorization Code +
+- [x] **7.4** Auth in the UI — **OIDC Authorization Code +
       PKCE primary, paste-a-token fallback**. Wires
       `react-oidc-context` (over `oidc-client-ts`) against
       Keycloak's admin-UI client (public client, PKCE
@@ -2373,6 +2373,49 @@ side channels. UI + API ship as a single
 headless API when `KNIEVEL_ADMIN_UI__STATIC_DIR` is unset.
 
 ### Notes
+
+**Note (7.4):** Landed across three commits per the
+"sub-commit prefixed `Phase X.Y (partial):`" convention used
+elsewhere (Phase 4.10): one for the API-side handshake
+(`/admin/config.json` + `/v1/whoami` + `admin_ui:` config),
+one for the UI-side OIDC plumbing (UserManager + routes +
+RequireAuth + paste-token form + typed fetch wrapper), and a
+third for silent refresh + the unified error-notification
+helper.
+
+Three subtleties worth not relearning:
+
+- **`oidc-client-ts` access tokens are sync-readable only via
+  a cache.** `UserManager.getUser()` is async, but the fetch
+  wrapper needs the bearer synchronously per request. The
+  fix: `userManager.ts` keeps a module-level `cachedUser`
+  primed at boot and updated via `addUserLoaded` /
+  `addUserUnloaded` / `addAccessTokenExpired`. Reads stay
+  zero-allocation.
+
+- **`openapi-fetch`'s discriminated union confuses TS's
+  narrowing.** `const r = await client.GET(...)` is
+  `{ data, error?: never, response } | { data?: never, error,
+  response }`. After `if (r.error || !r.data)` the compiler
+  collapses `r` to `never` and `r.response.status` errors as
+  "property does not exist on never." Workaround: pull
+  `result.response.status` BEFORE the conditional (where TS
+  still sees the full union). Documented in
+  `src/auth/PasteTokenLogin.tsx`.
+
+- **Silent-refresh retry is GET-only.** POST / PATCH bodies
+  may have been consumed by the time the 401 arrives, so
+  cloning the original Request to retry doesn't generalize.
+  Non-safe methods fail with 401 and the next request picks
+  up the refreshed token; the user sees one error toast
+  before TanStack Query re-fetches. Documented in
+  `src/api/client.ts`.
+
+The error-notification helper (`src/api/errors.ts`) covers
+all nine UI.md "Error handling" status branches via Mantine
+notifications with `X-Request-Id` appended for support
+correlation. Inline 403 panels and field-level mapping for
+400/422 land in 7.5+ once the views with real forms exist.
 
 **Note (7.3):** `xtask ui-client --check` writes the fresh
 codegen to `target/xtask-ui-client-check.ts` (gitignored

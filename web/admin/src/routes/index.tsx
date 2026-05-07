@@ -1,8 +1,10 @@
+import { useEffect } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Anchor, Code, Container, Group, Stack, Text, Title } from '@mantine/core';
 
 import { apiClient } from '../api/client';
+import { notifyApiError } from '../api/errors';
 import { RequireAuth } from '../auth/RequireAuth';
 
 export const Route = createFileRoute('/')({
@@ -25,6 +27,10 @@ function PlaceholderHome() {
       return data;
     },
   });
+
+  useEffect(() => {
+    if (error) notifyApiError(error);
+  }, [error]);
 
   return (
     <Container size="md" py="xl">
