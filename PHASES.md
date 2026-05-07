@@ -2254,7 +2254,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       side pagination/sort/filter against the cursor envelope.
       Detail panes inspect raw JSON for fields the table
       doesn't surface.
-- [ ] **7.7** Editing surface. PATCH/POST forms with
+- [x] **7.7** Editing surface. PATCH/POST forms with
       react-hook-form + zod, idempotency-key handling
       (UUIDv4 minted client-side per submit), optimistic
       invalidation. Roll out per resource behind a feature

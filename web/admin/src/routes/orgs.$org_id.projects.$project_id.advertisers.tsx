@@ -2,9 +2,9 @@
 // read-only list of advertisers. Phase 7.6.
 
 import { useEffect, useState } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Badge } from '@mantine/core';
+import { Badge, Button, Group } from '@mantine/core';
 
 import { apiClient } from '../api/client';
 import type { components } from '../api/generated';
@@ -44,6 +44,11 @@ function Advertisers() {
 
   return (
     <WorkspaceShell orgId={org_id} projectId={project_id}>
+      <Group justify="flex-end" mb="sm">
+        <Button component={Link} to={`/orgs/${org_id}/projects/${project_id}/advertisers/new`}>
+          New advertiser
+        </Button>
+      </Group>
       <DataTable
         title="Advertisers"
         description="Click a row to inspect the full record."

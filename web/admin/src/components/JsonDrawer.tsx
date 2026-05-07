@@ -5,16 +5,20 @@
 // the JSON drawer is the universal "what does this row
 // look like" surface.
 
-import { Drawer, Code, ScrollArea, Stack, Text, Title } from '@mantine/core';
+import type { ReactNode } from 'react';
+import { Code, Drawer, ScrollArea, Stack, Text, Title } from '@mantine/core';
 
 interface Props<T> {
   opened: boolean;
   onClose: () => void;
   row: T | null;
   title?: string;
+  /** Optional extras rendered above the JSON dump — used by
+   *  e.g. creatives to slot in the image upload widget. */
+  extras?: ReactNode;
 }
 
-export function JsonDrawer<T>({ opened, onClose, row, title }: Props<T>) {
+export function JsonDrawer<T>({ opened, onClose, row, title, extras }: Props<T>) {
   return (
     <Drawer
       opened={opened}
@@ -25,11 +29,15 @@ export function JsonDrawer<T>({ opened, onClose, row, title }: Props<T>) {
     >
       {row ? (
         <ScrollArea h="calc(100vh - 80px)">
-          <Stack gap="xs">
-            <Text size="sm" c="dimmed">
-              Read-only view. Editing surfaces land in 7.7.
-            </Text>
-            <Code block>{JSON.stringify(row, null, 2)}</Code>
+          <Stack gap="md">
+            {extras}
+            <Stack gap="xs">
+              <Text size="sm" c="dimmed">
+                Raw record. Field-level editing lands per resource as the editing surface (Phase
+                7.7) rolls out beyond advertisers.
+              </Text>
+              <Code block>{JSON.stringify(row, null, 2)}</Code>
+            </Stack>
           </Stack>
         </ScrollArea>
       ) : null}

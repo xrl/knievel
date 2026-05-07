@@ -12,6 +12,7 @@ import { RequireAuth } from '../auth/RequireAuth';
 import { WorkspaceShell } from '../components/WorkspaceShell';
 import { DataTable } from '../components/DataTable';
 import { JsonDrawer } from '../components/JsonDrawer';
+import { CreativeImageUpload } from '../components/CreativeImageUpload';
 
 type Creative = components['schemas']['Creative'];
 
@@ -70,6 +71,11 @@ function Creatives() {
         onClose={() => setSelected(null)}
         row={selected}
         title={selected?.name ?? `Creative ${selected?.id}`}
+        extras={
+          selected ? (
+            <CreativeImageUpload projectId={project_id} creativeId={selected.id} />
+          ) : undefined
+        }
       />
     </WorkspaceShell>
   );
