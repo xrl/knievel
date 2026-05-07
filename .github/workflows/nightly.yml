@@ -87,3 +87,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: echo "TODO — Phase 1.9 — multi-Postgres-version integration matrix"
+
+  ui-e2e:
+    # Phase 7.10: Playwright e2e against `pnpm preview`. Browser
+    # binaries get installed on demand here (not in per-PR ci.yml)
+    # because they add ~250 MB and aren't worth bloating the
+    # default lane.
+    name: ui e2e (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin exec playwright install --with-deps chromium
+      - run: pnpm --dir web/admin build
+      - run: pnpm --dir web/admin test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/admin/playwright-report
+          retention-days: 7
+
+  ui-size-limit:
+    # Phase 7.10: bundle-size budgets per UI.md "CI integration."
+    # Runs nightly so a regression doesn't block per-PR
+    # development but DOES open an issue (per TESTING.md §12.8)
+    # if breached.
+    name: ui bundle size budgets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin size

@@ -26,3 +26,6 @@ web/admin/.vite/
 web/admin/.tanstack/
 web/admin/*.tsbuildinfo
 web/admin/src/routeTree.gen.ts
+# Playwright outputs (Phase 7.10)
+web/admin/playwright-report/
+web/admin/test-results/

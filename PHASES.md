@@ -2333,7 +2333,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       owns user identity; knievel doesn't.)
       Refs: `AUTH.md` "Keycloak Setup — Human Admin UI
       (PKCE)"; `UI.md` "Auth."
-- [ ] **7.10** Polish: Playwright e2e in `nightly.yml`,
+- [x] **7.10** Polish: Playwright e2e in `nightly.yml`,
       bundle-size budgets, accessibility sweep (axe in CI for
       the main routes).
 - [x] **7.11** Single-image ghcr publish for the admin UI.

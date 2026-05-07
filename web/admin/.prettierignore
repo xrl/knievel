@@ -1,6 +1,8 @@
 dist/
 node_modules/
 coverage/
+playwright-report/
+test-results/
 src/routeTree.gen.ts
 src/api/generated.ts
 pnpm-lock.yaml
