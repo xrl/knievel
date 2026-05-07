@@ -2189,7 +2189,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       proves `pnpm install && pnpm dev && pnpm test && pnpm
       build` work clean. Include a README pointing at `UI.md`.
       Refs: `UI.md` "Stack," "Repo layout."
-- [ ] **7.2** CORS middleware install. Wraps the poem route
+- [x] **7.2** CORS middleware install. Wraps the poem route
       with `poem::middleware::Cors` when
       `cfg.api.allowed_origins` is non-empty: methods `GET,
       POST, PATCH, DELETE, OPTIONS`; allow-headers
@@ -2373,6 +2373,31 @@ side channels. UI + API ship as a single
 headless API when `KNIEVEL_ADMIN_UI__STATIC_DIR` is unset.
 
 ### Notes
+
+**Note (7.2):** poem 3.1's `Cors` requires the
+`MakeRouter`-style `.with(cors)` chaining. The conditional
+install pattern uses `EndpointExt::boxed()` because
+`routes.with(cors)` returns a different type than the bare
+`routes`, so the `match` arms have to converge on
+`BoxEndpoint<'static>`. The boxing is one heap allocation
+per request lifetime (cheap) and the alternative — always
+installing Cors with empty allow lists — would still fire
+the preflight handler on OPTIONS, which contradicts the
+"empty config = no middleware" goal.
+
+`tests/api_cors.rs` doesn't need `DATABASE_URL` — the test
+hits `/healthz` (system endpoint, served regardless of DB).
+`knievel::server::cors_layer(&cfg)` is exposed publicly so
+tests rebuild the same shape against fixture configs
+without copy-pasting the methods/headers/max_age list.
+
+For the non-matching-origin test, poem returns
+`CorsError::OriginNotAllowed` which surfaces as 401 (per
+its `error_response` impl, not 403 as I'd assumed); the
+test checks "no `Access-Control-Allow-Origin` header in
+response and status is not 2xx" rather than pinning the
+exact code, since the security-relevant assertion is the
+absence of the ACAO echo.
 
 **Note (7.1):** Pinned versions: React 18.3, TypeScript 5.7,
 Vite 6, Vitest 3 (Vitest 2 conflicts with Vite 6's `Plugin`

@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use poem::get;
+use poem::http::Method;
 use poem::listener::TcpListener;
+use poem::middleware::Cors;
 use poem::{EndpointExt, Route, Server};
 use poem_openapi::{OpenApiService, ServerObject};
 
@@ -49,7 +51,23 @@ pub async fn run(cfg: Config) -> Result<()> {
         .with_context(|| format!("invalid api.bind_addr: {}", cfg.api.bind_addr))?;
 
     let state = build_state(&cfg).await;
-    let app = routes().data(state);
+    let routes = routes().data(state);
+
+    // Conditional CORS install — empty `allowed_origins` means
+    // "no admin UI hitting us cross-origin," so the middleware
+    // isn't installed at all (no preflight overhead, no ACAO
+    // header on responses). Same-origin deploys (UI served from
+    // poem's StaticFilesEndpoint at `/admin/`) want this empty.
+    let app: poem::endpoint::BoxEndpoint<'static> = match cors_layer(&cfg) {
+        Some(cors) => {
+            tracing::info!(
+                origins = ?cfg.api.allowed_origins,
+                "CORS enabled"
+            );
+            routes.with(cors).boxed()
+        }
+        None => routes.boxed(),
+    };
 
     tracing::info!(
         addr = %addr,
@@ -69,6 +87,47 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     tracing::info!("knievel exited cleanly");
     Ok(())
+}
+
+/// Build the CORS middleware from config, or `None` when
+/// `allowed_origins` is empty (which means "don't install CORS
+/// at all" — see `UI.md` "CORS"). Public so tests can rebuild
+/// the same layer shape against fixture configs.
+///
+/// Header allow/expose lists track the admin-UI surface the SPA
+/// actually uses today: `Authorization` for bearer tokens,
+/// `Content-Type` for JSON/multipart, `Idempotency-Key` for
+/// POST/PATCH replay, `If-Match` for etag-guarded PATCH (when
+/// it lands), and `X-Request-Id` for support correlation
+/// (`UI.md` "Error handling"). Exposed: `ETag`, `Location`,
+/// `X-Request-Id`, `X-Idempotency-Replayed`. `allow_credentials`
+/// is `false` because the SPA uses Authorization headers, not
+/// cookies (`UI.md` "Auth"); keeping it false also removes the
+/// cookie-CSRF surface and the wildcard restriction.
+pub fn cors_layer(cfg: &Config) -> Option<Cors> {
+    if cfg.api.allowed_origins.is_empty() {
+        return None;
+    }
+    let cors = Cors::new()
+        .allow_origins(cfg.api.allowed_origins.iter().map(String::as_str))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            "authorization",
+            "content-type",
+            "idempotency-key",
+            "if-match",
+            "x-request-id",
+        ])
+        .expose_headers(["etag", "location", "x-request-id", "x-idempotency-replayed"])
+        .allow_credentials(false)
+        .max_age(600);
+    Some(cors)
 }
 
 /// Top-level routes. Phase 2 wires the system OpenAPI service
