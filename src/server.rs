@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use poem::endpoint::StaticFilesEndpoint;
 use poem::get;
 use poem::http::Method;
 use poem::listener::TcpListener;
@@ -53,7 +54,9 @@ pub async fn run(cfg: Config) -> Result<()> {
         .with_context(|| format!("invalid api.bind_addr: {}", cfg.api.bind_addr))?;
 
     let state = build_state(&cfg).await;
-    let routes = routes().data(state);
+    let r = routes();
+    let r = mount_admin_ui(r, cfg.admin_ui.static_dir.as_deref());
+    let routes = r.data(state);
 
     // Conditional CORS install — empty `allowed_origins` means
     // "no admin UI hitting us cross-origin," so the middleware
@@ -178,6 +181,31 @@ pub fn routes() -> Route {
         // authorization (`API.md` § 4).
         .at("/e/i/:signed", get(crate::event_endpoints::impression))
         .at("/e/c/:signed", get(crate::event_endpoints::click))
+}
+
+/// Mount the admin SPA at `/admin/` from a static directory
+/// when `cfg.admin_ui.static_dir` is set. `index.html`
+/// fallback gives the SPA's client-side router (TanStack
+/// Router) usable history routing — any unknown path under
+/// `/admin/` resolves to `index.html` so a deep-link refresh
+/// to `/admin/orgs/foo/projects/bar` doesn't 404.
+///
+/// Empty / unset `static_dir` → no mount; `/admin/*` returns
+/// 404 (headless API mode). The same image runs both shapes
+/// — Phase 7.11.
+pub fn mount_admin_ui(route: Route, static_dir: Option<&str>) -> Route {
+    match static_dir {
+        Some(dir) if !dir.is_empty() => {
+            tracing::info!(static_dir = %dir, "mounting admin UI at /admin/");
+            route.nest(
+                "/admin",
+                StaticFilesEndpoint::new(dir)
+                    .index_file("index.html")
+                    .fallback_to_index(),
+            )
+        }
+        _ => route,
+    }
 }
 
 async fn build_state(cfg: &Config) -> AppState {

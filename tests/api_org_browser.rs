@@ -79,10 +79,7 @@ async fn list_projects_returns_envelope_with_null_cursor() -> Result<()> {
     let body: serde_json::Value = resp.json().await.value().deserialize();
     let items = body["items"].as_array().expect("items array");
     assert_eq!(items.len(), 2);
-    let names: Vec<&str> = items
-        .iter()
-        .filter_map(|i| i["name"].as_str())
-        .collect();
+    let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
     assert!(names.contains(&"Project One"));
     assert!(names.contains(&"Project Two"));
     // 7.5 wires the envelope but doesn't paginate (TEXT-id
@@ -132,24 +129,17 @@ async fn seed_project(
     name: &str,
 ) -> Result<()> {
     let mut tx = testlib::tenant::begin_bound(pool, org_id, None).await?;
-    sqlx::query(
-        "INSERT INTO knievel.projects (id, org_id, name) VALUES ($1, $2, $3)",
-    )
-    .bind(project_id)
-    .bind(org_id)
-    .bind(name)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("INSERT INTO knievel.projects (id, org_id, name) VALUES ($1, $2, $3)")
+        .bind(project_id)
+        .bind(org_id)
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
 
-async fn mint_token(
-    pool: &sqlx::PgPool,
-    tok_id: &str,
-    org_id: &str,
-    role: &str,
-) -> Result<String> {
+async fn mint_token(pool: &sqlx::PgPool, tok_id: &str, org_id: &str, role: &str) -> Result<String> {
     let id_short = tok_id.strip_prefix("tok_").expect("tok_ prefix");
     let secret = format!("s{id_short}");
     let hash = knievel::auth::opaque::hash(&secret)?;

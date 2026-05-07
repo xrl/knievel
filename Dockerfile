@@ -56,6 +56,16 @@ FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=builder /build/target/release/knievel     /usr/local/bin/knievel
 COPY --from=builder /build/target/release/knievel-cli /usr/local/bin/knievel-cli
 
+# Admin UI bundle (Phase 7.11). Pre-built in CI / locally via
+# `cargo xtask build-image` (see UI.md "Deployment /
+# Single-image Dockerfile"). The Node build runs OUTSIDE the
+# container so pnpm's store cache works natively, and the
+# Dockerfile stays free of a Node toolchain. The build
+# context must contain `web/admin/dist/`; for headless API
+# builds, the directory can be empty — the runtime mount is
+# gated separately by `KNIEVEL_ADMIN_UI__STATIC_DIR` below.
+COPY web/admin/dist /var/lib/knievel/admin
+
 USER nonroot:nonroot
 EXPOSE 8080
 
@@ -64,5 +74,11 @@ EXPOSE 8080
 #     ConfigMap in Helm). Layered loader picks up KNIEVEL_*
 #     env vars on top.
 ENV KNIEVEL_CONFIG=/etc/knievel/config.yaml
+
+# Admin UI mount point. Set to empty string to disable
+# (the StaticFilesEndpoint isn't installed when this is
+# empty, so `/admin/*` returns 404 — same image runs as a
+# headless API).
+ENV KNIEVEL_ADMIN_UI__STATIC_DIR=/var/lib/knievel/admin
 
 ENTRYPOINT ["/usr/local/bin/knievel"]

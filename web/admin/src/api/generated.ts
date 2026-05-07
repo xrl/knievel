@@ -532,7 +532,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/projects/{project_id}/sites:upsertByUrl": {
+    "/v1/projects/{project_id}/sites/upsert-by-url": {
         parameters: {
             query?: never;
             header?: never;

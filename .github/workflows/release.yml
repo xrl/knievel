@@ -36,6 +36,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Phase 7.11: build the admin UI bundle BEFORE
+      # docker/build-push-action so the build context picks
+      # up the populated `web/admin/dist/` (the Dockerfile's
+      # COPY step expects it to exist).
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin build
+
       # buildx + qemu so we can produce both amd64 and arm64 from
       # the GitHub-hosted x86_64 runner.
       - uses: docker/setup-qemu-action@v3

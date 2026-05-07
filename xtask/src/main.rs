@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod build_image;
 mod check_api_doc;
 mod check_cross_tenant;
 mod check_doc_fences;
@@ -61,6 +62,16 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Local-dev wrapper: build the admin UI bundle, then `docker build .`.
+    BuildImage {
+        /// Skip the UI build; substitutes an empty dist/ so the Dockerfile's
+        /// COPY succeeds without a Node toolchain (headless-API images).
+        #[arg(long)]
+        skip_ui: bool,
+        /// Image tag (default `knievel:dev`).
+        #[arg(long, default_value = "knievel:dev")]
+        tag: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -81,5 +92,6 @@ fn main() -> Result<()> {
             skip_gates,
         }),
         Cmd::UiClient { check } => ui_client::run(check),
+        Cmd::BuildImage { skip_ui, tag } => build_image::run(build_image::Args { skip_ui, tag }),
     }
 }

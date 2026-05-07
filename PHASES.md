@@ -2336,7 +2336,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
 - [ ] **7.10** Polish: Playwright e2e in `nightly.yml`,
       bundle-size budgets, accessibility sweep (axe in CI for
       the main routes).
-- [ ] **7.11** Single-image ghcr publish for the admin UI.
+- [x] **7.11** Single-image ghcr publish for the admin UI.
       The Node build runs in **GitHub Actions** (not as a
       Docker stage) so pnpm's store is cached natively via
       `actions/setup-node` `cache: pnpm`; the Dockerfile

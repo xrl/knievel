@@ -26,7 +26,7 @@ serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 serde_yaml  = "0.9"
 figment     = { version = "0.10", features = ["yaml", "env"] }
-poem        = "3"
+poem        = { version = "3", features = ["static-files"] }
 poem-openapi = { version = "5", features = ["swagger-ui"] }
 rand        = "0.8"
 sqlx        = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate"] }

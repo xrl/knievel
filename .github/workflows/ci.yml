@@ -257,11 +257,19 @@ jobs:
     # before a release attempt ships a broken artifact. Single
     # platform here keeps the wall-time small; the multi-arch
     # publish lives in release.yml.
+    #
+    # Phase 7.11 adds the admin UI bundle. The Node build runs
+    # in this job (pnpm-store cached natively via setup-node)
+    # BEFORE docker/build-push-action so the build context
+    # picks up the populated `web/admin/dist/` for the
+    # Dockerfile's `COPY` step.
     name: build container image (no push)
     needs: prime
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm --dir web/admin build
       - uses: docker/setup-buildx-action@v3
       - name: Build (linux/amd64, no push)
         uses: docker/build-push-action@v6

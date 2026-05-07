@@ -154,7 +154,7 @@ method = "POST"
 test   = "cross_tenant_sites_create"
 
 [[entry]]
-path   = "/v1/projects/{project_id}/sites:upsertByUrl"
+path   = "/v1/projects/{project_id}/sites/upsert-by-url"
 method = "POST"
 test   = "cross_tenant_sites_upsert_by_url"
 
