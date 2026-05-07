@@ -68,10 +68,48 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
                 .await
                 .context("checking admin role attributes")?;
         if is_super {
-            sqlx::query("ALTER ROLE CURRENT_USER NOSUPERUSER CREATEDB")
+            // Wrap the ALTER in a savepoint so a failure (some
+            // managed Postgres tiers refuse self-alter even from
+            // a SUPERUSER; observed once on a CI Postgres 16 run)
+            // can be caught and we can fall through if the role
+            // has somehow already reached the desired state. With
+            // the savepoint we keep the outer txn alive for the
+            // commit below.
+            sqlx::query("SAVEPOINT role_downgrade")
                 .execute(&mut *tx)
                 .await
-                .context("downgrading admin role from SUPERUSER")?;
+                .context("opening role-downgrade savepoint")?;
+            let altered = sqlx::query("ALTER ROLE CURRENT_USER NOSUPERUSER CREATEDB")
+                .execute(&mut *tx)
+                .await;
+            match altered {
+                Ok(_) => {
+                    sqlx::query("RELEASE SAVEPOINT role_downgrade")
+                        .execute(&mut *tx)
+                        .await
+                        .context("releasing role-downgrade savepoint")?;
+                }
+                Err(e) => {
+                    sqlx::query("ROLLBACK TO SAVEPOINT role_downgrade")
+                        .execute(&mut *tx)
+                        .await
+                        .context("rolling back role-downgrade savepoint")?;
+                    let still: bool = sqlx::query_scalar(
+                        "SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
+                    )
+                    .fetch_one(&mut *tx)
+                    .await
+                    .context("re-checking role state after ALTER failed")?;
+                    if still {
+                        return Err(e).context("downgrading admin role from SUPERUSER");
+                    }
+                    // Else: the role is NOSUPERUSER (somehow
+                    // already in the right state — a parallel
+                    // process beat us to the alter, or the
+                    // managed Postgres pre-provisioned the
+                    // role). Continue.
+                }
+            }
         }
         tx.commit().await.context("committing role-downgrade tx")?;
     }

@@ -30,14 +30,16 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY xtask/Cargo.toml xtask/Cargo.toml
 COPY testlib/Cargo.toml testlib/Cargo.toml
-RUN mkdir -p src/bin xtask/src testlib/src \
+RUN mkdir -p src/bin xtask/src testlib/src benches \
  && echo 'fn main() {}' > src/main.rs \
  && echo '' > src/lib.rs \
  && echo 'fn main() {}' > src/bin/knievel_cli.rs \
  && echo 'fn main() {}' > xtask/src/main.rs \
  && echo '' > testlib/src/lib.rs \
+ && echo 'fn main() {}' > benches/selection_pick.rs \
+ && echo 'fn main() {}' > benches/hmac_verify.rs \
  && cargo build --release --locked --bins \
- && rm -rf src xtask/src testlib/src
+ && rm -rf src xtask/src testlib/src benches
 
 # Real source.
 COPY build.rs ./build.rs

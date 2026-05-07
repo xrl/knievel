@@ -62,6 +62,7 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     bump_cargo_toml(&args.version)?;
+    regen_openapi()?;
     refresh_cargo_lock()?;
     roll_changelog(&args.version)?;
     commit_and_tag(&args.version)?;
@@ -191,6 +192,23 @@ fn refresh_cargo_lock() -> Result<()> {
     Ok(())
 }
 
+/// Regenerate `openapi.yaml` after the Cargo.toml bump.
+/// `info.version` in the spec is sourced from
+/// `env!("CARGO_PKG_VERSION")` (see `src/lib.rs::openapi_spec_yaml`),
+/// so a Cargo.toml version change makes the committed
+/// `openapi.yaml` immediately stale and the openapi-drift gate
+/// would fail CI on the release tag.
+fn regen_openapi() -> Result<()> {
+    let status = Command::new("cargo")
+        .args(["xtask", "openapi"])
+        .status()
+        .context("running cargo xtask openapi")?;
+    if !status.success() {
+        bail!("cargo xtask openapi failed");
+    }
+    Ok(())
+}
+
 fn roll_changelog(version: &str) -> Result<()> {
     let path = "CHANGELOG.md";
     let content = fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
@@ -272,7 +290,13 @@ fn previous_tag_or_default() -> Result<String> {
 
 fn commit_and_tag(version: &str) -> Result<()> {
     let stage_status = Command::new("git")
-        .args(["add", "Cargo.toml", "Cargo.lock", "CHANGELOG.md"])
+        .args([
+            "add",
+            "Cargo.toml",
+            "Cargo.lock",
+            "openapi.yaml",
+            "CHANGELOG.md",
+        ])
         .status()
         .context("git add")?;
     if !stage_status.success() {
