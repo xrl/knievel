@@ -587,6 +587,14 @@ impl OrgApi {
     /// known gaps"). For now an org's full project set comes
     /// back in one page; orgs typically host single-digit
     /// project counts, so this is fine.
+    ///
+    /// The optional `external_id` query parameter resolves a
+    /// caller-assigned external id back to the knievel project
+    /// id (`UNIQUE (org_id, external_id)` makes this at-most-one
+    /// row). Lets consumers like rx — which only persist the
+    /// external id at write time — recover the internal id
+    /// without listing the org's full project set. See
+    /// `MIGRATION_RX.md` "Project bootstrap" and issue #2 § 5.
     #[oai(
         path = "/v1/orgs/:org_id/projects",
         method = "get",
@@ -600,6 +608,10 @@ impl OrgApi {
         // `limit` accepted but capped (DoS protection); the
         // cursor envelope is non-paginating today.
         limit: Query<Option<i64>>,
+        // Optional caller-assigned external id; when set the
+        // result is at most one row (or zero, with a 200 + empty
+        // items array — the same shape as a not-found list).
+        external_id: Query<Option<String>>,
     ) -> ListProjectsResponse {
         let principal = auth.0;
         let path_org_id = org_id.0;
@@ -640,12 +652,29 @@ impl OrgApi {
             }
         };
 
-        let sql = format!(
-            "SELECT {PROJECT_SELECT_COLS} FROM knievel.projects \
-             ORDER BY created_at DESC, id DESC LIMIT $1"
-        );
-        let q = sqlx::query_as::<_, ProjectRow>(&sql).bind(limit_value);
-        match q.fetch_all(&mut *tx).await {
+        let result = if let Some(ext) = external_id.0.as_deref() {
+            let sql = format!(
+                "SELECT {PROJECT_SELECT_COLS} FROM knievel.projects \
+                 WHERE external_id = $1 \
+                 ORDER BY created_at DESC, id DESC LIMIT $2"
+            );
+            sqlx::query_as::<_, ProjectRow>(&sql)
+                .bind(ext)
+                .bind(limit_value)
+                .fetch_all(&mut *tx)
+                .await
+        } else {
+            let sql = format!(
+                "SELECT {PROJECT_SELECT_COLS} FROM knievel.projects \
+                 ORDER BY created_at DESC, id DESC LIMIT $1"
+            );
+            sqlx::query_as::<_, ProjectRow>(&sql)
+                .bind(limit_value)
+                .fetch_all(&mut *tx)
+                .await
+        };
+
+        match result {
             Ok(rows) => ListProjectsResponse::Ok(Json(ProjectList {
                 items: rows.into_iter().map(Into::into).collect(),
                 next_cursor: None,

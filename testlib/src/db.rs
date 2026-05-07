@@ -206,6 +206,14 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
 
 /// Drop the ephemeral database. Optional cleanup; CI tears the
 /// service container down regardless.
+///
+/// `pool.close()` waits for the test's own pool to drain, but
+/// API tests typically clone the pool into `AppState` (held by
+/// `poem::test::TestClient`), and those cloned handles can keep
+/// backends alive past `close()`. Postgres then refuses
+/// `DROP DATABASE` with "is being accessed by other users".
+/// We pre-empt that by terminating every backend on the
+/// ephemeral database before issuing the drop.
 pub async fn ephemeral_drop(db: EphemeralDb) -> Result<()> {
     let admin_url = env::var("DATABASE_URL")?;
     let pool = db.pool;
@@ -214,6 +222,15 @@ pub async fn ephemeral_drop(db: EphemeralDb) -> Result<()> {
         .max_connections(1)
         .connect(&admin_url)
         .await?;
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+         WHERE datname = $1 AND pid <> pg_backend_pid() \
+           AND usename = current_user",
+    )
+    .bind(&db.name)
+    .execute(&admin)
+    .await
+    .context("terminating lingering backends on ephemeral DB")?;
     sqlx::query(&format!("DROP DATABASE IF EXISTS \"{}\"", db.name))
         .execute(&admin)
         .await
