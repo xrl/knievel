@@ -100,5 +100,12 @@ export const apiBaseUrl = (): string => {
   return '';
 };
 
-export const apiClient = createClient<paths>({ baseUrl: apiBaseUrl() });
+// `fetch` is wrapped in an arrow so every call resolves
+// `globalThis.fetch` at call time, not at module load.
+// Tests need this to swap fetch via vi.stubGlobal /
+// assignment without rebuilding the client.
+export const apiClient = createClient<paths>({
+  baseUrl: apiBaseUrl(),
+  fetch: (input) => globalThis.fetch(input),
+});
 apiClient.use(authMiddleware);

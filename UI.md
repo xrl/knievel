@@ -554,6 +554,48 @@ Node version pinning, mirroring `rust-setup`. Same caveat
 applies: callers must `actions/checkout@v4` before `uses:
 ./.github/actions/node-setup` (gotcha #6 in `CLAUDE.md`).
 
+## Test coverage
+
+Layered, with each layer tightening one concern. The
+foundational helpers (auth/session, runtime config, fetch
+wrapper, error-notification helper) get **vitest** unit
+coverage; security-critical surfaces (mint flows) and
+representative views get **axe** sweeps; the integrated
+boot path gets **Playwright** smoke tests in nightly CI.
+
+| Surface | Layer | Why |
+|---|---|---|
+| `auth/session` (paste-token store/clear, bearer accessor) | vitest | Wire-shape contract for the fetch wrapper. Lock the precedence order. |
+| `auth/runtimeConfig` (OIDC metadata fetch, defaults, cache) | vitest | Boot can't pivot on this getting wrong; the safe-defaults branches must work. |
+| `api/client` fetch wrapper (Bearer attach, X-Request-Id capture, 401 silent-refresh + retry on safe methods) | vitest | The most-touched code path; the silent-refresh retry is the kind of logic that breaks invisibly. |
+| `api/errors.notifyApiError` (per-status title/body/color) | vitest | Pinned strings; future error-UX changes go through here. |
+| `auth/RequireAuth` (paste-token path) | vitest | Guard logic isn't a security boundary, but a regression breaks every protected route. OIDC variant deferred — needs full `react-oidc-context` mocking. |
+| `MintRevealModal` (Done-disabled-until-ticked, Esc no-op) | vitest | Security-critical mint UX — silent regressions here lock operators out. |
+| `MintRevealModal` a11y | vitest + axe-core | Security-critical surface; WCAG 2 A/AA baseline. |
+| `PasteTokenLogin` a11y | vitest + axe-core | Auth entry point. |
+| Per-resource list views, detail drawer, edit forms, decision tester | typecheck + Playwright | Ten near-identical list views; per-view component tests would be repetitive. The typed `apiClient.GET(...)` calls catch wire-shape regressions; Playwright covers the integration. |
+| Boot → paste-token login → invalid-token error | Playwright (nightly) | The walking-skeleton smoke. Stubs `/admin/config.json` + `/v1/whoami` so no backend needed. |
+| Bundle-size budget (180 KB main / 35 KB Mantine CSS, gzip) | size-limit (nightly) | Advisory; guards against accidental dep bloat. |
+
+What's intentionally NOT covered:
+
+- **OIDC redirect flow.** Requires a running Keycloak.
+  Manual verification per `AUTH.md` § 7 is the v0 path;
+  CI-side OIDC-fixture e2e is a follow-up if/when a
+  Keycloak-in-CI rig becomes worth standing up.
+- **Per-resource list views as separate tests.** The 10
+  list routes share `<DataTable>` + `<JsonDrawer>` + the
+  same `apiClient.GET(...)` pattern; testing each
+  individually is duplicate work. Add per-resource
+  Playwright specs only when a real bug surfaces in a
+  specific view.
+- **Color-contrast axe rule.** Skipped in vitest because
+  happy-dom doesn't compute paint; relies on Mantine's
+  theme defaults plus manual verification.
+- **WorkspaceShell role-gating in unit tests.** Covered by
+  the typecheck + Playwright (which sees the rail with
+  whatever role the stubbed `/v1/whoami` returns).
+
 ## Deployment
 
 The admin UI ships in the **same `ghcr.io/<owner>/knievel`
