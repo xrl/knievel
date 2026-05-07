@@ -476,67 +476,132 @@ pipeline, no version-skew window between the two halves. UI
 version === API version === git SHA, all the way through to
 `GET /version`.
 
-### Single-image Dockerfile
+### Build split: bundle in CI, image just copies the artifact
 
-Extends the existing Phase 4.1 `Dockerfile` with a Node build
-stage that runs in parallel with the Rust stage and copies its
-output into the final distroless layer:
+The Node build runs in **GitHub Actions**, not as a Docker
+stage. CI's pnpm cache (via `actions/setup-node` with
+`cache: pnpm`) is dramatically faster and simpler than
+shoehorning a Node build into a Docker layer; we keep the
+Dockerfile focused on packaging.
+
+The Phase 4.1 `Dockerfile` gains exactly **one** new line:
 
 ```dockerfile
-# Stage 1 — UI bundle.
-FROM node:22-alpine AS ui-build
-WORKDIR /web/admin
-RUN corepack enable
-COPY web/admin/package.json web/admin/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-COPY openapi.yaml /openapi.yaml
-COPY web/admin/ ./
-RUN pnpm build           # → /web/admin/dist/
-
-# Stage 2 — Rust binary (existing, unchanged).
-FROM rust:1-bookworm AS builder
-... (existing stages)
-
-# Stage 3 — distroless final.
-FROM gcr.io/distroless/cc-debian12:nonroot
-COPY --from=builder  /build/target/release/knievel     /usr/local/bin/knievel
-COPY --from=builder  /build/target/release/knievel-cli /usr/local/bin/knievel-cli
-COPY --from=ui-build /web/admin/dist                   /var/lib/knievel/admin
-ENV KNIEVEL_CONFIG=/etc/knievel/config.yaml
-ENV KNIEVEL_ADMIN_UI__STATIC_DIR=/var/lib/knievel/admin
-USER nonroot:nonroot
-EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/knievel"]
+COPY web/admin/dist /var/lib/knievel/admin
 ```
 
-When `cfg.admin_ui.static_dir` is set, poem mounts it at
-`/admin/` via `StaticFilesEndpoint` with `index.html`
-fallback for SPA history routing. When unset, the admin UI
-isn't served at all — the same image runs as a headless API
-deployment, `/admin/*` returns 404. Both modes share one
-artifact; deployment chooses by setting (or not setting) the
-env var. Same-origin means the CORS layer stays disabled in
-the bundled deploy mode.
+…with two new env vars in the final stage:
 
-`GET /admin/config.json` is served by the API **before** the
-static fallback so the SPA's runtime config (`AUTH.md`
-"Knievel-side configuration") doesn't get shadowed by a
-`config.json` file inside the bundle.
+```dockerfile
+ENV KNIEVEL_ADMIN_UI__STATIC_DIR=/var/lib/knievel/admin
+```
 
-CI cost is bounded:
+The Rust multi-stage build is unchanged. The Dockerfile
+expects `web/admin/dist/` to be present in the build context;
+CI guarantees it, locally a wrapper handles it (next
+section).
 
-- ~1–2 minutes for the Node stage; pnpm store cached via
-  `actions/setup-node` `cache: pnpm`.
-- Layer ordering means a Rust-only edit doesn't bust the UI
-  cache and vice versa.
-- Final image grows by ~5–10 MB (gzipped JS bundle).
+### CI workflow shape
+
+`release.yml` (and the per-PR `ui-build` job in `ci.yml`)
+gain a Node setup + build step **before** the
+`docker/build-push-action` call, and the build context they
+hand to docker includes the populated `web/admin/dist/`:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: pnpm/action-setup@v4
+  with: { version: 9 }
+- uses: actions/setup-node@v4
+  with:
+    node-version: 22
+    cache: pnpm
+    cache-dependency-path: web/admin/pnpm-lock.yaml
+- run: pnpm --dir web/admin install --frozen-lockfile
+- run: pnpm --dir web/admin build      # → web/admin/dist/
+
+- uses: docker/build-push-action@v6
+  with:
+    context: .                         # picks up web/admin/dist/
+    tags:    ghcr.io/<owner>/knievel:${{ github.ref_name }}
+    push:    true
+```
+
+Wins from this split:
+
+- **pnpm store cached automatically** by `setup-node`. No
+  Docker buildx cache mount, no registry round-trips for
+  cache layers — just a tarball restore that runs in
+  seconds.
+- **Bundle artifact is reusable**: same `dist/` flows into
+  the image AND into bundle-size budget checks AND
+  (eventually) into Sentry sourcemap upload, all from one
+  build.
+- **Dockerfile stays small**: one extra COPY, no second
+  language toolchain in the build image.
+- **No Node in the runtime image**, no Node in the
+  build-image cache. Less to invalidate.
+
+### Local dev wrapper
+
+Building the image locally needs the bundle present first.
+A new xtask:
+
+```bash
+cargo xtask build-image                 # pnpm build + docker build
+cargo xtask build-image --skip-ui       # headless API only
+```
+
+`xtask/src/build_image.rs` shells out to `pnpm --dir
+web/admin install --frozen-lockfile && pnpm --dir web/admin
+build`, then `docker build -t knievel:dev .`. The
+`--skip-ui` flag substitutes an empty `web/admin/dist/`
+(just enough to make COPY succeed) for the headless case.
+
+### Static-file serving
+
+Poem has first-class static-file support — no extra crate
+needed beyond enabling the `static-files` feature:
+
+```toml
+poem = { workspace = true, features = ["static-files"] }
+```
+
+The mount in `src/server.rs`:
+
+```rust
+use poem::endpoint::StaticFilesEndpoint;
+
+if let Some(dir) = &cfg.admin_ui.static_dir {
+    route = route.nest(
+        "/admin",
+        StaticFilesEndpoint::new(dir)
+            .index_file("index.html")
+            .fallback_to_index(),       // SPA history-routing
+    );
+}
+// /admin/config.json is registered BEFORE this nest so
+// the static fallback doesn't shadow it.
+```
+
+When `cfg.admin_ui.static_dir` is unset, no mount is
+installed and `/admin/*` returns 404 — same image runs as a
+headless API deployment. Same-origin means the CORS layer
+stays disabled in bundled mode.
+
+`GET /admin/config.json` is registered **before** the static
+nest so the SPA's runtime config (`AUTH.md` "Knievel-side
+configuration") doesn't get shadowed by a `config.json`
+file inside the bundle.
 
 ### ghcr.io publishing
 
 The existing `release.yml` workflow already publishes
 `ghcr.io/<owner>/knievel` via `docker/build-push-action` on
-`v*` tags. No new workflow; the multi-stage Dockerfile rides
-the same lane.
+`v*` tags. No new workflow; the new pnpm + build steps slot
+in ahead of the existing docker step in the same lane. UI
+version === API version === git SHA, all the way through to
+`GET /version`.
 
 ### Fly.io sample-app deploy
 
@@ -598,6 +663,31 @@ but **not the default**): skip Keycloak entirely and use the
 surfaced on the landing page. Two fly apps instead of three;
 doesn't exercise OIDC; trades "showing off SSO" for
 "two-minute boot."
+
+#### CI deploy credentials
+
+Fly.io is an OIDC **provider** (its machines mint tokens to
+authenticate outbound to AWS/GCP/Azure) but does **not**
+accept inbound OIDC federation — there's no equivalent of
+the AWS / GCP "trust GitHub Actions' OIDC issuer" pattern,
+so CI deploys can't be keyless. Verified against
+[fly.io/docs/security/openid-connect](https://fly.io/docs/security/openid-connect/).
+
+The narrowest practical credential is an **app-scoped,
+time-limited deploy token**:
+
+```bash
+fly tokens create deploy \
+  --app knievel-demo \
+  --name "github-actions" \
+  --expiry 168h
+```
+
+Stored as `FLY_API_TOKEN` in the repo's GitHub Actions
+secrets. Mint one per fly app (knievel + Postgres +
+Keycloak), all expiring on the same calendar so rotation is
+a single ritual. Documented under
+`examples/fly/README.md` "Token rotation."
 
 ## Phasing
 

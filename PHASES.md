@@ -2264,28 +2264,38 @@ list churns it. Phases 7.x can run in parallel with Phase 4
 - [ ] **7.10** Polish: Playwright e2e in `nightly.yml`,
       bundle-size budgets, accessibility sweep (axe in CI for
       the main routes).
-- [ ] **7.11** Single-image Dockerfile + ghcr publish for the
-      admin UI. Adds a `node:22-alpine` build stage to the
-      existing `Dockerfile` (`pnpm install --frozen-lockfile
-      && pnpm build` → `web/admin/dist/`), copies the bundle
-      into the distroless final image at
-      `/var/lib/knievel/admin`, lands a new
-      `admin_ui:` config block (`static_dir`, the OIDC
+- [ ] **7.11** Single-image ghcr publish for the admin UI.
+      The Node build runs in **GitHub Actions** (not as a
+      Docker stage) so pnpm's store is cached natively via
+      `actions/setup-node` `cache: pnpm`; the Dockerfile
+      gains exactly one new line (`COPY web/admin/dist
+      /var/lib/knievel/admin`) plus a
+      `KNIEVEL_ADMIN_UI__STATIC_DIR` env var. `release.yml`
+      and the per-PR `ui-build` job grow a Node/pnpm setup
+      step + `pnpm --dir web/admin install --frozen-lockfile
+      && pnpm --dir web/admin build` ahead of the existing
+      `docker/build-push-action` call; the build context
+      already contains the populated `dist/`. Lands a new
+      `admin_ui:` config block (`static_dir`, plus the OIDC
       sub-block from 7.4) consumed by `src/server.rs` to
-      mount a `StaticFilesEndpoint` at `/admin/` with
-      `index.html` SPA fallback, and serves the runtime
-      config at `GET /admin/config.json` *before* the
-      static fallback so it isn't shadowed by a bundle file.
-      Empty `static_dir` → admin UI not served at all (same
-      image runs as a headless API). The existing
-      `release.yml` keeps publishing
-      `ghcr.io/<owner>/knievel` unchanged — the multi-stage
-      Dockerfile rides the same lane. CI gains pnpm-store
-      caching on the new stage. New `tests/api_admin_ui.rs`
-      slice covers: empty `static_dir` returns 404 on
-      `/admin/`; populated returns `index.html`; deep
-      paths fall back to `index.html` for SPA routing;
-      `/admin/config.json` round-trips the OIDC block.
+      mount poem's `StaticFilesEndpoint` at `/admin/` with
+      `.index_file("index.html").fallback_to_index()` for
+      SPA history routing; enables the `static-files`
+      feature on the `poem` workspace dep. Serves
+      `GET /admin/config.json` registered **before** the
+      static nest so it isn't shadowed by a bundle file.
+      Empty `static_dir` → mount not installed, `/admin/*`
+      returns 404 (same image runs as a headless API).
+      New `cargo xtask build-image [--skip-ui]` wrapper
+      drives `pnpm build && docker build` for local devs.
+      The existing `release.yml` keeps publishing
+      `ghcr.io/<owner>/knievel` unchanged. New
+      `tests/api_admin_ui.rs` slice covers: unset
+      `static_dir` returns 404 on `/admin/`; set returns
+      `index.html`; deep paths fall back to `index.html`
+      for SPA routing; `/admin/config.json` round-trips
+      the OIDC block and isn't shadowed by a same-named
+      bundle file.
       Refs: `UI.md` "Deployment"; `AUTH.md` "Knievel-side
       configuration."
 - [ ] **7.12** Fly.io sample-app deploy with
@@ -2311,9 +2321,18 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       Postgres). New optional GitHub Actions workflow
       `.github/workflows/fly-demo.yml` redeploys on `main`
       when `examples/fly/**` or the published image tag
-      changes.
-      Refs: `UI.md` "Deployment"; `AUTH.md` "Keycloak
-      Setup — Human Admin UI (PKCE)."
+      changes; auth uses **app-scoped, time-limited deploy
+      tokens** (`fly tokens create deploy --app knievel-demo
+      --name github-actions --expiry 168h`) stored as
+      `FLY_API_TOKEN` GitHub secret — fly.io is an OIDC
+      provider but doesn't accept inbound OIDC federation
+      (verified against fly.io/docs/security/openid-connect),
+      so keyless CI auth (the AWS/GCP pattern) isn't
+      available. One token per fly app, all on the same
+      rotation calendar; rotation ritual documented in
+      `examples/fly/README.md`.
+      Refs: `UI.md` "Deployment" (CI deploy credentials);
+      `AUTH.md` "Keycloak Setup — Human Admin UI (PKCE)."
 
 **Milestone:** Operators can log in, browse every project-
 scoped resource, edit the editable ones, and inspect rollups
