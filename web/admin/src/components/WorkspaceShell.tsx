@@ -11,14 +11,22 @@ import type { ReactNode } from 'react';
 import { AppShell, Group, NavLink, Stack, Text, Title } from '@mantine/core';
 import { Link, useLocation } from '@tanstack/react-router';
 
+import { useWhoami } from '../auth/whoamiQuery';
+import { hasRoleAtLeast, type Role } from '../auth/roles';
+
 interface RailItem {
   to: string;
   label: string;
+  /** Minimum role required to see this item. Undefined =
+   *  visible to everyone (reader baseline). UI gating only
+   *  — server still enforces every authz check. */
+  minRole?: Role;
 }
 
 interface RailSection {
   title: string;
   items: RailItem[];
+  minRole?: Role;
 }
 
 interface Props {
@@ -70,6 +78,10 @@ function buildSections(orgId: string, projectId: string): RailSection[] {
     },
     {
       title: 'Settings',
+      // Token mint + member management require admin or
+      // higher per AUTH.md "Authorization." Hide the whole
+      // section for editor/reader.
+      minRole: 'admin',
       items: [
         { to: `/orgs/${orgId}/members`, label: 'Members' },
         { to: `/orgs/${orgId}/tokens`, label: 'Tokens' },
@@ -80,7 +92,17 @@ function buildSections(orgId: string, projectId: string): RailSection[] {
 
 export function WorkspaceShell({ orgId, projectId, projectName, children }: Props) {
   const location = useLocation();
-  const sections = buildSections(orgId, projectId);
+  const whoami = useWhoami();
+  const role = whoami.data?.role;
+  const allSections = buildSections(orgId, projectId);
+  // Hide whole sections + individual items below the user's
+  // role. Server still enforces; this is purely cosmetic.
+  const sections = allSections
+    .filter((s) => !s.minRole || hasRoleAtLeast(role, s.minRole))
+    .map((s) => ({
+      ...s,
+      items: s.items.filter((i) => !i.minRole || hasRoleAtLeast(role, i.minRole)),
+    }));
   const projectBase = `/orgs/${orgId}/projects/${projectId}`;
 
   return (

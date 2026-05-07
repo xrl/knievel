@@ -23,6 +23,7 @@ import '@mantine/notifications/styles.css';
 
 import { routeTree } from './routeTree.gen';
 import { AuthProvider } from './auth/AuthProvider';
+import { IdleWarning } from './auth/IdleWarning';
 import { initUserManager } from './auth/userManager';
 import { loadRuntimeConfig } from './auth/runtimeConfig';
 
@@ -63,6 +64,7 @@ async function boot() {
         <MantineProvider defaultColorScheme="auto">
           <Notifications />
           <AuthProvider config={config}>
+            <IdleWarning />
             <RouterProvider router={router} />
           </AuthProvider>
         </MantineProvider>

@@ -398,6 +398,61 @@ In production this fallback is typically disabled
 sidestepped; operators with a legitimate need keep one
 break-glass opaque token in their secret store.
 
+### 7. Operational verification
+
+Phase 7.9 hardens the SPA's OIDC flow with end-session
+integration, an idle-warning modal, and role-claim-driven UI
+gating. Verify against a real realm before declaring the
+admin UI live for an environment:
+
+1. **Sign-in round-trip.** Visit the admin UI's URL,
+   confirm the Keycloak login page renders, sign in, and
+   land on the post-login deep link (the `?return_to=`
+   carried through `state.return_to`). The
+   `Authorization: Bearer …` header attached by the SPA's
+   fetch wrapper should be a JWT (not a `kvl_*` opaque
+   token); confirm `GET /v1/whoami` returns the right
+   `org_id` + `role`.
+2. **Group → claim mapping.** Sign in as a user in
+   `/knievel/<org-id>/editor`; confirm `whoami.role` is
+   `editor`. Sign in as a user in
+   `/knievel/<org-id>/admin`; confirm `admin`. The SPA's
+   role-gating shows / hides the Settings rail and the
+   "New advertiser" button accordingly.
+3. **End-session.** Click "Sign out" in the SPA. The
+   browser should bounce through Keycloak's
+   `end_session_endpoint` (passing `id_token_hint`) and
+   land back at the admin UI's root. Re-clicking any
+   protected link should re-prompt for sign-in (proving the
+   SSO session was actually invalidated, not just the local
+   token).
+4. **Idle warning.** Configure Keycloak's access-token
+   lifespan to a short value (e.g. 2 minutes) for the test.
+   Sign in, leave the SPA idle for ~1 minute. The
+   "Session expiring" modal should appear; click "Stay
+   signed in" to confirm `signinSilent()` refreshes the
+   token without a redirect. Reset the lifespan to your
+   production value when done.
+5. **Silent-refresh on 401.** With Keycloak still on the
+   short lifespan, leave the tab open until the access
+   token expires, then trigger a `useQuery` refetch (e.g.
+   navigate between resource lists). The fetch wrapper
+   should attempt `signinSilent()`, get a fresh token, and
+   succeed on retry — visible only as a brief loading
+   flicker, no error toast.
+6. **Cross-tenant gate.** Sign in as a user in org A, then
+   manually navigate to `/orgs/<org-b>/projects`. The API
+   returns `403 wrong_tenant`; the SPA renders the error
+   toast. (Spot-check that the SPA itself didn't leak the
+   forbidden org's data — it shouldn't, since it never
+   fetched it.)
+
+If any of (3)–(5) misbehaves, the most common cause is an
+incorrect `post_logout_redirect_uri` or
+`automaticSilentRenew` setting on the public client; check
+Keycloak's "Client → Settings" tab against the values in
+"1. Create the admin-UI client" above.
+
 ### Why public client + PKCE, not BFF
 
 Two architectures could carry OIDC for the SPA:

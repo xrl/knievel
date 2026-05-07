@@ -10,6 +10,8 @@ import { apiClient } from '../api/client';
 import type { components } from '../api/generated';
 import { notifyApiError } from '../api/errors';
 import { RequireAuth } from '../auth/RequireAuth';
+import { hasRoleAtLeast } from '../auth/roles';
+import { useWhoami } from '../auth/whoamiQuery';
 import { WorkspaceShell } from '../components/WorkspaceShell';
 import { DataTable } from '../components/DataTable';
 import { JsonDrawer } from '../components/JsonDrawer';
@@ -26,6 +28,8 @@ export const Route = createFileRoute('/orgs/$org_id/projects/$project_id/adverti
 
 function Advertisers() {
   const { org_id, project_id } = Route.useParams();
+  const whoami = useWhoami();
+  const canEdit = hasRoleAtLeast(whoami.data?.role, 'editor');
   const { data, isLoading, error } = useQuery({
     queryKey: ['advertisers', project_id],
     queryFn: async () => {
@@ -44,11 +48,13 @@ function Advertisers() {
 
   return (
     <WorkspaceShell orgId={org_id} projectId={project_id}>
-      <Group justify="flex-end" mb="sm">
-        <Button component={Link} to={`/orgs/${org_id}/projects/${project_id}/advertisers/new`}>
-          New advertiser
-        </Button>
-      </Group>
+      {canEdit && (
+        <Group justify="flex-end" mb="sm">
+          <Button component={Link} to={`/orgs/${org_id}/projects/${project_id}/advertisers/new`}>
+            New advertiser
+          </Button>
+        </Group>
+      )}
       <DataTable
         title="Advertisers"
         description="Click a row to inspect the full record."

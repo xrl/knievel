@@ -2282,7 +2282,7 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       rollups, a tail view over `/events` (poll-based for v0;
       revisit if/when push lands). Time-bucket controls match
       `REPORTING.md`.
-- [ ] **7.9** OIDC hardening. Wires Keycloak's
+- [x] **7.9** OIDC hardening. Wires Keycloak's
       `end_session_endpoint` into `signoutRedirect()` so
       logout invalidates the SSO session (not just the local
       tokens), adds an idle-warning modal driven by
