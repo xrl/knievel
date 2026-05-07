@@ -111,12 +111,14 @@ async fn create_token_returns_201_with_plaintext_secret() -> Result<()> {
     assert_eq!(body["role"], serde_json::json!("editor"));
 
     // Audit row exists for the mint.
+    let mut tx = testlib::tenant::begin_bound(&f.db.pool, "org_a", None).await?;
     let audit_count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM knievel.audit_log
-         WHERE org_id = 'org_a' AND operation = 'tokens.mint'",
+         WHERE operation = 'tokens.mint'",
     )
-    .fetch_one(&f.db.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     assert_eq!(audit_count, 1, "mint must emit one audit_log row");
 
     testlib::db::ephemeral_drop(f.db).await?;
@@ -320,12 +322,14 @@ async fn revoke_token_blocks_subsequent_auth() -> Result<()> {
     resp.assert_status(poem::http::StatusCode::NOT_FOUND);
 
     // Audit log records both mint + revoke.
+    let mut tx = testlib::tenant::begin_bound(&f.db.pool, "org_a", None).await?;
     let audit_count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM knievel.audit_log
-         WHERE org_id = 'org_a' AND operation IN ('tokens.mint', 'tokens.revoke')",
+         WHERE operation IN ('tokens.mint', 'tokens.revoke')",
     )
-    .fetch_one(&f.db.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     assert!(audit_count >= 2, "expected mint+revoke audit rows");
 
     testlib::db::ephemeral_drop(f.db).await?;

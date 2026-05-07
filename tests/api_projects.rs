@@ -257,10 +257,11 @@ async fn create_project_idempotency_key_replay() -> Result<()> {
     let replay: serde_json::Value = resp.json().await.value().deserialize();
     assert_eq!(replay["id"].as_str().unwrap(), first_id);
 
-    let count: i64 =
-        sqlx::query_scalar("SELECT count(*)::bigint FROM knievel.projects WHERE org_id = 'org_a'")
-            .fetch_one(&f.db.pool)
-            .await?;
+    let mut tx = testlib::tenant::begin_bound(&f.db.pool, "org_a", None).await?;
+    let count: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM knievel.projects")
+        .fetch_one(&mut *tx)
+        .await?;
+    tx.commit().await?;
     assert_eq!(count, 1, "replay must not produce a second project row");
 
     testlib::db::ephemeral_drop(f.db).await?;
