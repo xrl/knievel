@@ -16,3 +16,12 @@
 /out/
 /.env
 /.env.local
+
+# Admin UI (Phase 7+)
+web/admin/node_modules/
+web/admin/dist/
+web/admin/coverage/
+web/admin/.vite/
+web/admin/.tanstack/
+web/admin/*.tsbuildinfo
+web/admin/src/routeTree.gen.ts
