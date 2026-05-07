@@ -91,6 +91,13 @@ export interface paths {
          *     known gaps"). For now an org's full project set comes
          *     back in one page; orgs typically host single-digit
          *     project counts, so this is fine.
+         * @description The optional `external_id` query parameter resolves a
+         *     caller-assigned external id back to the knievel project
+         *     id (`UNIQUE (org_id, external_id)` makes this at-most-one
+         *     row). Lets consumers like rx — which only persist the
+         *     external id at write time — recover the internal id
+         *     without listing the org's full project set. See
+         *     `MIGRATION_RX.md` "Project bootstrap" and issue #2 § 5.
          */
         get: operations["listProjects"];
         put?: never;
@@ -1692,6 +1699,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                external_id?: string;
             };
             header?: never;
             path: {
