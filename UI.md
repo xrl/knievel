@@ -603,92 +603,6 @@ in ahead of the existing docker step in the same lane. UI
 version === API version === git SHA, all the way through to
 `GET /version`.
 
-### Fly.io sample-app deploy
-
-A **demo target**, not the recommended production deploy
-shape — but the simplest "see knievel running with real OIDC
-and a Postgres" path for evaluators. Lives under
-`examples/fly/` (`fly.toml` per app, a `deploy.sh`, a
-realm-export JSON, a README). All three apps fit inside
-fly.io's free tier (3 × shared-cpu-1x + one small Postgres).
-
-Three fly apps:
-
-1. **`knievel-demo`** — pulls
-   `ghcr.io/<owner>/knievel:<tag>`, exposes `:8080`, one
-   `shared-cpu-1x` / 256 MB. Reads its config via env vars
-   (`KNIEVEL_*`); connects to Postgres on the internal
-   `.flycast` hostname.
-2. **`knievel-demo-pg`** — `fly postgres create` smallest
-   tier. Knievel runs its migrations at boot
-   (`database.auto_migrate: true`).
-3. **`knievel-demo-keycloak`** —
-   `quay.io/keycloak/keycloak` in dev mode (production
-   Keycloak deploys are out of scope for the demo). Realm
-   `knievel-demo` provisioned from `examples/fly/realm.json`:
-   one admin-UI client per `AUTH.md` "Keycloak Setup —
-   Human Admin UI (PKCE)", plus **GitHub configured as a
-   social identity provider** so users click "Sign in with
-   GitHub" → Keycloak federates → SPA gets a
-   `knievel`-claim JWT.
-
-Why GitHub via Keycloak, not directly: GitHub's
-`/login/oauth/authorize` returns access tokens, **not**
-OIDC ID tokens with `iss`/`sub`/`aud` that knievel's JWKS
-validator can consume. Keycloak bridges the impedance —
-GitHub is the identity provider; Keycloak is the OIDC
-issuer knievel trusts. This also keeps the demo's auth
-path **identical to production**: same
-`auth.jwt.issuers[]` config shape, same SPA PKCE flow,
-just a different upstream IdP behind Keycloak.
-
-Boot sequence (scripted in `examples/fly/deploy.sh`):
-
-1. Postgres app up; knievel migrates on first boot.
-2. Keycloak app up; realm imported from JSON; GitHub OAuth
-   `client_id`/`client_secret` injected from
-   `fly secrets set`.
-3. Knievel app up; `knievel-cli seed-demo` plants a demo
-   Org + Project + sample
-   advertiser/campaign/flight/ad/creative chain so a fresh
-   sign-in lands in a useful state.
-4. First GitHub sign-in lands the user in a Keycloak group
-   (`/knievel/demo-org/editor`); the group-membership claim
-   mapper assembles the `knievel` claim; the SPA picks up
-   the JWT and renders the project workspace.
-
-Lighter alternative (documented in `examples/fly/README.md`
-but **not the default**): skip Keycloak entirely and use the
-**paste-a-token fallback** with a seeded Org Editor token
-surfaced on the landing page. Two fly apps instead of three;
-doesn't exercise OIDC; trades "showing off SSO" for
-"two-minute boot."
-
-#### CI deploy credentials
-
-Fly.io is an OIDC **provider** (its machines mint tokens to
-authenticate outbound to AWS/GCP/Azure) but does **not**
-accept inbound OIDC federation — there's no equivalent of
-the AWS / GCP "trust GitHub Actions' OIDC issuer" pattern,
-so CI deploys can't be keyless. Verified against
-[fly.io/docs/security/openid-connect](https://fly.io/docs/security/openid-connect/).
-
-The narrowest practical credential is an **app-scoped,
-time-limited deploy token**:
-
-```bash
-fly tokens create deploy \
-  --app knievel-demo \
-  --name "github-actions" \
-  --expiry 168h
-```
-
-Stored as `FLY_API_TOKEN` in the repo's GitHub Actions
-secrets. Mint one per fly app (knievel + Postgres +
-Keycloak), all expiring on the same calendar so rotation is
-a single ritual. Documented under
-`examples/fly/README.md` "Token rotation."
-
 ## Phasing
 
 The UI is a new top-level workstream; it doesn't displace any
@@ -737,25 +651,20 @@ hot-path rail (3.21):
   Refs: `AUTH.md` "Keycloak Setup — Human Admin UI (PKCE)."
 - **Phase 7.10** — Playwright e2e in `nightly.yml`, bundle-size
   budgets, accessibility sweep.
-- **Phase 7.11** — Single-image Dockerfile + ghcr publish:
-  Node build stage in the existing `Dockerfile`, distroless
-  final layer carries the bundle at `/var/lib/knievel/admin`,
-  `admin_ui:` config block + `StaticFilesEndpoint` mount at
-  `/admin/`, `GET /admin/config.json` for runtime config.
-  Same `ghcr.io/<owner>/knievel` image, no new release lane.
-- **Phase 7.12** — Fly.io sample-app deploy:
-  `examples/fly/{fly.toml,realm.json,deploy.sh,README.md}`
-  for three apps (knievel + Postgres + Keycloak federated to
-  GitHub). `knievel-cli seed-demo` plants demo data;
-  group-membership claim mapper drops first-time GitHub
-  signups into a demo Org. Lighter 2-app variant (paste-token,
-  no Keycloak) documented as an alternative.
+- **Phase 7.11** — Single-image ghcr publish: Node build runs
+  in GitHub Actions (pnpm cache via `actions/setup-node`),
+  Dockerfile gains one `COPY web/admin/dist
+  /var/lib/knievel/admin` line, `admin_ui:` config block +
+  poem `StaticFilesEndpoint` mount at `/admin/` (with
+  `static-files` feature enabled), `GET /admin/config.json`
+  for runtime config, `cargo xtask build-image [--skip-ui]`
+  wrapper for local devs. Same `ghcr.io/<owner>/knievel`
+  image, no new release lane.
 
 Numbering is provisional — the actual phase number lands when
 this gets merged into `PHASES.md`. The point is the dependency
 order: skeleton → CORS → codegen → auth → views → editing →
-reporting → OIDC hardening → polish → single-image publish →
-fly.io sample-app deploy.
+reporting → OIDC hardening → polish → single-image publish.
 
 ## Open questions
 

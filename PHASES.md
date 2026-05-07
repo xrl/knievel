@@ -2298,52 +2298,26 @@ list churns it. Phases 7.x can run in parallel with Phase 4
       bundle file.
       Refs: `UI.md` "Deployment"; `AUTH.md` "Knievel-side
       configuration."
-- [ ] **7.12** Fly.io sample-app deploy with
-      Keycloak-federated-to-GitHub. Lands `examples/fly/`
-      with three apps: `knievel-demo` (pulls
-      `ghcr.io/<owner>/knievel:<tag>`), `knievel-demo-pg`
-      (smallest fly Postgres tier), `knievel-demo-keycloak`
-      (Keycloak in dev mode with a `realm.json` import that
-      provisions the admin-UI client + GitHub social IdP).
-      `examples/fly/deploy.sh` orchestrates the boot order
-      (Postgres → Keycloak → knievel) and runs
-      `knievel-cli seed-demo` to plant a demo
-      Org/Project/advertiser/campaign/flight/ad/creative
-      chain so a fresh GitHub sign-in lands in a useful
-      state. Group-membership claim mapper assembles the
-      `knievel` claim per `AUTH.md` "Keycloak Setup —
-      Human Admin UI (PKCE)"; first-sign-in lands the user
-      in `/knievel/demo-org/editor`. Documents both the
-      canonical 3-app deploy and a lighter 2-app variant
-      (paste-token fallback, no Keycloak) in
-      `examples/fly/README.md`. All three apps target
-      fly.io's free tier (3 × shared-cpu-1x + small
-      Postgres). New optional GitHub Actions workflow
-      `.github/workflows/fly-demo.yml` redeploys on `main`
-      when `examples/fly/**` or the published image tag
-      changes; auth uses **app-scoped, time-limited deploy
-      tokens** (`fly tokens create deploy --app knievel-demo
-      --name github-actions --expiry 168h`) stored as
-      `FLY_API_TOKEN` GitHub secret — fly.io is an OIDC
-      provider but doesn't accept inbound OIDC federation
-      (verified against fly.io/docs/security/openid-connect),
-      so keyless CI auth (the AWS/GCP pattern) isn't
-      available. One token per fly app, all on the same
-      rotation calendar; rotation ritual documented in
-      `examples/fly/README.md`.
-      Refs: `UI.md` "Deployment" (CI deploy credentials);
-      `AUTH.md` "Keycloak Setup — Human Admin UI (PKCE)."
-
 **Milestone:** Operators can log in, browse every project-
 scoped resource, edit the editable ones, and inspect rollups
 + event flow — all over the public OpenAPI surface, no admin
 side channels. UI + API ship as a single
-`ghcr.io/<owner>/knievel` image; an evaluator can spin up the
-whole stack on fly.io with one script and sign in via GitHub.
+`ghcr.io/<owner>/knievel` image; the same image runs as a
+headless API when `KNIEVEL_ADMIN_UI__STATIC_DIR` is unset.
 
 ### Notes
 
-(none yet)
+**Note (7.12 dropped):** Originally planned a fly.io
+sample-app deploy (knievel + Postgres + Keycloak federated
+to GitHub) so evaluators could spin up the whole stack with
+one script. Removed because fly.io's free trial is bounded
+to 7 days — a perpetual demo target doesn't fit. The
+reusable pieces (Keycloak realm export, demo-data seed
+script, GitHub-as-social-IdP setup) stay valid; they belong
+in 7.4 / 7.9 / 7.11. If a hosted demo target comes back
+later (Render, Railway, a self-hosted box, or a
+docker-compose recipe), slot it in as a fresh task with the
+new provider's specifics.
 
 ---
 
