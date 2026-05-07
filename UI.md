@@ -110,7 +110,7 @@ strings: `/projects/{p}/flights?campaign={c}`.
 ### Cmd+K spotlight
 
 Mantine's `Spotlight` (or equivalent) gives operators a single
-search box to jump by ID, `externalId`, or name across every
+search box to jump by ID, `external_id`, or name across every
 resource in the active project. Backed by the same flat list
 endpoints (`?q=...`); no separate search index in v0.
 
