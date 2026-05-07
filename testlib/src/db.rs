@@ -75,13 +75,28 @@ pub async fn ephemeral() -> Result<EphemeralDb> {
             // has somehow already reached the desired state. With
             // the savepoint we keep the outer txn alive for the
             // commit below.
+            //
+            // Substitute the literal role name rather than using
+            // the `CURRENT_USER` keyword. Postgres 16.13 rejects
+            // `ALTER ROLE CURRENT_USER NOSUPERUSER` with
+            // "permission denied to alter role" even when the
+            // session is a verified superuser (`rolsuper=true`,
+            // `is_superuser` GUC `on`); using the literal role
+            // name takes the bug-prone code path out of the loop.
+            let role_name: String = sqlx::query_scalar("SELECT current_user::text")
+                .fetch_one(&mut *tx)
+                .await
+                .context("reading current_user for role name")?;
+            // Quote-escape to handle role names with special
+            // chars / case-sensitivity. Use double-quote escaping
+            // — Postgres identifier rules.
+            let quoted = format!("\"{}\"", role_name.replace('"', "\"\""));
+            let alter_sql = format!("ALTER ROLE {quoted} NOSUPERUSER CREATEDB");
             sqlx::query("SAVEPOINT role_downgrade")
                 .execute(&mut *tx)
                 .await
                 .context("opening role-downgrade savepoint")?;
-            let altered = sqlx::query("ALTER ROLE CURRENT_USER NOSUPERUSER CREATEDB")
-                .execute(&mut *tx)
-                .await;
+            let altered = sqlx::query(&alter_sql).execute(&mut *tx).await;
             match altered {
                 Ok(_) => {
                     sqlx::query("RELEASE SAVEPOINT role_downgrade")
