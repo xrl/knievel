@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
   title: knievel
-  version: 0.1.8
+  version: 0.1.9
 servers:
 - url: http://localhost:8080
   description: Local development default; override via your client's host configuration for production.
