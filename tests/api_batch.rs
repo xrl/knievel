@@ -237,7 +237,14 @@ macro_rules! cross_tenant_batch_test {
                 .body_json(&body)
                 .send()
                 .await;
-            resp.assert_status(poem::http::StatusCode::FORBIDDEN);
+            let status = resp.0.status();
+            if status != poem::http::StatusCode::FORBIDDEN {
+                let body_bytes = resp.0.into_body().into_bytes().await.unwrap_or_default();
+                let body_str = String::from_utf8_lossy(&body_bytes);
+                panic!(
+                    "expected 403 FORBIDDEN, got {status}: body={body_str}"
+                );
+            }
             testlib::db::ephemeral_drop(f.db).await?;
             Ok(())
         }
