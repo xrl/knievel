@@ -28,6 +28,99 @@ for v0 and will be a separate deliverable.
 - An embedded editor for `creative_template.schema` JSON Schema.
   Raw JSON textarea with validation is acceptable for v0.
 
+## Information architecture
+
+Knievel's resources don't fit a single drill-down tree. There
+are two shapes:
+
+- **Demand tree** — Advertiser → Campaign → Flight → Ad →
+  Creative. Natural parent/child chain; the obvious flow when
+  auditing "what is project X actually serving."
+- **Lateral surfaces** — Sites and Zones (inventory), Creative
+  Templates and Taxonomy (config), Ad Library (org-scoped,
+  referenced from project Ads), Members and Tokens (org admin).
+  Siblings at the project or org level, not children of
+  advertisers. Forcing them under the demand tree makes "list
+  every template" or "where is this site referenced" needlessly
+  indirect.
+
+The UI splits the difference. A left rail at the project
+workspace organizes resources into four sections; an org-level
+rail handles the cross-project surfaces. **Every resource is
+reachable two ways**: a flat searchable list view (cursor
+pagination + filter, the audit-first path) and via the demand
+tree when that's the natural drill-down. Detail pages
+reconstruct the parent chain from the API and surface it as
+breadcrumbs.
+
+### Rail layout
+
+| Section | Scope | Resources | Backing endpoints |
+|---|---|---|---|
+| Demand | Project | Advertisers, Campaigns, Flights, Ads, Creatives | `/v1/projects/{p}/{resource}` |
+| Inventory | Project | Sites, Zones | `/v1/projects/{p}/{resource}` |
+| Config | Project | Creative Templates, Taxonomy (Channels, Priorities, Ad Types) | `/v1/projects/{p}/{resource}` |
+| Reports | Project | Rollups, Decision Explainer, Events tail (post-7.8) | `/v1/projects/{p}/decisions:explain`, `/events`, reporting endpoints |
+| Library | Org | Ad Library items | `/v1/orgs/{o}/ad-library/items` |
+| Settings | Org | Projects list, Members, Tokens | `/v1/orgs/{o}/{resource}` |
+
+### Routes
+
+URLs are **flat per resource within a project** —
+`{resource}/{id}`, not `{advertiser}/{id}/campaigns/{id}/flights/...`.
+Resource IDs are unique within scope, so threading every parent
+through the URL makes deep links unwieldy and breaks when a
+resource moves between parents (reparenting an Ad to a
+different Flight, etc.). Cross-resource filters use query
+strings: `/projects/{p}/flights?campaign={c}`.
+
+```
+/                                          → redirect to last org/project
+/orgs/{org_id}                             → org dashboard
+/orgs/{org_id}/projects                    → projects list
+/orgs/{org_id}/members
+/orgs/{org_id}/tokens
+/orgs/{org_id}/library
+/orgs/{org_id}/library/{item_id}
+
+/orgs/{org_id}/projects/{project_id}       → project dashboard
+
+  # Demand
+  /advertisers              /advertisers/{advertiser_id}
+  /campaigns                /campaigns/{campaign_id}
+  /flights                  /flights/{flight_id}
+  /ads                      /ads/{ad_id}
+  /creatives                /creatives/{creative_id}
+
+  # Inventory
+  /sites                    /sites/{site_id}
+  /zones                    /zones/{zone_id}
+
+  # Config
+  /templates                /templates/{template_id}
+  /taxonomy                 → channels / priorities / ad-types tabs
+
+  # Reports (post-7.8)
+  /reports                  → rollup charts
+  /reports/explain          → decision explainer
+  /reports/events           → tail of /events
+```
+
+### Cmd+K spotlight
+
+Mantine's `Spotlight` (or equivalent) gives operators a single
+search box to jump by ID, `externalId`, or name across every
+resource in the active project. Backed by the same flat list
+endpoints (`?q=...`); no separate search index in v0.
+
+### Read-then-edit phasing
+
+Read-only auditor views (Demand + Inventory + Config + Library)
+land first as the 7.5 / 7.6 slices. Editing (7.7) layers
+PATCH/POST forms onto the same routes — same nav, same detail
+shells, same breadcrumbs. Reports (7.8) and OIDC hardening
+(7.9) extend the rail without reshaping it.
+
 ## Stack
 
 | Concern | Choice | Why |
@@ -81,11 +174,26 @@ web/admin/
       runtimeConfig.ts    # fetches /admin/config.json on boot
     routes/
       __root.tsx
-      projects/
-        index.tsx
-        $project_id.tsx
-        $project_id.advertisers.tsx
-        ...
+      orgs/
+        $org_id.tsx                 # org dashboard + rail
+        $org_id.members.tsx
+        $org_id.tokens.tsx
+        $org_id.library.tsx
+        $org_id.library.$item_id.tsx
+        $org_id.projects.tsx
+        $org_id.projects.$project_id.tsx          # project dashboard + rail
+        $org_id.projects.$project_id.advertisers.tsx
+        $org_id.projects.$project_id.advertisers.$advertiser_id.tsx
+        $org_id.projects.$project_id.campaigns.tsx
+        $org_id.projects.$project_id.flights.tsx
+        $org_id.projects.$project_id.ads.tsx
+        $org_id.projects.$project_id.creatives.tsx
+        $org_id.projects.$project_id.sites.tsx
+        $org_id.projects.$project_id.zones.tsx
+        $org_id.projects.$project_id.templates.tsx
+        $org_id.projects.$project_id.taxonomy.tsx
+        $org_id.projects.$project_id.reports.tsx
+        ...                           # detail routes mirror the list routes
     components/
       DataTable.tsx       # Mantine + TanStack Table wrapper
       JsonView.tsx        # read-only JSON inspector for audit
