@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>knievel API reference</title>
+  <meta name="description" content="Live OpenAPI 3.0 reference for knievel. Rendered from the spec on the main branch.">
+  <style>
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .topbar { padding: .8rem 1.2rem; border-bottom: 1px solid #e5e7eb; display: flex; gap: 1rem; align-items: center; }
+    .topbar a { color: #1f2937; text-decoration: none; font-weight: 600; }
+    .topbar a:hover { text-decoration: underline; }
+    .topbar .sep { color: #9ca3af; }
+  </style>
+</head>
+<body>
+
+<nav class="topbar">
+  <a href="index.html">← knievel</a>
+  <span class="sep">·</span>
+  <span>API reference (live from main)</span>
+  <span class="sep">·</span>
+  <a href="https://github.com/knievel-ads/knievel/blob/main/openapi.yaml">openapi.yaml</a>
+  <span class="sep">·</span>
+  <a href="https://github.com/knievel-ads/knievel/blob/main/API.md">API.md (prose)</a>
+</nav>
+
+<!--
+  Redoc renders openapi.yaml fetched at runtime from the canonical
+  source on `main`. This always reflects the latest spec —
+  consumers who need a pinned version should reference the
+  `openapi.yaml` at a specific tag (e.g. .../knievel/blob/v0.1.6/openapi.yaml).
+-->
+<redoc spec-url="https://raw.githubusercontent.com/knievel-ads/knievel/main/openapi.yaml"></redoc>
+<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+
+</body>
+</html>
