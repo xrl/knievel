@@ -78,21 +78,54 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-anyhow      = { workspace = true }
-criterion   = "0.5"
-poem        = { workspace = true, features = ["test"] }
-serde_json  = { workspace = true }
-sqlx        = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate"] }
-testlib     = { path = "testlib" }
-tokio       = { workspace = true }
+anyhow        = { workspace = true }
+criterion     = "0.5"
+# Phase 5.9 — instruction-counting benches for hardware-independent
+# normalization across releases. Valgrind dependency lives in the
+# cloud-session runbook (`bench/README.md`), not CI.
+iai-callgrind = "0.16"
+# Phase 5.9 — heap profiler. Activated only via the `dhat-heap`
+# feature so production builds and normal `cargo test` are
+# unaffected.
+dhat          = "0.3"
+poem          = { workspace = true, features = ["test"] }
+serde_json    = { workspace = true }
+sqlx          = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate"] }
+testlib       = { path = "testlib" }
+tokio         = { workspace = true }
+
+# Phase 5.9 — opt-in heap profiling for `benches/dhat_decision.rs`.
+# Disabled by default; the bench's `#[global_allocator]` swap is
+# behind this gate so normal builds don't replace the system
+# allocator.
+[features]
+dhat-heap = []
 
 # Phase 5.7 — criterion micro-benchmarks for the hot inner loops.
-# Macro load tests against a running knievel are documented in
-# `bench/macro/README.md`; they are operator-run, not CI.
+# Phase 5.9 — extended end-to-end criterion + iai-callgrind +
+# dhat heap-profile harness. Macro load tests against a running
+# knievel are documented in `bench/README.md`; they are
+# operator-run, not CI.
 [[bench]]
 name    = "selection_pick"
 harness = false
 
 [[bench]]
 name    = "hmac_verify"
+harness = false
+
+[[bench]]
+name    = "decision_handler"
+harness = false
+
+[[bench]]
+name    = "iai_decision"
+harness = false
+
+[[bench]]
+name    = "iai_hmac"
+harness = false
+
+[[bench]]
+name    = "dhat_decision"
 harness = false
