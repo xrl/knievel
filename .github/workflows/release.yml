@@ -11,23 +11,25 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# A tag never lands on `main` without first riding through a PR
+# whose `ci.yml` matrix went green (branch protection on `main`
+# requires the full per-PR DAG defined in TESTING.md § 12.4).
+# Re-running the same gates on the tag commit produced almost-zero
+# additional signal — locked deps make it deterministic — at the
+# cost of ~25 min of release wall-time. So this workflow trusts
+# the PR gate and only does the things that are intrinsically
+# tag-specific: build + sign artifacts, regen the gem, cut the
+# GitHub Release. If you need to verify the tag commit in
+# isolation, run `gh workflow run ci.yml --ref <tag>` manually.
+
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/knievel
 
 jobs:
-  ci:
-    name: per-PR CI on tag
-    uses: ./.github/workflows/ci.yml
-    # The `gem build + smoke` job needs the knievel-pipelines
-    # App credentials to mint a token for cross-repo checkout;
-    # `workflow_call` does not pass secrets implicitly.
-    secrets: inherit
-
   publish-image:
     name: publish container image
-    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,7 +107,6 @@ jobs:
 
   build-cli:
     name: build knievel-cli (${{ matrix.target }})
-    needs: ci
     permissions:
       contents: read
       id-token: write       # cosign keyless on the artifact digest
@@ -304,12 +305,15 @@ jobs:
     # downstream workflows, unlike pushes via the default
     # GITHUB_TOKEN — that's what makes the chain work.)
     #
-    # Gated on `needs: ci` so the gem build + smoke job (in
-    # ci.yml) has to pass before any publish — the gem only
-    # leaves this repo if smoke proves it talks to a freshly
-    # built knievel image.
+    # Smoke-test rationale: the `gem-build` job in ci.yml
+    # already regenerated this gem on the merging PR, built it,
+    # and ran `examples/compose/gem_smoke.rb` against a freshly
+    # built knievel image. If the PR's `gem-build` was green,
+    # this regen against the same `openapi.yaml` is a tautology.
+    # Re-running the smoke at tag time would only catch
+    # toolchain-flake regressions in the openapi-generator
+    # action — not worth the wall-time on every release.
     name: release ruby gem
-    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -844,8 +844,14 @@ changes.
 ### 12.9 Release-tagging workflow
 
 `.github/workflows/release.yml`, triggered on `push` to tags
-matching `v*`. Runs the per-PR DAG (so a tag never goes out without
-green tests), then:
+matching `v*`. **Trusts the `main` gate.** The PR that landed the
+tagged commit already ran the per-PR DAG (§ 12.4) green; branch
+protection on `main` makes that a hard precondition. Re-running
+clippy / unit / db / api / acceptance / gem-build+smoke / helm-lint
+/ doc-link / ui-{typecheck,lint,test,build} on the tag commit is
+deterministic with `--locked` deps and yields ~zero additional
+signal at ~25 min wall-time. So the tag workflow only does what
+is intrinsically tag-specific:
 
 1. **Bench regression check.** `bench/results/<version>.md` must be
    present for any release that touches `selection::*` /
@@ -863,6 +869,11 @@ green tests), then:
 5. **Ruby gem rebuilt** from the released spec, version bumped to
    match the spec version, pushed to RubyGems.
 6. **GitHub Release** created with the changelog and artifact links.
+
+If a tag commit needs verification in isolation (e.g. you suspect
+the merge-vs-tag SHA chain was broken by a force-push), run
+`gh workflow run ci.yml --ref <tag>` manually — `ci.yml` accepts
+arbitrary refs.
 
 Release jobs do not run with `cancel-in-progress`. A retried tag
 creates a new run; partial publishes are documented in
