@@ -6,6 +6,25 @@
 //! date window.
 //!
 //! Spec refs: `API.md` § 3.3.
+//!
+//! ## Fixes applied (audit findings #5 / #7)
+//!
+//! - **Same-project FK on `campaign_id`** (opus O7): before the
+//!   INSERT/UPDATE, a SELECT inside the bound transaction confirms
+//!   the campaign exists in this project. Because the transaction
+//!   already has `knievel.project_id` set, the campaigns RLS policy
+//!   enforces project membership automatically. A missing campaign
+//!   returns `422 fk_not_found`; a cross-project campaign also
+//!   returns `422` (RLS hides it from the SELECT, same as missing).
+//!
+//! - **`start_date <= end_date` validation** (sonnet #11): the
+//!   handler pre-validates the date order before touching the DB
+//!   and returns `400 invalid_date_range`. The schema-level CHECK
+//!   constraint in migration 0014 is the belt to this suspender.
+//!
+//! - **Batch short-circuits on first row error** (opus O5):
+//!   replaced with `crate::batch::run_batch_with_savepoints` so
+//!   every row gets a diagnostic even when earlier rows fail.
 
 // Flight is a wide struct (10+ fields), so each ApiResponse
 // variant carrying `Json<Flight>` is large compared to the
@@ -23,7 +42,7 @@ use poem_openapi::{
 use crate::api_tags::ApiTags;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
-use crate::batch::{classify_pg_error, BatchErrorDetail, BatchErrorEnvelope};
+use crate::batch::{run_batch_with_savepoints, BatchErrorDetail, BatchErrorEnvelope};
 use crate::handlers::{open_project_tx, AuthzError};
 use crate::orgs::{ErrorBody, ErrorEnvelope};
 use crate::state::AppState;
@@ -163,6 +182,8 @@ pub enum GetResp {
 pub enum UpdateResp {
     #[oai(status = 200)]
     Ok(Json<Flight>),
+    #[oai(status = 400)]
+    BadRequest(Json<ErrorEnvelope>),
     #[oai(status = 403)]
     Forbidden(Json<ErrorEnvelope>),
     #[oai(status = 404)]
@@ -195,6 +216,48 @@ fn forbid<R, F: FnOnce(Json<ErrorEnvelope>) -> R>(f: F, e: AuthzError) -> R {
     f(Json(err(e.code(), e.message())))
 }
 
+/// Validate that `start_date` does not come after `end_date` when
+/// both are supplied. Both are raw ISO-8601 strings at this point;
+/// lexicographic order is correct for UTC timestamps of the form
+/// `YYYY-MM-DDTHH:MM:SS…` (the format that `to_char` produces on
+/// the read path). On the write path callers supply the same format.
+/// Returns `Err` with an error envelope when the order is invalid.
+fn validate_date_order(
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+) -> Result<(), ErrorEnvelope> {
+    match (start_date, end_date) {
+        (Some(s), Some(e)) if s > e => Err(err(
+            "invalid_date_range",
+            "start_date must not be later than end_date",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Pre-validate that `campaign_id` belongs to the bound project.
+///
+/// The transaction already has `knievel.project_id` set, so the
+/// campaigns RLS policy filters the SELECT to only the bound
+/// project. If the campaign is missing (either truly absent or in a
+/// different project), the SELECT returns `None` and the caller
+/// returns `422 fk_not_found`.
+async fn check_campaign_in_project(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    campaign_id: i64,
+) -> Result<(), ()> {
+    let found: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM knievel.campaigns WHERE id = $1")
+            .bind(campaign_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .unwrap_or(None);
+    if found.is_none() {
+        return Err(());
+    }
+    Ok(())
+}
+
 #[OpenApi(tag = "ApiTags::Flights")]
 impl FlightsApi {
     #[oai(
@@ -221,6 +284,11 @@ impl FlightsApi {
             )));
         }
 
+        // start_date must not be after end_date (sonnet #11).
+        if let Err(e) = validate_date_order(req.start_date.as_deref(), req.end_date.as_deref()) {
+            return CreateResp::BadRequest(Json(e));
+        }
+
         let pool = match state.0.db.as_ref() {
             Some(p) => p,
             None => return CreateResp::Internal(Json(err("no_db", "no database configured"))),
@@ -229,6 +297,19 @@ impl FlightsApi {
             Ok(t) => t,
             Err(e) => return forbid(CreateResp::Forbidden, e),
         };
+
+        // Pre-validate campaign_id belongs to this project (opus O7).
+        // The bound tx has knievel.project_id set so campaigns RLS
+        // filters to the project automatically.
+        if check_campaign_in_project(&mut tx, req.campaign_id)
+            .await
+            .is_err()
+        {
+            return CreateResp::Unprocessable(Json(err(
+                "fk_not_found",
+                "campaign_id does not exist in this project",
+            )));
+        }
 
         // Parse start/end_date as timestamptz at the SQL layer to
         // avoid pulling in chrono. NULL stays NULL.
@@ -274,11 +355,6 @@ impl FlightsApi {
                     CreateResp::Conflict(Json(err(
                         "external_id_conflict",
                         "external_id is already taken in this project",
-                    )))
-                } else if kind.is_fk_violation() {
-                    CreateResp::Unprocessable(Json(err(
-                        "fk_not_found",
-                        "campaign_id does not exist in this project",
                     )))
                 } else {
                     tracing::error!(error = %e, kind = ?kind, "flight insert failed");
@@ -398,6 +474,12 @@ impl FlightsApi {
         let pj = project_id.0;
         let id = id.0;
         let req = body.0;
+
+        // start_date must not be after end_date when both are supplied.
+        if let Err(e) = validate_date_order(req.start_date.as_deref(), req.end_date.as_deref()) {
+            return UpdateResp::BadRequest(Json(e));
+        }
+
         let pool = match state.0.db.as_ref() {
             Some(p) => p,
             None => return UpdateResp::Internal(Json(err("no_db", "no database configured"))),
@@ -443,8 +525,16 @@ impl FlightsApi {
             },
             Ok(None) => UpdateResp::NotFound(Json(err("not_found", "flight not found"))),
             Err(e) => {
-                tracing::error!(error = %e, "update flight failed");
-                UpdateResp::Internal(Json(err("db_error", "update failed")))
+                let kind = crate::sql::classify_pg_error(&e);
+                if kind.is_check_violation() {
+                    UpdateResp::BadRequest(Json(err(
+                        "invalid_date_range",
+                        "start_date must not be later than end_date",
+                    )))
+                } else {
+                    tracing::error!(error = %e, "update flight failed");
+                    UpdateResp::Internal(Json(err("db_error", "update failed")))
+                }
             }
         }
     }
@@ -468,30 +558,43 @@ impl FlightsApi {
             Some(p) => p,
             None => return BatchResp::Internal(Json(err("no_db", "no database configured"))),
         };
-        // Pre-validate ad_types non-empty per `API.md` § 3.3 BEFORE
-        // touching the DB — these are validation_failed, not
-        // FK/unique violations.
+
+        // Pre-validate per-row invariants before touching the DB so
+        // these surface as deterministic validation_failed errors at
+        // known indices.
+        let mut pre_errors: Vec<BatchErrorDetail> = Vec::new();
         for (idx, row) in req.items.iter().enumerate() {
             if row.ad_types.is_empty() {
-                return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
-                    req.items.len(),
-                    vec![BatchErrorDetail {
-                        index: idx as i32,
-                        field: Some("adTypes".into()),
-                        code: "validation_failed".into(),
-                        message: "ad_types must be a non-empty array".into(),
-                    }],
-                )));
+                pre_errors.push(BatchErrorDetail {
+                    index: idx as i32,
+                    field: Some("adTypes".into()),
+                    code: "validation_failed".into(),
+                    message: "ad_types must be a non-empty array".into(),
+                });
+            }
+            if validate_date_order(row.start_date.as_deref(), row.end_date.as_deref()).is_err() {
+                pre_errors.push(BatchErrorDetail {
+                    index: idx as i32,
+                    field: Some("startDate".into()),
+                    code: "invalid_date_range".into(),
+                    message: "start_date must not be later than end_date".into(),
+                });
             }
         }
+        if !pre_errors.is_empty() {
+            let total = req.items.len();
+            return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
+                total,
+                pre_errors,
+            )));
+        }
+
         let mut tx = match open_project_tx(pool, &principal, &pj, Role::Editor).await {
             Ok(t) => t,
             Err(e) => return forbid(BatchResp::Forbidden, e),
         };
-        let total = req.items.len();
-        let mut out: Vec<Flight> = Vec::with_capacity(total);
-        let mut details: Vec<BatchErrorDetail> = Vec::new();
-        let sql = format!(
+
+        let upsert_sql = format!(
             "INSERT INTO knievel.flights
                  (org_id, project_id, campaign_id, external_id, name, priority_id,
                   start_date, end_date, site_ids, zone_ids, ad_types, is_active)
@@ -514,27 +617,77 @@ impl FlightsApi {
                  updated_at = now()
              RETURNING {COLS}"
         );
-        for (idx, row) in req.items.iter().enumerate() {
-            let r: Result<Flight, _> = sqlx::query_as(&sql)
-                .bind(&principal.org_id)
-                .bind(&pj)
-                .bind(row.campaign_id)
-                .bind(&row.external_id)
-                .bind(&row.name)
-                .bind(row.priority_id)
-                .bind(row.start_date.as_deref())
-                .bind(row.end_date.as_deref())
-                .bind(row.site_ids.as_deref())
-                .bind(row.zone_ids.as_deref())
-                .bind(&row.ad_types)
-                .bind(row.is_active)
-                .fetch_one(&mut *tx)
-                .await;
-            match r {
+
+        let org_id = principal.org_id.clone();
+        let pj2 = pj.clone();
+        let items = req.items;
+
+        // Use savepoints so each row failure is isolated — the outer
+        // transaction stays alive and every row gets a diagnostic
+        // entry (opus O5 finding).
+        let results = run_batch_with_savepoints(&mut tx, &items, |tx2, _idx, row| {
+            let sql = upsert_sql.clone();
+            let org_id = org_id.clone();
+            let pj2 = pj2.clone();
+            let campaign_id = row.campaign_id;
+            let external_id = row.external_id.clone();
+            let name = row.name.clone();
+            let priority_id = row.priority_id;
+            let start_date = row.start_date.clone();
+            let end_date = row.end_date.clone();
+            let site_ids = row.site_ids.clone();
+            let zone_ids = row.zone_ids.clone();
+            let ad_types = row.ad_types.clone();
+            let is_active = row.is_active;
+            Box::pin(async move {
+                // Same-project campaign_id check (opus O7).
+                // The tx has knievel.project_id set so campaigns RLS
+                // filters to the bound project automatically.
+                let found: Option<(i64,)> =
+                    sqlx::query_as("SELECT id FROM knievel.campaigns WHERE id = $1")
+                        .bind(campaign_id)
+                        .fetch_optional(&mut **tx2)
+                        .await?;
+                if found.is_none() {
+                    // Surface as a recognisable RowNotFound so the
+                    // error-classifier below emits fk_not_found.
+                    return Err(sqlx::Error::RowNotFound);
+                }
+                sqlx::query_as::<_, Flight>(&sql)
+                    .bind(&org_id)
+                    .bind(&pj2)
+                    .bind(campaign_id)
+                    .bind(&external_id)
+                    .bind(&name)
+                    .bind(priority_id)
+                    .bind(start_date.as_deref())
+                    .bind(end_date.as_deref())
+                    .bind(site_ids.as_deref())
+                    .bind(zone_ids.as_deref())
+                    .bind(&ad_types)
+                    .bind(is_active)
+                    .fetch_one(&mut **tx2)
+                    .await
+            })
+        })
+        .await;
+
+        let total = items.len();
+        let mut out: Vec<Flight> = Vec::with_capacity(total);
+        let mut details: Vec<BatchErrorDetail> = Vec::new();
+
+        for (idx, result) in results.into_iter().enumerate() {
+            match result {
                 Ok(f) => out.push(f),
                 Err(e) => {
-                    let m = format!("{e}");
-                    let (code, msg) = classify_pg_error(&m);
+                    let (code, msg) = if matches!(e, sqlx::Error::RowNotFound) {
+                        (
+                            "fk_not_found",
+                            Some("campaign_id does not exist in this project"),
+                        )
+                    } else {
+                        crate::sql::classify_pg_error(&e).as_batch_detail()
+                    };
                     details.push(BatchErrorDetail {
                         index: idx as i32,
                         field: if code == "fk_not_found" {
@@ -545,10 +698,10 @@ impl FlightsApi {
                         code: code.into(),
                         message: msg.unwrap_or("row failed validation").into(),
                     });
-                    break;
                 }
             }
         }
+
         if !details.is_empty() {
             let _ = tx.rollback().await;
             return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(

@@ -1358,6 +1358,12 @@ paths:
             application/json; charset=utf-8:
               schema:
                 $ref: '#/components/schemas/Flight'
+        '400':
+          description: ''
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: ''
           content:
