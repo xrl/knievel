@@ -79,7 +79,8 @@ justification in the same PR.
 ### Release artifacts
 
 - [ ] `release.yml` workflow ran successfully on the tag (all jobs
-      green: `publish-image`, `build-cli`, `github-release`,
+      green: `publish-image` (matrix: amd64 + arm64),
+      `publish-image-merge`, `build-cli`, `github-release`,
       `release-ruby-gem`). The PR that merged the release commit
       to `main` already ran the per-PR DAG; the tag workflow does
       not re-run it (TESTING.md § 12.9).

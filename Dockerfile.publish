@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1.7
+#
+# Thin runtime image. Used by `release.yml`'s `publish-image` job,
+# which builds the `knievel` + `knievel-cli` binaries NATIVELY on
+# the runner — one matrix entry per supported arch (`ubuntu-latest`
+# for amd64, `ubuntu-24.04-arm` for arm64) — and copies the
+# resulting binaries in here. No cross-compilation, no QEMU.
+#
+# `Dockerfile` (the build-from-source variant in this same dir)
+# stays the canonical path for `docker compose up` / local dev /
+# contributor workflows where a Rust toolchain isn't already set
+# up on the host.
+#
+# The runtime base mirrors `Dockerfile`: `cc:nonroot` (rather than
+# `static:nonroot`) because rustls-tls links libgcc_s, which lives
+# in the `cc` variant. UID 65532, no shell, no package manager.
+
+FROM gcr.io/distroless/cc-debian12:nonroot
+
+# Pre-built binaries. The build context must match the target
+# architecture — see `release.yml` for the runner-to-arch pairing.
+COPY knievel /usr/local/bin/knievel
+COPY knievel-cli /usr/local/bin/knievel-cli
+
+# Admin UI bundle (Phase 7.11). Built outside the container so
+# pnpm's store cache works natively on the runner.
+COPY web/admin/dist /var/lib/knievel/admin
+
+USER nonroot:nonroot
+EXPOSE 8080
+
+ENV KNIEVEL_CONFIG=/etc/knievel/config.yaml
+ENV KNIEVEL_ADMIN_UI__STATIC_DIR=/var/lib/knievel/admin
+
+ENTRYPOINT ["/usr/local/bin/knievel"]
