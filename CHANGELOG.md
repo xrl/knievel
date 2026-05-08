@@ -23,6 +23,20 @@ authoritative per-commit log is `git log` plus `PHASES.md`.
 
 (none)
 
+## [0.1.18] — 2026-05-08
+
+### Added
+
+(none)
+
+### Changed
+
+(none)
+
+### Fixed
+
+(none)
+
 ## [0.1.17] — 2026-05-08
 
 ### Added
@@ -273,7 +287,8 @@ authoritative per-commit log is `git log` plus `PHASES.md`.
 Squatted `knievel` on RubyGems. No public release; first real
 release was `0.1.1`.
 
-[Unreleased]: https://github.com/knievel-ads/knievel/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/knievel-ads/knievel/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/knievel-ads/knievel/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/knievel-ads/knievel/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/knievel-ads/knievel/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/knievel-ads/knievel/compare/v0.1.14...v0.1.15
