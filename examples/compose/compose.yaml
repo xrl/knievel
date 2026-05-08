@@ -101,7 +101,15 @@ services:
       DATABASE_URL: postgres://knievel_app:dev@knievel-postgres:5432/knievel?sslmode=disable
     volumes:
       - ../../tmp:/out
-    restart: "no"
+    # seed-demo and the knievel server both depend on
+    # knievel-postgres being healthy, but seed-demo can race ahead
+    # of the server's `auto_migrate: true` and hit
+    # `relation "knievel.organizations" does not exist`. Knievel's
+    # distroless image precludes a docker healthcheck we could
+    # `depends_on: condition: service_healthy` against — so let
+    # docker restart seed-demo on failure. It's idempotent and
+    # converges within a couple of seconds once migrations land.
+    restart: on-failure
 
 volumes:
   knievel-pgdata:
