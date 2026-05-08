@@ -600,6 +600,31 @@ manager and leader election running.
       refactor commit can extract it then. The Phase 3.5 note
       about external_id idempotency remains: today external_id
       reuse returns 409, not 200-replay.
+
+      **Note (3.9 — audit fixes, PR #9):** Four findings from the
+      sonnet (#5) and opus (#7) code audits were closed
+      post-merge:
+      - *Sonnet #10* — `priority_id` had no FK to
+        `knievel.priorities(id)`. Migration `0014` adds the FK
+        as `DEFERRABLE INITIALLY DEFERRED` (seeds before taxonomy
+        rows still commit).
+      - *Sonnet #11* — no `CHECK (start_date <= end_date)` at the
+        schema layer. Migration `0014` adds the constraint.
+        Handler pre-validates and returns `400 invalid_date_range`
+        before touching the DB.
+      - *Opus O7* — `campaign_id` was not validated against the
+        bound project before the INSERT. Fixed with a pre-flight
+        SELECT inside the bound transaction; campaigns RLS filters
+        to the project automatically, so a cross-project
+        `campaign_id` returns `422 fk_not_found` identically to
+        a missing one.
+      - *Opus O24* — cross-tenant manifest listed
+        `cross_tenant_flights_{create,list,get,patch}` but no
+        real test functions existed. `tests/api_flights.rs` now
+        provides all four, plus additional coverage for the
+        campaign FK and date-range fixes.
+      Batch handler migrated from `break`-on-first-error to
+      `crate::batch::run_batch_with_savepoints` (opus O5).
 - [x] **3.10** Creative + CreativeTemplate CRUD.
       `creative_templates` stores the JSON Schema document as
       `serde_json::Value` — poem-openapi treats this as a
