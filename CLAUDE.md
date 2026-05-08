@@ -375,20 +375,18 @@ The harness git safety rules still apply unconditionally:
 
 - **Phase 1**: complete (foundation rails).
 - **Phase 2**: complete (walking skeleton).
-- **Phase 3**: decomposed into 29 tasks (Phase 3.0 commit). The
-  tenancy + auth rail (3.1–3.6) and resource-CRUD rail
-  (3.7–3.13) are complete; `xtask check-cross-tenant` reports
-  **38 project-scoped endpoints, all covered**, and
-  `openapi.yaml` is ~74 KB.
-- **Next task: 3.14** — `:batchUpsert` for every CRUD resource
-  that declares it (advertisers, campaigns, flights, ads,
-  sites, zones). Single Postgres transaction with per-row
-  diagnostics matching `API.md` "Write contract"; cross-entity
-  FK validation inside the transaction. The
-  `crud_contract!` macro (deferred from 3.8 / 3.9) should be
-  extracted in this commit — the `:batchUpsert` test rows are
-  the natural unit for the macro. After 3.14 the hot-path rail
-  starts (3.15 selection → 3.21 events).
+- **Phase 3**: complete (29 tasks across tenancy/auth, CRUD,
+  hot-path, and cursor pagination). `xtask check-cross-tenant`
+  reports all project-scoped endpoints covered.
+- **Phase 4**: deployment rails complete (compose stack,
+  containers, helm, acceptance suite, ad templating, ruby gem
+  codegen, repo rehome). Only 4.11 (kind-helm e2e) is open.
+- **Phase 5**: docs done; bench harness extended to a full
+  three-signal suite (criterion + iai-callgrind + dhat) plus a
+  macro-load script, all run from cloud sessions via
+  `cargo xtask bench-all`. Schema lives in
+  `bench/results/SCHEMA.md`. Next is **5.8** (release-tagging
+  workflow → first checklist-gated cut, `v0.1.7`).
 
 Risks to front-load (per `PHASES.md` cross-cutting risks):
 

@@ -112,6 +112,159 @@ pub enum DecisionsResp {
     Unavailable(Json<ErrorEnvelope>),
 }
 
+/// Pure (Postgres-free, HTTP-free) result of running selection,
+/// HMAC signing, and event composition for a request. The handler
+/// drains `events` to the bounded mpsc channel; benchmarks discard
+/// them or collect them into a `Vec` sink.
+pub struct DecideOutcome {
+    pub response: DecisionsResponse,
+    pub events: Vec<events::Event>,
+}
+
+/// Validation errors produced by `decide_pure`. The handler maps
+/// these onto `400` responses; benchmarks treat them as fixture
+/// bugs and panic.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DecideError {
+    PlacementsRequired,
+    TooManyPlacements,
+    AdTypesRequired,
+}
+
+impl DecideError {
+    fn code(&self) -> &'static str {
+        match self {
+            DecideError::PlacementsRequired => "placements_required",
+            DecideError::TooManyPlacements => "too_many_placements",
+            DecideError::AdTypesRequired => "ad_types_required",
+        }
+    }
+
+    fn message(&self) -> &'static str {
+        match self {
+            DecideError::PlacementsRequired => "placements must be a non-empty array",
+            DecideError::TooManyPlacements => "max 32 placements per request",
+            DecideError::AdTypesRequired => "placements[].ad_types must be a non-empty array",
+        }
+    }
+}
+
+/// Run filter → priority → weighted_random → HMAC sign for every
+/// placement against an in-memory snapshot. Pure: takes nothing
+/// that can touch Postgres or HTTP and returns nothing that
+/// requires them. The handler wraps this with auth, snapshot
+/// lookup, force-gate audit, and event drain; benchmarks call it
+/// directly.
+///
+/// `force_active` is the *result* of the three-control gate, not
+/// a request flag — the caller decides whether the override path
+/// runs. The pure function never reads global state and never
+/// writes to `audit_log`.
+pub fn decide_pure(
+    project: &ProjectSnapshot,
+    snapshot_version: i64,
+    principal: &Principal,
+    project_id: &str,
+    req: &DecisionsRequest,
+    now_ms: i64,
+    force_active: bool,
+) -> Result<DecideOutcome, DecideError> {
+    if req.placements.is_empty() {
+        return Err(DecideError::PlacementsRequired);
+    }
+    if req.placements.len() > 32 {
+        return Err(DecideError::TooManyPlacements);
+    }
+
+    let block = build_block(&req.block);
+    let now_secs = (now_ms / 1000) as u64;
+
+    let mut decisions: HashMap<String, Vec<DecisionAd>> = HashMap::new();
+    let mut events_to_send: Vec<events::Event> = Vec::new();
+    let context = req.context.as_ref();
+
+    for placement in &req.placements {
+        let resolved = match resolve_site(project, placement) {
+            Some(s) => s,
+            None => {
+                decisions.insert(placement.id.clone(), Vec::new());
+                continue;
+            }
+        };
+        if placement.ad_types.is_empty() {
+            return Err(DecideError::AdTypesRequired);
+        }
+        let count = placement.count.unwrap_or(1).clamp(1, 10) as u32;
+        let p = Placement {
+            site_id: resolved,
+            zone_ids: placement.zone_ids.clone().unwrap_or_default(),
+            ad_types: placement.ad_types.clone(),
+            count,
+        };
+
+        let cands = selection::filter(&project.flights, &project.ads, &p, &block, now_ms);
+        let top = selection::priority(&cands);
+        let seed = selection_seed(&placement.id, now_ms);
+        let mut picks: Vec<Candidate<'_>> = selection::weighted_random(&top, count, seed);
+
+        if force_active {
+            if let Some(ad_id) = placement.force.as_ref().and_then(|f| f.ad_id) {
+                if let Some(forced) = forced_candidate(project, ad_id) {
+                    picks = vec![forced];
+                } else {
+                    picks.clear();
+                }
+            }
+        }
+
+        let mut placement_out = Vec::with_capacity(picks.len());
+        for c in &picks {
+            let nonce = mint_nonce(now_ms, c.ad.id);
+            let payload = SignaturePayload {
+                project_id: project_id.to_string(),
+                ad_id: c.ad.id,
+                creative_id: 0,
+                placement_id_hash: hmac::placement_id_hash(project_id, &placement.id),
+                issued_at_secs: now_secs,
+                nonce,
+            };
+            let click_signed = hmac::sign(&payload, &project.hmac_secret);
+            let imp_signed = hmac::sign(&payload, &project.hmac_secret);
+            placement_out.push(DecisionAd {
+                ad_id: c.ad.id,
+                creative_id: 0,
+                flight_id: c.flight.id,
+                campaign_id: c.flight.campaign_id,
+                advertiser_id: c.flight.advertiser_id,
+                priority_id: c.flight.priority_tier as i64,
+                site_id: resolved,
+                click_url: format!("/e/c/{click_signed}"),
+                impression_url: format!("/e/i/{imp_signed}"),
+            });
+            events_to_send.push(decision_event(
+                principal,
+                project_id,
+                placement,
+                resolved,
+                c,
+                &nonce,
+                snapshot_version,
+                now_ms,
+                context,
+            ));
+        }
+        decisions.insert(placement.id.clone(), placement_out);
+    }
+
+    Ok(DecideOutcome {
+        response: DecisionsResponse {
+            snapshot_version,
+            decisions,
+        },
+        events: events_to_send,
+    })
+}
+
 fn err(code: &str, message: &str) -> ErrorEnvelope {
     ErrorEnvelope {
         error: ErrorBody {
@@ -158,16 +311,20 @@ impl DecisionsApi {
             Err(e) => return forbid(e),
         };
 
+        // Pre-flight validation runs before the snapshot grab so
+        // an empty/oversized request fails fast without reading
+        // RAM-bound state. `decide_pure` re-validates defensively
+        // for callers that don't share this prologue (benches).
         if req.placements.is_empty() {
             return DecisionsResp::BadRequest(Json(err(
-                "placements_required",
-                "placements must be a non-empty array",
+                DecideError::PlacementsRequired.code(),
+                DecideError::PlacementsRequired.message(),
             )));
         }
         if req.placements.len() > 32 {
             return DecisionsResp::BadRequest(Json(err(
-                "too_many_placements",
-                "max 32 placements per request",
+                DecideError::TooManyPlacements.code(),
+                DecideError::TooManyPlacements.message(),
             )));
         }
 
@@ -231,101 +388,26 @@ impl DecisionsApi {
             drop(tx);
         }
 
-        let block = build_block(&req.block);
-        let now_ms = epoch_ms();
-        let now_secs = (now_ms / 1000) as u64;
-
-        let mut decisions: HashMap<String, Vec<DecisionAd>> = HashMap::new();
-        let mut events_to_send: Vec<events::Event> = Vec::new();
-        let context = req.context.as_ref();
-        for placement in &req.placements {
-            let resolved = match resolve_site(project, placement) {
-                Some(s) => s,
-                None => {
-                    decisions.insert(placement.id.clone(), Vec::new());
-                    continue;
-                }
-            };
-            if placement.ad_types.is_empty() {
-                return DecisionsResp::BadRequest(Json(err(
-                    "ad_types_required",
-                    "placements[].ad_types must be a non-empty array",
-                )));
+        let outcome = match decide_pure(
+            project,
+            snap.config_version,
+            &principal,
+            &pj,
+            &req,
+            epoch_ms(),
+            force_active,
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                return DecisionsResp::BadRequest(Json(err(e.code(), e.message())));
             }
-            let count = placement.count.unwrap_or(1).clamp(1, 10) as u32;
-            let p = Placement {
-                site_id: resolved,
-                zone_ids: placement.zone_ids.clone().unwrap_or_default(),
-                ad_types: placement.ad_types.clone(),
-                count,
-            };
-
-            let cands = selection::filter(&project.flights, &project.ads, &p, &block, now_ms);
-            let top = selection::priority(&cands);
-            let seed = selection_seed(&placement.id, now_ms);
-            let mut picks: Vec<Candidate<'_>> = selection::weighted_random(&top, count, seed);
-
-            // Force.adId substitution: replace the picks with the
-            // forced ad if it exists in the snapshot. v0 honors
-            // `force.adId` only — campaignId/flightId/creativeId
-            // are accepted on the wire (so callers can stop
-            // sending them once we wire them up) but ignored
-            // during selection. Spec follow-up tracked in
-            // `PHASES.md`.
-            if force_active {
-                if let Some(ad_id) = placement.force.as_ref().and_then(|f| f.ad_id) {
-                    if let Some(forced) = forced_candidate(project, ad_id) {
-                        picks = vec![forced];
-                    } else {
-                        picks.clear();
-                    }
-                }
-            }
-
-            let mut placement_out = Vec::with_capacity(picks.len());
-            for c in &picks {
-                let nonce = mint_nonce(now_ms, c.ad.id);
-                let payload = SignaturePayload {
-                    project_id: pj.clone(),
-                    ad_id: c.ad.id,
-                    creative_id: 0, // resolved at the snapshot consumer; v0 stub
-                    placement_id_hash: hmac::placement_id_hash(&pj, &placement.id),
-                    issued_at_secs: now_secs,
-                    nonce,
-                };
-                let click_signed = hmac::sign(&payload, &project.hmac_secret);
-                let imp_signed = hmac::sign(&payload, &project.hmac_secret);
-                placement_out.push(DecisionAd {
-                    ad_id: c.ad.id,
-                    creative_id: 0,
-                    flight_id: c.flight.id,
-                    campaign_id: c.flight.campaign_id,
-                    advertiser_id: c.flight.advertiser_id,
-                    priority_id: c.flight.priority_tier as i64,
-                    site_id: resolved,
-                    click_url: format!("/e/c/{click_signed}"),
-                    impression_url: format!("/e/i/{imp_signed}"),
-                });
-                events_to_send.push(decision_event(
-                    &principal,
-                    &pj,
-                    placement,
-                    resolved,
-                    c,
-                    &nonce,
-                    snap.config_version,
-                    now_ms,
-                    context,
-                ));
-            }
-            decisions.insert(placement.id.clone(), placement_out);
-        }
+        };
 
         // Drain events into the channel after the response is
         // fully composed. Saturation fails fast at `503` per
         // `API.md` § 4 / `REQUIREMENTS.md` § 7.6.
         if let Some(sender) = state.0.events.as_ref() {
-            if let Err(()) = drain_to_sender(sender, events_to_send) {
+            if let Err(()) = drain_to_sender(sender, outcome.events) {
                 return DecisionsResp::Unavailable(Json(err(
                     "event_channel_saturated",
                     "events flusher cannot keep up; retry with backoff",
@@ -333,10 +415,7 @@ impl DecisionsApi {
             }
         }
 
-        DecisionsResp::Ok(Json(DecisionsResponse {
-            snapshot_version: snap.config_version,
-            decisions,
-        }))
+        DecisionsResp::Ok(Json(outcome.response))
     }
 }
 

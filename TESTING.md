@@ -436,24 +436,56 @@ gem-server skew is caught before tag, not at integration time.
 `REQUIREMENTS.md` § 9.2 is the source of truth. Summary of how the
 test suite plugs in:
 
-- **Bench harness** (`bench/`): `vegeta` or `k6` driving a knievel
-  binary built in `--release` against a synthetic project with 100 k
-  active flights drawn from a realistic distribution.
-- **Trigger**: any change to `selection::*`, `snapshot::*`, or
-  `events::flusher::*` is flagged by a Cargo crate-path check; the
-  release-tagging PR for such a release MUST include an entry in
-  `bench/results/<version>.md` per § 9.2.
-- **Reportable artifact**: knievel SHA, DB class, achieved QPS,
-  achieved p50/p95/p99, observed bottleneck, and a regression
-  comparison against the previous release's entry.
-- **Regression policy**: a > 20 % regression on any of (p50, p99,
-  sustained QPS) blocks the tag without an explicit waiver in the
-  release-tagging PR.
+- **Macro bench harness** (`bench/macro/`): `vegeta` driving a
+  knievel binary built in `--release` against a synthetic project
+  with 100 k active flights (`bench/macro/seed.sh`). Operator-run
+  on dedicated hardware; not part of CI.
+- **Micro + heap bench harness** (`benches/`): criterion (wall-
+  clock) + iai-callgrind (deterministic CPU instructions / cache
+  misses) + dhat-rs (heap allocations) covering the
+  `selection::*` inner loop, `hmac::verify`, and the full
+  Postgres-free `decisions::decide_pure` path.
+- **Runner**: **Claude Code cloud sessions, not CI.** A session
+  invokes `cargo xtask bench-all`, which reads the workspace
+  version from `Cargo.toml`, runs the entire suite, captures a
+  host fingerprint via `cargo xtask bench-env`, and writes
+  `bench/results/v<MAJ>.<MIN>.{md,json}` matching the schema in
+  `bench/results/SCHEMA.md`. Procedure documented in
+  `bench/README.md`.
+- **Trigger**: the release-tagging PR for any release that
+  bumps the workspace minor version MUST include the new
+  `bench/results/v<X>.json` entry; macro numbers in the
+  `macro` slot can be back-filled by an operator before the
+  tag fires.
+- **Reportable artifact**: pinned by `bench/results/SCHEMA.md`.
+  Top-level keys: `env` (CPU, memory, kernel, governor, rustc),
+  `micro_criterion` (wall-clock per fixture), `micro_iai`
+  (instruction counts per fixture), `heap_dhat` (allocations
+  per decision), `macro` (vegeta p50/p95/p99/QPS plus
+  concurrent CPU/RSS sampling).
 
-`criterion` micro-benchmarks live alongside the unit tests for the
-hot inner loops (`selection::weighted::pick`, `hmac::verify`). They
-run nightly, are not release-blocking, but a > 30 % regression opens
-an issue automatically.
+### Regression policy
+
+Per signal:
+
+| Signal | Threshold | Blocking? |
+|---|---|---|
+| `iai-callgrind` `events.Ir` | > 5% | Issue (deterministic; any drift is real) |
+| `criterion` micro `mean_ns` | > 30% | Issue |
+| `criterion` macro `p50_ms` / `p99_ms` | > 20% | Release tag |
+| `criterion` macro `throughput_qps` | > 20% | Release tag |
+| `dhat` `total_bytes` | > 30% | Issue |
+
+`cargo xtask bench-all --against v<prev>` reads the previous
+release's JSON and prints a markdown delta table; paste it into
+the release-tagging PR. The check is agent-driven, not gated by
+a workflow.
+
+The deterministic instruction counter is what makes the
+historical record portable across runners — wall-clock is
+±20% on cloud runners, but `events.Ir` is bit-identical across
+identical source on identical rustc. That's what lets
+`bench/results/v<X>.json` deltas survive a runner change.
 
 ## 9. Chaos / Degraded-Mode Suite
 

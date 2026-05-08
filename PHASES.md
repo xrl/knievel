@@ -2028,6 +2028,54 @@ checklist green.
       intentionally stays camelCase — that's JSON Schema, not
       knievel wire. Documented in `CONTRIBUTING.md`
       "Wire-format rule" and `DOCUMENTATION_PLAN.md` § 8.1.
+- [x] **5.9** Comprehensive decision benchmark suite +
+      historical record. Extracts `decisions::decide_pure` (the
+      Postgres-free, HTTP-free decision path) so benchmarks
+      can drive it directly. Adds three measurement tiers:
+      criterion (wall-clock), iai-callgrind (deterministic CPU
+      instructions / cache events), dhat-rs (heap allocations).
+      Sweeps placement count (1, 4, 10), filter selectivity
+      (1%, 10%, 50%, 100%), snapshot size (100, 1k, 10k flights),
+      plus side fixtures for force-override and heavy block-set.
+      `cargo xtask bench-all` orchestrates the suite end-to-end:
+      reads workspace version from `Cargo.toml`, captures host
+      fingerprint via `xtask bench-env`, runs each bench, walks
+      `target/criterion` + `target/iai` + dhat stdout to
+      assemble `bench/results/v<MAJ>.<MIN>.json` matching
+      `bench/results/SCHEMA.md`. `--against v<prev>` prints a
+      regression diff. Macro `loadgen.sh` upgraded with
+      concurrent `/proc/<pid>` CPU/RSS sampling and unified
+      `run.json`; new `seed.sh` populates the 100k-flight
+      synthetic project. Runner is **Claude Code cloud
+      sessions, not CI** — the harness was deliberately built
+      out-of-CI per user direction; the regression check is
+      agent-driven via the diff command.
+
+      Refs: `bench/README.md`, `bench/results/SCHEMA.md`,
+      `TESTING.md` § 8, `REQUIREMENTS.md` § 9.
+
+      **Note (5.9 hardware-independence):** iai-callgrind's
+      instruction counters are deterministic — identical source
+      on identical rustc emits identical `events.Ir` regardless
+      of which runner ran the bench. That property is what
+      makes `bench/results/v<X>.json` deltas authoritative
+      across releases even when a runner changes underfoot.
+      Wall-clock numbers stay ±20% on cloud runners, so the
+      regression policy gates on instruction counts (> 5%)
+      tighter than wall-clock (> 30% micro / > 20% macro). Real
+      regressions surface in `events.Ir` first; wall-clock
+      drift confirms them when the runner is stable.
+
+      **Note (5.9 no-DB invariant):** The in-process benches
+      never touch Postgres — they build `Snapshot` directly
+      from the `pub` types in `src/snapshot.rs`, never call
+      `snapshot::run_loader`, never construct `AppState`. This
+      is enforced by the `decide_pure` extraction: the function
+      takes no `&PgPool` and no `&AppState`. Future contributors
+      adding a DB call to the bench path will fail the
+      `unset DATABASE_URL && cargo xtask bench-all --skip-iai
+      --skip-dhat` smoke documented in `bench/README.md`.
+
 - [ ] **5.8** Release-tagging workflow — first
       checklist-gated cut. Multi-arch image published, gem
       published, GitHub Release created.

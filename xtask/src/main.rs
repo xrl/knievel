@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod bench_all;
+mod bench_env;
 mod build_image;
 mod check_api_doc;
 mod check_cross_tenant;
@@ -72,6 +74,24 @@ enum Cmd {
         #[arg(long, default_value = "knievel:dev")]
         tag: String,
     },
+    /// Emit a host fingerprint as JSON (CPU, mem, kernel, governor, etc.).
+    /// Phase 5.9 — captured into `bench/results/v<X>.json` under `env`.
+    BenchEnv,
+    /// Run the full Phase 5.9 decision benchmark suite (criterion + iai +
+    /// dhat) and write `bench/results/v<MAJ>.<MIN>.{md,json}` from the
+    /// workspace's current version. Cloud-session orchestrator; not CI.
+    BenchAll {
+        /// Optional previous version to diff against (e.g. `0.1`). Reads
+        /// `bench/results/v<against>.json` and prints a regression table.
+        #[arg(long)]
+        against: Option<String>,
+        /// Skip iai-callgrind (use when valgrind isn't installed locally).
+        #[arg(long)]
+        skip_iai: bool,
+        /// Skip the dhat heap profile.
+        #[arg(long)]
+        skip_dhat: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -93,5 +113,15 @@ fn main() -> Result<()> {
         }),
         Cmd::UiClient { check } => ui_client::run(check),
         Cmd::BuildImage { skip_ui, tag } => build_image::run(build_image::Args { skip_ui, tag }),
+        Cmd::BenchEnv => bench_env::run(),
+        Cmd::BenchAll {
+            against,
+            skip_iai,
+            skip_dhat,
+        } => bench_all::run(bench_all::Args {
+            against,
+            skip_iai,
+            skip_dhat,
+        }),
     }
 }
