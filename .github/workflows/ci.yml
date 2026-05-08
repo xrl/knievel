@@ -405,6 +405,14 @@ jobs:
           KNIEVEL_IMAGE: knievel:gem-smoke
         run: |
           set -eu
+          # seed-demo runs as the distroless `nonroot` UID (65532)
+          # and writes the token to ./tmp/knievel-dev-token via a
+          # bind mount. The runner workspace owner is `runner`
+          # (UID 1001), so we have to pre-create the directory
+          # with permissive perms — otherwise the seeder's
+          # restart-loop just spins on EACCES.
+          mkdir -p tmp
+          chmod 0777 tmp
           docker compose -f examples/compose/compose.yaml up -d \
             knievel-postgres knievel knievel-seed
 
