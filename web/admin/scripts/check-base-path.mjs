@@ -13,20 +13,14 @@ const html = readFileSync(resolve('dist/index.html'), 'utf8');
 
 const bad = html.match(/(?:src|href)="\/assets\//g);
 if (bad) {
-  console.error(
-    'check-base-path: dist/index.html references /assets/ (root-anchored).',
-  );
-  console.error(
-    'Vite `base: "/admin/"` should rewrite these to /admin/assets/.',
-  );
+  console.error('check-base-path: dist/index.html references /assets/ (root-anchored).');
+  console.error('Vite `base: "/admin/"` should rewrite these to /admin/assets/.');
   process.exit(1);
 }
 
 const good = html.match(/(?:src|href)="\/admin\/assets\//g);
 if (!good) {
-  console.error(
-    'check-base-path: dist/index.html has no /admin/assets/ references.',
-  );
+  console.error('check-base-path: dist/index.html has no /admin/assets/ references.');
   console.error('Did the build emit any assets at all?');
   process.exit(1);
 }

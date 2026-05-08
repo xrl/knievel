@@ -64,8 +64,7 @@ test('serves bundle assets under /admin/ (no asset 404s)', async ({ page }) => {
   const assetFailures: string[] = [];
   page.on('response', (resp) => {
     const url = resp.url();
-    const isAsset =
-      url.includes('/assets/') || url.endsWith('.js') || url.endsWith('.css');
+    const isAsset = url.includes('/assets/') || url.endsWith('.js') || url.endsWith('.css');
     if (isAsset && resp.status() >= 400) {
       assetFailures.push(`${resp.status()} ${url}`);
     }
