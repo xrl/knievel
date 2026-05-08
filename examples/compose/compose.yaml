@@ -43,17 +43,18 @@ services:
       - "127.0.0.1:5432:5432"
 
   knievel:
-    # Default points at the published ghcr image. Phase 4.3
-    # publishes images on semver tags only (no main-branch
-    # pushes) — until the first release, contributors must
-    # build locally via `KNIEVEL_BUILD=1 docker compose build`.
-    # `KNIEVEL_IMAGE` overrides the default; production
-    # deployments should pin a digest:
+    # Default points at the published ghcr image. `KNIEVEL_IMAGE`
+    # overrides for a locally-built image or a digest pin:
+    #   KNIEVEL_IMAGE=knievel:local docker compose up
     #   KNIEVEL_IMAGE=ghcr.io/knievel-ads/knievel@sha256:... docker compose up
+    #
+    # Local-image building no longer happens via `compose build`.
+    # The runtime Dockerfile is intentionally thin (just COPYs
+    # pre-built binaries in) so the cargo build is a debuggable
+    # bare step in `release.yml` and `cargo xtask build-image` —
+    # not a layer hidden inside a docker build. To produce a
+    # local image: `cargo xtask build-image -t knievel:local`.
     image: ${KNIEVEL_IMAGE:-ghcr.io/knievel-ads/knievel:latest}
-    build:
-      context: ../..
-      dockerfile: Dockerfile
     depends_on:
       knievel-postgres:
         condition: service_healthy

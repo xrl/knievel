@@ -29,24 +29,24 @@ env:
 
 jobs:
   # Per-arch native build → single-platform image push by digest.
+  #
+  # The cargo build is a bare workflow step (NOT inside a docker
+  # build) so failures surface as plain GitHub Actions logs and
+  # the Rust cache is the standard Swatinem/rust-cache rather
+  # than buildx's opaque cache mounts. The runtime Dockerfile
+  # just packages the binaries — no compilation inside the
+  # container.
+  #
   # No QEMU: amd64 builds on `ubuntu-latest`, arm64 builds on
   # `ubuntu-24.04-arm` (GitHub-hosted Linux/aarch64 runner). Each
-  # runner builds its OWN platform natively under buildx —
-  # `--platform linux/<host-arch>` is a no-op emulation-wise — so
-  # `cargo build` inside the Dockerfile runs at native speed.
-  # Replaces the prior single-runner multi-arch build that
-  # compiled the arm64 leg under QEMU emulation, which made the
-  # arm64 leg ~10–20× slower than native and dominated release
-  # wall-time (~30–45 min vs. ~5–8 min native).
+  # runner builds its own platform natively. Replaces the prior
+  # single-runner multi-arch build that compiled the arm64 leg
+  # under QEMU emulation — ~10–20× slower than native — which
+  # dominated release wall-time at ~30–45 min for the arm64 leg.
   #
-  # Rust caching: the Dockerfile uses the standard "stub crate
-  # skeleton → cargo build → drop stubs → real build" trick that
-  # produces a fat dep-priming layer. Combined with
-  # `cache-to: type=gha,mode=max` (which preserves intermediate
-  # layers, not just the final), subsequent runs restore the
-  # primed layer and only rebuild crates whose source changed.
-  # Per-arch cache scopes prevent the two matrix legs from
-  # clobbering each other's cache.
+  # Rust caching: each matrix leg uses Swatinem/rust-cache via
+  # the `rust-setup` composite, with a per-arch shared-key so the
+  # two legs maintain independent caches.
   #
   # The `publish-image-merge` job below stitches the two per-arch
   # digests into a manifest list, signs it, and attests provenance.
@@ -70,12 +70,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Phase 7.11: build the admin UI bundle BEFORE
-      # docker/build-push-action so the build context picks up
-      # the populated `web/admin/dist/` (the Dockerfile's COPY
-      # step expects it to exist).
+      # Native Rust toolchain + rust-cache, scoped per-arch so
+      # the matrix legs don't share/clobber.
+      - uses: ./.github/actions/rust-setup
+        with:
+          shared-key: knievel-publish-${{ matrix.arch }}
+
+      # Admin UI bundle. Built outside the container so pnpm's
+      # store cache works natively on the runner.
       - uses: ./.github/actions/node-setup
       - run: pnpm --dir web/admin build
+
+      - name: Build knievel + knievel-cli (native release)
+        run: |
+          cargo build --release --locked --bin knievel --bin knievel-cli
+          strip target/release/knievel target/release/knievel-cli
+
+      - name: Stage docker build context
+        # Dockerfile expects:
+        #   ./knievel              (server binary, this arch)
+        #   ./knievel-cli          (CLI binary, this arch)
+        #   ./web/admin/dist/      (admin SPA bundle)
+        # Stage them in a clean dir so the build context stays
+        # tiny — no Cargo.toml, no `target/`, no source tree.
+        run: |
+          set -eu
+          mkdir -p docker-context/web/admin
+          cp target/release/knievel       docker-context/knievel
+          cp target/release/knievel-cli   docker-context/knievel-cli
+          cp -r web/admin/dist            docker-context/web/admin/dist
+          cp Dockerfile                   docker-context/Dockerfile
 
       - uses: docker/setup-buildx-action@v3
 
@@ -90,17 +114,12 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: docker-context
           platforms: ${{ matrix.platform }}
-          # `push-by-digest=true` uploads the image without
-          # claiming any tag; the merge job below stitches the
-          # per-arch digests into a manifest list and tags that.
+          # push-by-digest=true uploads without claiming any
+          # tag; the merge job below stitches the per-arch
+          # digests into a manifest list and tags that.
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          # Per-arch cache scope — isolates the amd64 and arm64
-          # cargo build caches from each other. mode=max keeps
-          # the dep-priming layer warm across runs.
-          cache-from: type=gha,scope=publish-${{ matrix.arch }}
-          cache-to: type=gha,scope=publish-${{ matrix.arch }},mode=max
 
       - name: Export per-arch digest
         # Filename = digest (sha256:<hex> with the prefix
