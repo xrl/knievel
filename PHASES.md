@@ -627,6 +627,28 @@ manager and leader election running.
       (`API.md` follow-up). This is invisible to the integration
       story but documented so a future schema-aware client can
       narrow the type at the consumer side.
+
+      **Note (3.10 — O18 fix):** `creatives.template_id` FK
+      originally lacked an `ON DELETE` clause (defaulting to NO
+      ACTION — deferred RI). Migration `0014_creative_template_fk_restrict.sql`
+      re-declares the FK with `ON DELETE RESTRICT`, making the
+      error immediate and unambiguous at DELETE time. A future
+      DELETE handler for creative_templates must check for
+      referencing creatives before (or alongside) the DB delete;
+      the RESTRICT constraint is the safety net.
+      Template schema versioning invariant: `schema` is append-only
+      by convention — each PATCH that changes the schema bumps
+      `version`; downstream creatives observe the version at
+      reference time and are not retroactively re-validated.
+      Explicit re-validation cascade is deferred to a future task.
+
+      **Note (3.10 — O19 fix):** PATCH version bump now compares
+      field *values*, not field *presence*. The handler SELECTs
+      the current row inside the same tenant-bound transaction
+      before updating; `version` increments only when `schema`,
+      `template`, or `template_engine` actually differs from the
+      stored value. Name-only PATCHes and identical-value
+      re-sends do not increment the version counter.
 - [x] **3.11** Ad CRUD — inline-creative variant only.
       `src/ads.rs::AdsApi` accepts `creative_id` in the request
       body and rejects bodies that try to set

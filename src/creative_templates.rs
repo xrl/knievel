@@ -357,9 +357,20 @@ impl CreativeTemplatesApi {
         }
     }
 
-    /// PATCH bumps `version` whenever the schema field is provided
-    /// (per `API.md` § 3.6 — schema changes are versioned but do
-    /// not retroactively re-validate existing creatives).
+    /// PATCH bumps `version` only when `schema`, `template`, or
+    /// `template_engine` *actually change value* (opus O19 fix).
+    ///
+    /// The previous implementation bumped version on mere field
+    /// *presence* in the request, so a PATCH sending the same
+    /// schema the row already had would increment the version
+    /// counter. We now SELECT the current row first and compare
+    /// each versioned field before deciding whether to bump.
+    ///
+    /// `name` is not versioned — only the rendering contract
+    /// (`schema`, `template`, `template_engine`) is.
+    ///
+    /// Per `API.md` § 3.6, schema changes are versioned but do
+    /// not retroactively re-validate existing creatives.
     #[oai(
         path = "/v1/projects/:project_id/creative-templates/:id",
         method = "patch",
@@ -399,11 +410,49 @@ impl CreativeTemplatesApi {
                 Err(env) => return UpdateResp::Unprocessable(Json(env)),
             },
         };
-        let template_changed = req.template.is_some() || req.template_engine.is_some();
-        // `bump` triggers when `schema` OR `template` content
-        // changes — both affect what `templated`/`native`
-        // creatives observe at decision time.
-        let bump = req.schema.is_some() || template_changed;
+        // SELECT the existing row so we can compare values.
+        // The transaction is already tenant-bound; this SELECT
+        // runs under the same RLS context as the subsequent UPDATE.
+        let existing_sql = format!("SELECT {COLS} FROM knievel.creative_templates WHERE id = $1");
+        let existing: CreativeTemplate = match sqlx::query_as::<_, CreativeTemplate>(&existing_sql)
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return UpdateResp::NotFound(Json(err("not_found", "creative_template not found")))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "select for update creative_template failed");
+                return UpdateResp::Internal(Json(err("db_error", "select failed")));
+            }
+        };
+        // Determine the effective new values for versioned fields.
+        // `None` in the request means "keep existing" for each field.
+        let new_schema = req.schema.as_ref().unwrap_or(&existing.schema);
+        let new_template: Option<&str> = if req.template.is_some() || req.template_engine.is_some()
+        {
+            // template/template_engine were supplied — effective
+            // value is the newly-validated engine source (which may
+            // be None if the caller sent null to clear).
+            req.template.as_deref()
+        } else {
+            existing.template.as_deref()
+        };
+        let new_engine: Option<&str> = if req.template.is_some() || req.template_engine.is_some() {
+            engine_to_set.as_ref().and_then(|e| e.as_deref())
+        } else {
+            existing.template_engine.as_deref()
+        };
+        // Version bumps only when a versioned field *value* changes.
+        let schema_changed = new_schema != &existing.schema;
+        let template_changed = new_template != existing.template.as_deref();
+        let engine_changed = new_engine != existing.template_engine.as_deref();
+        let bump = schema_changed || template_changed || engine_changed;
+        // Whether to overwrite the template/engine columns at all.
+        // We always write if either was supplied in the request.
+        let replace_template = req.template.is_some() || req.template_engine.is_some();
         let sql = format!(
             "UPDATE knievel.creative_templates
              SET name = COALESCE($2, name),
@@ -416,13 +465,11 @@ impl CreativeTemplatesApi {
              WHERE id = $1
              RETURNING {COLS}"
         );
-        let new_template = req.template.as_deref();
-        let new_engine = engine_to_set.as_ref().and_then(|e| e.as_deref());
         match sqlx::query_as::<_, CreativeTemplate>(&sql)
             .bind(id)
             .bind(req.name.as_deref())
             .bind(req.schema.as_ref())
-            .bind(template_changed)
+            .bind(replace_template)
             .bind(new_template)
             .bind(new_engine)
             .bind(bump)

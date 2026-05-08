@@ -217,3 +217,150 @@ async fn creative_kind_validation_and_round_trip() -> Result<()> {
     testlib::db::ephemeral_drop(f.db).await?;
     Ok(())
 }
+
+/// O19 fix: PATCH with same-value fields must NOT bump version.
+///
+/// Previously, any PATCH that included `schema` (even with the
+/// identical value) incremented the version counter. After the fix
+/// the handler SELECTs the row first and compares field-by-field;
+/// version bumps only when a field *value* actually changes.
+#[tokio::test]
+async fn creative_template_patch_noop_does_not_bump_version() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let f = setup().await?;
+    let cli = TestClient::new(build_app(f.db.pool.clone()));
+
+    let schema = serde_json::json!({"type": "object"});
+
+    // Create a template at version 1.
+    let resp = cli
+        .post("/v1/projects/pj_a/creative-templates")
+        .header("Authorization", format!("Bearer {}", f.pj_a_editor))
+        .body_json(&serde_json::json!({"name": "noop_test", "schema": schema}))
+        .send()
+        .await;
+    resp.assert_status(poem::http::StatusCode::CREATED);
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    let id = body["id"].as_i64().unwrap();
+    assert_eq!(body["version"].as_i64(), Some(1), "initial version = 1");
+
+    // PATCH with the identical schema — version must stay at 1.
+    let resp = cli
+        .patch(format!("/v1/projects/pj_a/creative-templates/{id}"))
+        .header("Authorization", format!("Bearer {}", f.pj_a_editor))
+        .body_json(&serde_json::json!({"schema": schema}))
+        .send()
+        .await;
+    resp.assert_status_is_ok();
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    assert_eq!(
+        body["version"].as_i64(),
+        Some(1),
+        "no-op PATCH must not bump version"
+    );
+
+    // PATCH with only a name change — version must still stay at 1
+    // (name is not versioned).
+    let resp = cli
+        .patch(format!("/v1/projects/pj_a/creative-templates/{id}"))
+        .header("Authorization", format!("Bearer {}", f.pj_a_editor))
+        .body_json(&serde_json::json!({"name": "noop_test_renamed"}))
+        .send()
+        .await;
+    resp.assert_status_is_ok();
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    assert_eq!(
+        body["version"].as_i64(),
+        Some(1),
+        "name-only PATCH must not bump version"
+    );
+
+    // PATCH with a genuinely different schema — version bumps to 2.
+    let new_schema =
+        serde_json::json!({"type": "object", "properties": {"foo": {"type": "string"}}});
+    let resp = cli
+        .patch(format!("/v1/projects/pj_a/creative-templates/{id}"))
+        .header("Authorization", format!("Bearer {}", f.pj_a_editor))
+        .body_json(&serde_json::json!({"schema": new_schema}))
+        .send()
+        .await;
+    resp.assert_status_is_ok();
+    let body: serde_json::Value = resp.json().await.value().deserialize();
+    assert_eq!(
+        body["version"].as_i64(),
+        Some(2),
+        "schema change must bump version"
+    );
+
+    testlib::db::ephemeral_drop(f.db).await?;
+    Ok(())
+}
+
+/// O18 fix: creatives.template_id FK has ON DELETE RESTRICT.
+///
+/// A creative_template referenced by at least one creative must
+/// not be deletable directly. The FK constraint added in migration
+/// 0014_creative_template_fk_restrict.sql enforces this at the DB
+/// layer; this test confirms the error surfaces through the
+/// integration path as a FK violation (not a silent no-op).
+#[tokio::test]
+async fn creative_template_delete_blocked_by_fk() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let f = setup().await?;
+
+    let schema = serde_json::json!({"type": "object"});
+
+    // Insert a template directly (no HTTP handler for DELETE yet).
+    let mut tx = testlib::tenant::begin_bound(&f.db.pool, "org_a", Some("pj_a")).await?;
+    let tmpl_id: i64 = sqlx::query_scalar(
+        "INSERT INTO knievel.creative_templates
+             (org_id, project_id, name, schema)
+         VALUES ('org_a', 'pj_a', 'fk_test_tmpl', $1)
+         RETURNING id",
+    )
+    .bind(&schema)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    // Attach a native creative to the template.
+    let mut tx = testlib::tenant::begin_bound(&f.db.pool, "org_a", Some("pj_a")).await?;
+    sqlx::query(
+        "INSERT INTO knievel.creatives
+             (org_id, project_id, advertiser_id, kind, template_id, values)
+         VALUES ('org_a', 'pj_a', $1, 'native', $2, '{}'::jsonb)",
+    )
+    .bind(f.advertiser_a)
+    .bind(tmpl_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    // Attempt to DELETE the template — must fail with a FK
+    // violation (SQLSTATE 23503) because a creative references it.
+    {
+        let mut tx =
+            testlib::tenant::begin_bound(&f.db.pool, "org_a", Some("pj_a")).await?;
+        let result = sqlx::query("DELETE FROM knievel.creative_templates WHERE id = $1")
+            .bind(tmpl_id)
+            .execute(&mut *tx)
+            .await;
+        assert!(result.is_err(), "DELETE of referenced template must fail");
+        let err_msg = result.unwrap_err().to_string();
+        // SQLSTATE 23503 = foreign_key_violation.
+        assert!(
+            err_msg.contains("23503") || err_msg.contains("foreign key"),
+            "expected FK violation error, got: {err_msg}"
+        );
+        // tx rolled back on drop — no commit needed.
+    }
+
+    testlib::db::ephemeral_drop(f.db).await?;
+    Ok(())
+}
