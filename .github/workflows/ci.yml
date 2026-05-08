@@ -27,7 +27,14 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo nextest run --no-run --workspace --all-targets --locked
+      # `--all-targets` would include benches; nextest then tries
+      # to enumerate the bench binary's "tests" by running it,
+      # which fails for benches whose `main()` prints non-nextest
+      # output (e.g. the dhat_decision bench's DHAT_JSON_*
+      # framing). Compile the benches separately so the priming
+      # is still complete, but keep them out of nextest discovery.
+      - run: cargo nextest run --no-run --workspace --lib --bins --tests --examples --locked
+      - run: cargo build --workspace --benches --locked
 
   unit-prop:
     name: unit + property
