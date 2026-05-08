@@ -108,4 +108,16 @@ impl AppState {
         self.admin_ui = admin_ui;
         self
     }
+
+    /// Return the DB pool or `Err` with a fixed `(code, message)` pair
+    /// that callers can map to a 500 `no_db` envelope.
+    ///
+    /// Eliminates the repeated `match state.0.db.as_ref() { … }`
+    /// blocks across handlers. New handlers that need the pool should
+    /// use this rather than re-inlining the match.
+    pub fn require_db(&self) -> Result<&sqlx::PgPool, (&'static str, &'static str)> {
+        self.db
+            .as_ref()
+            .ok_or(("no_db", "no database configured"))
+    }
 }
