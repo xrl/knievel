@@ -38,6 +38,10 @@ RUN mkdir -p src/bin xtask/src testlib/src benches \
  && echo '' > testlib/src/lib.rs \
  && echo 'fn main() {}' > benches/selection_pick.rs \
  && echo 'fn main() {}' > benches/hmac_verify.rs \
+ && echo 'fn main() {}' > benches/decision_handler.rs \
+ && echo 'fn main() {}' > benches/iai_decision.rs \
+ && echo 'fn main() {}' > benches/iai_hmac.rs \
+ && echo 'fn main() {}' > benches/dhat_decision.rs \
  && cargo build --release --locked --bins \
  && rm -rf src xtask/src testlib/src benches
 
