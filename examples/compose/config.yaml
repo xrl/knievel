@@ -5,9 +5,12 @@
 #   2. This file (mounted at /etc/knievel/config.yaml).
 #   3. KNIEVEL_* env-var overrides.
 #
-# `${VAR}` interpolation runs against the process environment
-# before parse, so you can keep the password in compose's
-# environment block instead of rebaking the YAML.
+# Env-var interpolation runs against the process environment
+# before parse (dollar-brace syntax), so you can keep the password
+# in compose's environment block instead of rebaking the YAML.
+# Note: the loader scans the entire file text — including comment
+# bodies — so don't write a literal placeholder here unless the
+# referenced env var is always set.
 
 api:
   bind_addr: 0.0.0.0:8080
