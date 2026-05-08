@@ -4,6 +4,10 @@
 //! channels / priorities / ad_types under that project, and the
 //! read endpoints return them tenant-scoped.
 //!
+//! Additional coverage (Fix(taxonomy) audit): re-seed idempotency via
+//! `ON CONFLICT DO NOTHING`, `(project_id, name)` uniqueness enforcement,
+//! and the defensive GUC check in `seed_default_taxonomy`.
+//!
 //! Skipped when `DATABASE_URL` is not set.
 
 use anyhow::Result;
@@ -139,5 +143,168 @@ async fn project_creation_seeds_default_taxonomy() -> Result<()> {
     resp.assert_status(poem::http::StatusCode::FORBIDDEN);
 
     testlib::db::ephemeral_drop(f.db).await?;
+    Ok(())
+}
+
+/// Calling `seed_default_taxonomy` twice on the same project must
+/// be idempotent — the second call should produce no duplicates
+/// because all inserts use `ON CONFLICT (project_id, name) DO NOTHING`.
+#[tokio::test]
+async fn seed_default_taxonomy_is_idempotent() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let db = testlib::db::ephemeral().await?;
+    seed_org(&db.pool, "org_seed").await?;
+
+    // Create a project directly via the pool so we can call
+    // seed_default_taxonomy manually twice.
+    let pj = "pj_seed_idem";
+    {
+        let mut tx = testlib::tenant::begin_bound(&db.pool, "org_seed", None).await?;
+        sqlx::query("INSERT INTO knievel.projects (id, org_id, name) VALUES ($1, $2, $3)")
+            .bind(pj)
+            .bind("org_seed")
+            .bind("Idem test project")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("SELECT set_config('knievel.project_id', $1, true)")
+            .bind(pj)
+            .execute(&mut *tx)
+            .await?;
+        // First seed.
+        knievel::taxonomy::seed_default_taxonomy(&mut tx, "org_seed", pj).await?;
+        // Second seed — must be a no-op due to ON CONFLICT DO NOTHING.
+        knievel::taxonomy::seed_default_taxonomy(&mut tx, "org_seed", pj).await?;
+        tx.commit().await?;
+    }
+
+    // Verify counts: exactly 3 channels, 3 priorities, 4 ad_types.
+    {
+        let mut tx = testlib::tenant::begin_bound(&db.pool, "org_seed", Some(pj)).await?;
+        let (channel_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM knievel.channels WHERE project_id = $1")
+                .bind(pj)
+                .fetch_one(&mut *tx)
+                .await?;
+        assert_eq!(channel_count, 3, "expected exactly 3 channels after double-seed");
+
+        let (priority_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM knievel.priorities WHERE project_id = $1")
+                .bind(pj)
+                .fetch_one(&mut *tx)
+                .await?;
+        assert_eq!(priority_count, 3, "expected exactly 3 priorities after double-seed");
+
+        let (ad_type_count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM knievel.ad_types WHERE project_id = $1")
+                .bind(pj)
+                .fetch_one(&mut *tx)
+                .await?;
+        assert_eq!(ad_type_count, 4, "expected exactly 4 ad_types after double-seed");
+    }
+
+    testlib::db::ephemeral_drop(db).await?;
+    Ok(())
+}
+
+/// Inserting a channel with a duplicate (project_id, name) must fail
+/// with a unique_violation (SQLSTATE 23505).  The migration
+/// 0015_taxonomy_unique_names.sql added this constraint.
+#[tokio::test]
+async fn channel_name_must_be_unique_per_project() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let db = testlib::db::ephemeral().await?;
+    seed_org(&db.pool, "org_uniq").await?;
+
+    let pj = "pj_uniq_ch";
+    {
+        let mut tx = testlib::tenant::begin_bound(&db.pool, "org_uniq", None).await?;
+        sqlx::query("INSERT INTO knievel.projects (id, org_id, name) VALUES ($1, $2, $3)")
+            .bind(pj)
+            .bind("org_uniq")
+            .bind("Unique-name project")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("SELECT set_config('knievel.project_id', $1, true)")
+            .bind(pj)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO knievel.channels (org_id, project_id, name) VALUES ($1, $2, 'Web')",
+        )
+        .bind("org_uniq")
+        .bind(pj)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+    }
+
+    // Second insert of the same (project_id, name) must be rejected.
+    {
+        let mut tx = testlib::tenant::begin_bound(&db.pool, "org_uniq", Some(pj)).await?;
+        let result =
+            sqlx::query("INSERT INTO knievel.channels (org_id, project_id, name) VALUES ($1, $2, 'Web')")
+                .bind("org_uniq")
+                .bind(pj)
+                .execute(&mut *tx)
+                .await;
+        let err = result.expect_err("expected unique_violation for duplicate channel name");
+        let kind = knievel::sql::classify_pg_error(&err);
+        assert!(
+            kind.is_unique_violation(),
+            "expected UniqueViolation, got {kind:?}"
+        );
+        let constraint = kind.constraint().unwrap_or("");
+        assert!(
+            constraint.contains("channels_project_id_name_key"),
+            "unexpected constraint name: {constraint}"
+        );
+    }
+
+    testlib::db::ephemeral_drop(db).await?;
+    Ok(())
+}
+
+/// `seed_default_taxonomy` must raise an error when `knievel.project_id`
+/// is not set on the transaction.  This guards against callers that
+/// skip the tenant-binding step.
+#[tokio::test]
+async fn seed_default_taxonomy_requires_project_id_guc() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!("DATABASE_URL not set; skipping.");
+        return Ok(());
+    }
+    let db = testlib::db::ephemeral().await?;
+    seed_org(&db.pool, "org_guc").await?;
+
+    let pj = "pj_guc_check";
+    // Create the project (with proper binding), then commit so the row exists.
+    {
+        let mut tx = testlib::tenant::begin_bound(&db.pool, "org_guc", None).await?;
+        sqlx::query("INSERT INTO knievel.projects (id, org_id, name) VALUES ($1, $2, $3)")
+            .bind(pj)
+            .bind("org_guc")
+            .bind("GUC check project")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
+
+    // Now open a tx with org_id but WITHOUT project_id — seed must fail.
+    {
+        let mut tx = testlib::tenant::begin_bound(&db.pool, "org_guc", None).await?;
+        let result = knievel::taxonomy::seed_default_taxonomy(&mut tx, "org_guc", pj).await;
+        assert!(
+            result.is_err(),
+            "expected seed_default_taxonomy to fail when knievel.project_id is unset"
+        );
+    }
+
+    testlib::db::ephemeral_drop(db).await?;
     Ok(())
 }

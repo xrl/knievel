@@ -677,6 +677,28 @@ manager and leader election running.
       Manifest gains 6 entries; gate now reports
       `38 project-scoped endpoint(s), all covered`.
       Refs: `API.md` § 3.9.
+
+      **Note (3.13):** Post-ship audit (opus O23) found two gaps
+      closed in `Fix(taxonomy)` branch: (1) `knievel.channels` and
+      `knievel.ad_types` lacked `UNIQUE (project_id, name)` — a
+      re-run of `seed_default_taxonomy` would silently double-insert
+      rows. Fixed in migration `0015_taxonomy_unique_names.sql`; all
+      three inserts now use `ON CONFLICT (project_id, name) DO NOTHING`
+      making the function idempotent. (2) `seed_default_taxonomy`
+      had no defensive precondition on the `knievel.project_id` GUC
+      — a caller that skips tenant-binding would insert rows that RLS
+      silently rejects. Fixed via a Postgres `DO $$` block that raises
+      an exception when the GUC is absent. Three new integration tests
+      cover these invariants: `seed_default_taxonomy_is_idempotent`,
+      `channel_name_must_be_unique_per_project`, and
+      `seed_default_taxonomy_requires_project_id_guc`. The three
+      taxonomy `*List` response types had undocumented `next_cursor`
+      fields — doc comments now explain that these are intentionally
+      always `null` (bounded-small per-project sets, non-paginated
+      per the 3.33 decision). `AppState::require_db()` added to
+      `src/state.rs` to DRY out the repeated `db.as_ref()` None-match
+      across handlers.
+
 - [x] **3.14** `:batchUpsert` — single Postgres transaction with
       per-row diagnostics matching `API.md` "Write contract."
       Cross-entity FK validation inside the transaction (a flight
