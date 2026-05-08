@@ -79,7 +79,10 @@ justification in the same PR.
 ### Release artifacts
 
 - [ ] `release.yml` workflow ran successfully on the tag (all jobs
-      green: `ci`, `publish-image`, `publish-cli`, `release`).
+      green: `publish-image`, `build-cli`, `github-release`,
+      `release-ruby-gem`). The PR that merged the release commit
+      to `main` already ran the per-PR DAG; the tag workflow does
+      not re-run it (TESTING.md § 12.9).
 - [ ] Container image present: `ghcr.io/knievel-ads/knievel:vX.Y.Z`.
       Multi-arch (`amd64` + `arm64`).
 - [ ] Image cosigned + provenance-attested. `cosign verify
