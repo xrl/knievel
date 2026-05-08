@@ -7,7 +7,7 @@ edition    = "2021"
 license    = "MIT"
 repository = "https://github.com/knievel-ads/knievel"
 homepage   = "https://github.com/knievel-ads/knievel"
-version    = "0.1.14"
+version    = "0.1.15"
 
 # Shared dep versions live here so workspace members agree.
 # Members opt in via `dep = { workspace = true }`. Per-task work
