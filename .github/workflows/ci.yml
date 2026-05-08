@@ -403,7 +403,7 @@ jobs:
           KNIEVEL_IMAGE: knievel:gem-smoke
         run: docker compose -f examples/compose/compose.yaml build knievel
 
-      - name: Boot compose stack (postgres + knievel + seed-demo)
+      - name: Boot compose stack (postgres + knievel only)
         working-directory: knievel
         env:
           KNIEVEL_IMAGE: knievel:gem-smoke
@@ -413,12 +413,18 @@ jobs:
           # and writes the token to ./tmp/knievel-dev-token via a
           # bind mount. The runner workspace owner is `runner`
           # (UID 1001), so we have to pre-create the directory
-          # with permissive perms — otherwise the seeder's
-          # restart-loop just spins on EACCES.
+          # with permissive perms — otherwise the seeder fails
+          # with EACCES.
           mkdir -p tmp
           chmod 0777 tmp
+          # Boot postgres + knievel WITHOUT knievel-seed. seed-demo
+          # depends only on postgres being healthy, but it can race
+          # ahead of knievel server's `auto_migrate: true` and hit
+          # "relation knievel.X does not exist" intermittently. We
+          # run seed-demo as a one-shot AFTER /healthz proves
+          # migrations are complete (next step but one).
           docker compose -f examples/compose/compose.yaml up -d \
-            knievel-postgres knievel knievel-seed
+            knievel-postgres knievel
 
       # If anything between Boot and Smoke trips, dump every
       # service's logs before teardown so the failure shows up in
@@ -428,7 +434,7 @@ jobs:
         working-directory: knievel
         run: docker compose -f examples/compose/compose.yaml logs --no-color || true
 
-      - name: Wait for /healthz + capture seed token
+      - name: Wait for /healthz (proves auto_migrate is complete)
         working-directory: knievel
         run: |
           set -eu
@@ -441,23 +447,33 @@ jobs:
             fi
             sleep 2
           done
-          deadline=$((SECONDS + 30))
-          until [ -s tmp/knievel-dev-token ]; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "seed-demo never wrote the token file" >&2
-              docker compose -f examples/compose/compose.yaml logs knievel-seed >&2
-              exit 1
-            fi
-            sleep 1
-          done
+
+      - name: Run seed-demo (one-shot, post-migration)
+        working-directory: knievel
+        env:
+          KNIEVEL_IMAGE: knievel:gem-smoke
+        run: |
+          set -eu
+          # `compose run --rm` runs the service synchronously and
+          # tears the container down on exit. Migrations are
+          # already in (proved by /healthz), so this is a single
+          # deterministic run — no restart loop, no race.
+          docker compose -f examples/compose/compose.yaml run --rm knievel-seed
+
+      - name: Capture seed token
+        working-directory: knievel
+        run: |
+          set -eu
           # seed-demo writes the file as the distroless `nonroot`
           # UID (65532) with mode 0o600. The runner user (1001)
           # cannot read that, and `$(cat ...)` failure inside a
           # variable assignment does not propagate out under
-          # `set -eu`, so we'd silently end up with an empty bearer
-          # and the gem's first call would 401. Loosen perms with
-          # sudo (passwordless on GitHub-hosted runners), then
-          # require the captured value to be non-empty.
+          # `set -eu`, so without the chmod we'd silently end up
+          # with an empty bearer and the gem's first call would
+          # 401. Loosen perms with sudo (passwordless on
+          # GitHub-hosted runners), then require the captured
+          # value to be non-empty.
+          test -s tmp/knievel-dev-token
           sudo chmod 0644 tmp/knievel-dev-token
           token=$(cat tmp/knievel-dev-token)
           test -n "$token"
