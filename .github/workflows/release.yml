@@ -120,10 +120,13 @@ jobs:
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-latest
             cross: true
-          # Apple silicon + intel — native runners avoid the
-          # cross-compile dance for Mach-O.
+          # Apple silicon + Intel — native runners avoid the
+          # cross-compile dance for Mach-O. Use `macos-15-intel`
+          # (the canonical x86_64 macOS runner label, supported
+          # through Aug 2027) — the older `macos-13` label was
+          # retired Dec 4 2025 and queues forever.
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
             cross: false
           - target: aarch64-apple-darwin
             runner: macos-14
