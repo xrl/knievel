@@ -18,6 +18,7 @@ use poem::web::Data;
 use poem_openapi::{param::Path, payload::Json, ApiResponse, Object, OpenApi};
 
 use crate::api_tags::ApiTags;
+use crate::audit;
 use crate::auth::security::BearerAuth;
 use crate::auth::Role;
 use crate::db;
@@ -249,27 +250,8 @@ impl TokensApi {
         // Audit row in the same transaction so mint and audit are
         // atomic. payload_hash captures a sanitized digest of the
         // request — no secret material lands in audit_log.
-        let payload_hash = match audit_payload_hash(&req) {
-            Ok(h) => h,
-            Err(e) => {
-                tracing::error!(error = %e, "audit hash failed");
-                return CreateTokenResp::Internal(Json(err(
-                    "internal_error",
-                    "could not hash audit payload",
-                )));
-            }
-        };
-        if let Err(e) = sqlx::query(
-            "INSERT INTO knievel.audit_log
-                (org_id, project_id, actor, operation, payload_hash)
-             VALUES ($1, $2, $3, 'tokens.mint', $4)",
-        )
-        .bind(&path_org_id)
-        .bind(req.project_id.as_deref())
-        .bind(&principal.actor_id)
-        .bind(&payload_hash)
-        .execute(&mut *tx)
-        .await
+        if let Err(e) =
+            audit::emit(&mut tx, &principal, "tokens.mint", "token", &id, Some(&req)).await
         {
             tracing::error!(error = %e, "audit_log insert failed");
             return CreateTokenResp::Internal(Json(err("db_error", "audit_log insert failed")));
@@ -443,15 +425,19 @@ impl TokensApi {
             )));
         }
 
-        if let Err(e) = sqlx::query(
-            "INSERT INTO knievel.audit_log
-                (org_id, actor, operation, payload_hash)
-             VALUES ($1, $2, 'tokens.revoke', $3)",
+        // Symmetric with mint: revoke routes through `audit::emit`
+        // so `payload_hash` is a SHA-256 digest, not the raw token
+        // id. Closes sonnet #14 / opus O14.
+        if let Err(e) = audit::emit(
+            &mut tx,
+            &principal,
+            "tokens.revoke",
+            "token",
+            &path_token_id,
+            // No request body to hash; the audit row is already
+            // pinned by (org, actor, operation, resource_id).
+            None::<&serde_json::Value>,
         )
-        .bind(&path_org_id)
-        .bind(&principal.actor_id)
-        .bind(&path_token_id)
-        .execute(&mut *tx)
         .await
         {
             tracing::error!(error = %e, "audit_log insert failed");
@@ -468,17 +454,6 @@ impl TokensApi {
 
         RevokeTokenResp::NoContent
     }
-}
-
-/// SHA-256 hex digest of the request body, with the `name` field
-/// preserved (caller-meaningful) but `ip_allowlist` and timestamps
-/// folded into the hash without standalone exposure. Used for
-/// `audit_log.payload_hash`. The hash itself is the audit value;
-/// the request body never lands in audit_log.
-fn audit_payload_hash(req: &CreateTokenRequest) -> anyhow::Result<String> {
-    use sha2::{Digest, Sha256};
-    let canonical = serde_json::to_vec(req)?;
-    Ok(hex::encode(Sha256::digest(&canonical)))
 }
 
 fn random_hex(bytes: usize) -> String {
