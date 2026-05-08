@@ -246,12 +246,11 @@ async fn check_campaign_in_project(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     campaign_id: i64,
 ) -> Result<(), ()> {
-    let found: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM knievel.campaigns WHERE id = $1")
-            .bind(campaign_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .unwrap_or(None);
+    let found: Option<(i64,)> = sqlx::query_as("SELECT id FROM knievel.campaigns WHERE id = $1")
+        .bind(campaign_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .unwrap_or(None);
     if found.is_none() {
         return Err(());
     }
@@ -584,8 +583,7 @@ impl FlightsApi {
         if !pre_errors.is_empty() {
             let total = req.items.len();
             return BatchResp::PartialFailure(Json(BatchErrorEnvelope::partial_failure(
-                total,
-                pre_errors,
+                total, pre_errors,
             )));
         }
 

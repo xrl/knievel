@@ -282,7 +282,10 @@ async fn flight_date_range_validation() -> Result<()> {
         .await;
     resp.assert_status(poem::http::StatusCode::BAD_REQUEST);
     let err: serde_json::Value = resp.json().await.value().deserialize();
-    assert_eq!(err["error"]["code"], serde_json::json!("invalid_date_range"));
+    assert_eq!(
+        err["error"]["code"],
+        serde_json::json!("invalid_date_range")
+    );
 
     // start_date == end_date → ok (201).
     let resp = cli
