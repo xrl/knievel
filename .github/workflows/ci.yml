@@ -334,9 +334,13 @@ jobs:
           generator: ruby
           config-file: knievel-ruby/openapi-generator-config.json
           openapi-file: knievel/openapi.yaml
-          # CI-only placeholder version — never published, never tagged.
+          # CI-only placeholder version — never published, never
+          # tagged. Use a non-pre-release semver: a hyphen suffix
+          # like `0.0.0-ci` becomes `0.0.0.pre.ci` in gemspec land,
+          # which `require "knievel/client"` won't auto-activate
+          # because rubygems skips pre-releases by default.
           command-args: >-
-            --additional-properties=gemVersion=0.0.0-ci,library=faraday
+            --additional-properties=gemVersion=999.0.0,library=faraday
             --output=knievel-ruby
 
       - name: Ensure Gemfile.lock is gitignored
