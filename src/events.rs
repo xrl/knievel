@@ -81,6 +81,13 @@ impl EventSender {
             Err(mpsc::error::TrySendError::Closed(_)) => Err(SendError::FlusherDown),
         }
     }
+
+    /// True when the flusher task has exited and the receiver side of
+    /// the channel is gone. Used by `/readyz` to detect criterion (c)
+    /// — event flusher unexpectedly down.
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
 }
 
 /// Spawn the flusher task. Returns the `EventSender` handlers

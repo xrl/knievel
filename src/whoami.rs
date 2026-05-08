@@ -15,6 +15,13 @@
 //! `(iss, sub, azp)` (joined) for JWTs; it's already in
 //! `audit_log.actor`, so exposing it here doesn't leak
 //! anything that isn't also in operator-side logs.
+//!
+//! Principal exposure: `org_id` is always returned because the
+//! bearer itself is bound to an org; the caller already knows
+//! it (they minted the token against that org). `project_id`
+//! is returned only when `scope == "project"` — org-scoped
+//! callers receive `null`. This matches the token's own scope
+//! and adds nothing the caller doesn't already hold.
 
 use poem_openapi::{payload::Json, ApiResponse, Object, OpenApi};
 
@@ -41,13 +48,33 @@ pub struct WhoamiResponse {
 
 #[derive(ApiResponse)]
 pub enum WhoamiResp {
+    /// Bearer is valid — returns the resolved principal.
     #[oai(status = 200)]
     Ok(Json<WhoamiResponse>),
+    /// Bearer is missing, malformed, revoked, or expired.
+    ///
+    /// `poem-openapi` returns this automatically when the
+    /// `BearerAuth` extractor yields `None` — the variant is
+    /// declared here so the `401` status appears in the OpenAPI
+    /// spec rather than being silently omitted.
+    #[oai(status = 401)]
+    Unauthorized,
 }
 
 #[OpenApi(tag = "ApiTags::Auth")]
 impl WhoamiApi {
-    #[oai(path = "/v1/whoami", method = "get", operation_id = "whoami")]
+    /// Validate the bearer token and return the resolved principal.
+    ///
+    /// Use this as a pre-flight before rendering the admin
+    /// workspace: a `200` guarantees the token is valid and
+    /// surfaces the server-resolved role so the UI can gate
+    /// features without parsing the JWT client-side.
+    #[oai(
+        path = "/v1/whoami",
+        method = "get",
+        operation_id = "whoami",
+        summary = "Validate bearer and return resolved principal"
+    )]
     async fn whoami(&self, auth: BearerAuth) -> WhoamiResp {
         let p = auth.0;
         WhoamiResp::Ok(Json(WhoamiResponse {
@@ -64,5 +91,60 @@ impl WhoamiApi {
             },
             actor_id: p.actor_id,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use poem::http::StatusCode;
+    use poem::test::TestClient;
+    use poem::EndpointExt;
+
+    use crate::server::routes;
+    use crate::state::AppState;
+
+    fn app() -> impl poem::Endpoint {
+        routes().data(AppState::new())
+    }
+
+    #[tokio::test]
+    async fn whoami_unauthenticated_returns_401() {
+        // No Authorization header — `poem-openapi`'s BearerAuth
+        // extractor must return 401, not panic or 500.
+        let cli = TestClient::new(app());
+        let resp = cli.get("/v1/whoami").send().await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn whoami_bad_token_returns_401() {
+        // A structurally invalid bearer (not a kvl_ token, no DB
+        // configured) must also return 401 cleanly.
+        let cli = TestClient::new(app());
+        let resp = cli
+            .get("/v1/whoami")
+            .header("Authorization", "Bearer not-a-valid-token")
+            .send()
+            .await;
+        resp.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn whoami_appears_in_openapi_spec() {
+        let cli = TestClient::new(app());
+        let resp = cli.get("/openapi.json").send().await;
+        resp.assert_status_is_ok();
+        let spec: serde_json::Value = resp.json().await.value().deserialize();
+        let paths = spec["paths"].as_object().expect("paths is an object");
+        assert!(
+            paths.contains_key("/v1/whoami"),
+            "whoami path missing from spec"
+        );
+        // 401 must be declared in the spec so clients know to expect it.
+        let responses = &spec["paths"]["/v1/whoami"]["get"]["responses"];
+        assert!(
+            responses.get("401").is_some(),
+            "whoami spec must declare 401 response; got: {responses}"
+        );
     }
 }

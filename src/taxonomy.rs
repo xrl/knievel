@@ -49,16 +49,24 @@ pub struct AdType {
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct ChannelList {
     pub items: Vec<Channel>,
+    /// Always `null`. Taxonomy lists are intentionally non-paginated:
+    /// each set is bounded-small per project (default seed is 3 rows)
+    /// and `REQUIREMENTS.md` § 11 caps write-endpoint volume in post-v0.
+    /// The field is kept in the wire shape for API-contract stability —
+    /// callers that already read it won't break when write endpoints
+    /// allow larger sets later. See `PHASES.md` Phase 3.33 note.
     pub next_cursor: Option<String>,
 }
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct PriorityList {
     pub items: Vec<Priority>,
+    /// Always `null`. See `ChannelList::next_cursor` for rationale.
     pub next_cursor: Option<String>,
 }
 #[derive(Object, serde::Serialize, serde::Deserialize)]
 pub struct AdTypeList {
     pub items: Vec<AdType>,
+    /// Always `null`. See `ChannelList::next_cursor` for rationale.
     pub next_cursor: Option<String>,
 }
 
@@ -369,14 +377,46 @@ impl TaxonomyApi {
 /// versions; the post-v0 write endpoints (`REQUIREMENTS.md` § 11
 /// roadmap) will replace this for projects that need custom
 /// taxonomies.
+///
+/// # Idempotency
+///
+/// All inserts use `ON CONFLICT DO NOTHING` (keyed on the
+/// `(project_id, name)` UNIQUE constraints added in migration
+/// `0015_taxonomy_unique_names.sql`). Calling this function twice
+/// for the same project is safe — the second call is a no-op.
+///
+/// # Precondition
+///
+/// `knievel.project_id` MUST be set on the transaction before this
+/// function is called. The function asserts this via a Postgres
+/// `DO $$ BEGIN ... END $$` block that raises an exception when the
+/// GUC is absent, so a misconfigured caller fails loudly rather than
+/// inserting rows that escape RLS.
 pub async fn seed_default_taxonomy(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     org_id: &str,
     project_id: &str,
 ) -> Result<(), sqlx::Error> {
+    // Defensive precondition: the caller must have bound
+    // knievel.project_id on this transaction before seeding so that
+    // RLS policies on the taxonomy tables pass.  A missing GUC means
+    // the caller skipped the tenant-binding step — fail loudly.
+    sqlx::query(
+        "DO $$ BEGIN
+           IF current_setting('knievel.project_id', true) IS NULL
+              OR current_setting('knievel.project_id', true) = ''
+           THEN
+             RAISE EXCEPTION 'seed_default_taxonomy: knievel.project_id GUC is not set';
+           END IF;
+         END $$",
+    )
+    .execute(&mut **tx)
+    .await?;
+
     sqlx::query(
         "INSERT INTO knievel.channels (org_id, project_id, name)
-         VALUES ($1, $2, 'Web'), ($1, $2, 'Mobile'), ($1, $2, 'Email')",
+         VALUES ($1, $2, 'Web'), ($1, $2, 'Mobile'), ($1, $2, 'Email')
+         ON CONFLICT (project_id, name) DO NOTHING",
     )
     .bind(org_id)
     .bind(project_id)
@@ -385,7 +425,8 @@ pub async fn seed_default_taxonomy(
 
     sqlx::query(
         "INSERT INTO knievel.priorities (org_id, project_id, name, tier) VALUES
-         ($1, $2, 'House', 1), ($1, $2, 'Standard', 2), ($1, $2, 'Backfill', 3)",
+         ($1, $2, 'House', 1), ($1, $2, 'Standard', 2), ($1, $2, 'Backfill', 3)
+         ON CONFLICT (project_id, name) DO NOTHING",
     )
     .bind(org_id)
     .bind(project_id)
@@ -397,7 +438,8 @@ pub async fn seed_default_taxonomy(
          ($1, $2, 'Medium Rectangle', 300, 250),
          ($1, $2, 'Leaderboard',      728,  90),
          ($1, $2, 'Mobile Banner',    320,  50),
-         ($1, $2, 'Large Leaderboard',970,  90)",
+         ($1, $2, 'Large Leaderboard',970,  90)
+         ON CONFLICT (project_id, name) DO NOTHING",
     )
     .bind(org_id)
     .bind(project_id)
