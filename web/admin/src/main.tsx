@@ -41,6 +41,12 @@ const queryClient = new QueryClient({
 
 const router = createRouter({
   routeTree,
+  // Match the server-side mount in src/server.rs
+  // (mount_admin_ui pinned at /admin/). Vite's base option only
+  // affects asset URLs at build time; this pins the runtime
+  // history/router base so navigate({to: '/login'}) becomes
+  // /admin/login, not /login.
+  basepath: '/admin',
   defaultPreload: 'intent',
   context: { queryClient },
 });

@@ -52,3 +52,33 @@ test('rejects an invalid token with a useful error', async ({ page }) => {
   await page.getByRole('button', { name: /sign in/i }).click();
   await expect(page.getByText(/Token rejected/i)).toBeVisible();
 });
+
+// Regression guard for the /admin/ base-path fix. The original
+// bug shipped a blank page at `/admin/` because Vite emitted
+// `<script src="/assets/...">` (root-anchored) while the poem
+// server mounted the bundle under /admin/, so every asset 404'd.
+// Asserts that under the production preview the bundle
+// references are scoped to /admin/ and actually load with 200s,
+// independent of any downstream auth-flow rendering.
+test('serves bundle assets under /admin/ (no asset 404s)', async ({ page }) => {
+  const assetFailures: string[] = [];
+  page.on('response', (resp) => {
+    const url = resp.url();
+    const isAsset = url.includes('/assets/') || url.endsWith('.js') || url.endsWith('.css');
+    if (isAsset && resp.status() >= 400) {
+      assetFailures.push(`${resp.status()} ${url}`);
+    }
+  });
+
+  const response = await page.goto('/admin/');
+  expect(response?.status()).toBe(200);
+
+  const html = (await response?.text()) ?? '';
+  expect(html).toMatch(/(?:src|href)="\/admin\/assets\//);
+  expect(html).not.toMatch(/(?:src|href)="\/assets\//);
+
+  // Wait for SPA bundle network activity to settle so any
+  // late-loaded chunk 404s are caught.
+  await page.waitForLoadState('networkidle');
+  expect(assetFailures).toEqual([]);
+});

@@ -6,6 +6,11 @@ import react from '@vitejs/plugin-react';
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
 
 export default defineConfig({
+  // SPA is served under /admin/ by knievel's poem server
+  // (mount_admin_ui in src/server.rs). Without this, Vite emits
+  // <script src="/assets/..."> which 404s because /assets is
+  // not under /admin/.
+  base: '/admin/',
   plugins: [
     // Router plugin runs before @vitejs/plugin-react so the
     // generated routeTree.gen.ts is in place when react picks
