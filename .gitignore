@@ -17,6 +17,9 @@
 /.env
 /.env.local
 
+# Claude Code agent worktrees (per-agent isolated copies of the repo)
+.claude/worktrees/
+
 # Admin UI (Phase 7+)
 web/admin/node_modules/
 web/admin/dist/
