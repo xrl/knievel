@@ -291,11 +291,140 @@ jobs:
       - uses: actions/checkout@v4
       - run: echo "TODO — Phase 5.8 — helm package + chart index push"
 
-  publish-gem:
-    name: publish ruby gem
-    needs: github-release
+  release-ruby-gem:
+    # Regenerate the knievel-ads/knievel-ruby client from the
+    # tagged `openapi.yaml`, commit + tag knievel-ruby with the
+    # same `v*`. The downstream RubyGems publish lives in
+    # knievel-ruby's `publish-rubygems.yml`, triggered by the
+    # tag we push here. (App-token-pushed tags DO trigger
+    # downstream workflows, unlike pushes via the default
+    # GITHUB_TOKEN — that's what makes the chain work.)
+    #
+    # Gated on `needs: ci` so the gem build + smoke job (in
+    # ci.yml) has to pass before any publish — the gem only
+    # leaves this repo if smoke proves it talks to a freshly
+    # built knievel image.
+    name: release ruby gem
+    needs: ci
     runs-on: ubuntu-latest
-    if: false   # Phase 4.9 builds the gem; 5.8 wires the publish.
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 5.8 — knievel-ruby gem build + RubyGems push"
+      - name: Mint knievel-pipelines installation token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.KNIEVEL_PIPELINES_APP_ID }}
+          private-key: ${{ secrets.KNIEVEL_PIPELINES_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            knievel
+            knievel-ruby
+
+      - name: Checkout knievel (server, for openapi.yaml + config)
+        uses: actions/checkout@v4
+        with:
+          path: knievel
+
+      - name: Checkout knievel-ruby (regeneration target)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/knievel-ruby
+          path: knievel-ruby
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve gem version + target tag
+        id: gem_version
+        run: |
+          set -eu
+          echo "gem=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}"   >> "$GITHUB_OUTPUT"
+
+      - name: Seed/refresh openapi-generator config in knievel-ruby
+        run: |
+          set -eu
+          cp knievel/.github/ruby-client/openapi-generator-config.json \
+             knievel-ruby/openapi-generator-config.json
+          cp knievel/.github/ruby-client/.openapi-generator-ignore \
+             knievel-ruby/.openapi-generator-ignore
+
+      - name: Generate Ruby client from openapi.yaml
+        uses: openapi-generators/openapitools-generator-action@v1
+        with:
+          generator: ruby
+          config-file: knievel-ruby/openapi-generator-config.json
+          openapi-file: knievel/openapi.yaml
+          command-args: >-
+            --additional-properties=gemVersion=${{ steps.gem_version.outputs.gem }},library=faraday
+            --output=knievel-ruby
+
+      - name: Ensure Gemfile.lock is gitignored
+        run: |
+          set -eu
+          touch knievel-ruby/.gitignore
+          if ! grep -qx 'Gemfile.lock' knievel-ruby/.gitignore; then
+            echo Gemfile.lock >> knievel-ruby/.gitignore
+          fi
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: knievel-ruby
+          bundler-cache: false
+
+      - name: Build + load-check gem
+        working-directory: knievel-ruby
+        run: |
+          set -eu
+          # Generated repo — Gemfile.lock isn't tracked, so do a
+          # fresh resolve every run.
+          bundle config set --local frozen false
+          bundle install --jobs=4
+          rake build
+          # Verify the packaged gem loads cleanly (catches syntax
+          # errors and missing requires that rake build doesn't).
+          gem_file=$(ls pkg/*.gem | head -n1)
+          test -n "$gem_file"
+          unpack_dir=$(mktemp -d)
+          gem unpack "$gem_file" --target "$unpack_dir" >/dev/null
+          ruby -I "$unpack_dir"/*/lib -e "require 'knievel'; puts Knievel::VERSION"
+
+      - name: Upload built gem as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: knievel-${{ steps.gem_version.outputs.gem }}.gem
+          path: knievel-ruby/pkg/*.gem
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit + tag knievel-ruby
+        working-directory: knievel-ruby
+        env:
+          TAG: ${{ steps.gem_version.outputs.tag }}
+        run: |
+          set -eu
+          git config user.name  "knievel-pipelines[bot]"
+          git config user.email "knievel-pipelines[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No file changes; tagging existing HEAD as $TAG"
+          else
+            git commit -m "Regenerate from knievel $TAG"
+            git push origin HEAD:main
+          fi
+          # Fail loudly if the tag already exists upstream — re-tagging
+          # a published gem version would be a footgun.
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists on knievel-ruby; refusing to overwrite." >&2
+            exit 1
+          fi
+          git tag -a "$TAG" -m "Generated from knievel $TAG"
+          git push origin "$TAG"
+          # knievel-ruby's `publish-rubygems.yml` picks up from
+          # here: tag push triggers it, it builds the gem fresh
+          # from the tagged source, and runs `gem push` with
+          # `secrets.RUBYGEMS_ORG_API_KEY` (scoped to that repo).
