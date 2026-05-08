@@ -358,14 +358,14 @@ impl OrgApi {
         let response: ProjectResponse = match row {
             Ok(row) => row.into(),
             Err(e) => {
-                let msg = format!("{e}");
-                if msg.contains("duplicate key") || msg.contains("unique constraint") {
+                let kind = crate::sql::classify_pg_error(&e);
+                if kind.is_external_id_conflict() {
                     return CreateProjectResponse::Conflict(Json(ErrorEnvelope::of(
                         "external_id_conflict",
                         "external_id is already taken in this org",
                     )));
                 }
-                tracing::error!(error = %e, "create_project insert failed");
+                tracing::error!(error = %e, kind = ?kind, "create_project insert failed");
                 return CreateProjectResponse::Internal(Json(ErrorEnvelope::of(
                     "db_error",
                     "insert failed",

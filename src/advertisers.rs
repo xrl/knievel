@@ -224,14 +224,14 @@ impl AdvertisersApi {
                 }
             },
             Err(e) => {
-                let m = format!("{e}");
-                if m.contains("duplicate key") || m.contains("unique constraint") {
+                let kind = crate::sql::classify_pg_error(&e);
+                if kind.is_external_id_conflict() {
                     CreateAdvertiserResp::Conflict(Json(err(
                         "external_id_conflict",
                         "external_id is already taken in this project",
                     )))
                 } else {
-                    tracing::error!(error = %e, "advertiser insert failed");
+                    tracing::error!(error = %e, kind = ?kind, "advertiser insert failed");
                     CreateAdvertiserResp::Internal(Json(err("db_error", "insert failed")))
                 }
             }

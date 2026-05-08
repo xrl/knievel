@@ -90,3 +90,45 @@ pub async fn open_project_tx<'p>(
         .map_err(|_| AuthzError::Internal)?;
     Ok(tx)
 }
+
+/// Open an org-scoped tenant-bound transaction after validating the
+/// principal can operate on `path_org_id` at `min_role`. Mirrors
+/// `open_project_tx` for resources whose paths are
+/// `/v1/orgs/:org_id/...` (today: tokens, ad_library) so org-scoped
+/// handlers don't have to hand-roll the same prologue six times.
+///
+/// The returned transaction has `knievel.org_id` set so RLS
+/// policies on org-scoped tables (`organizations`, `api_tokens`,
+/// `ad_library_items`, `audit_log`) pass through. `project_id` is
+/// **not** bound here — org-scoped handlers operate above the
+/// project boundary.
+///
+/// `WrongProject` is the catch-all for project-scoped tokens
+/// addressing org-scoped routes: a project-scoped principal cannot
+/// mint a token or write to the ad library by spec
+/// (`AUTH.md` "Authorization"), so we surface that as
+/// `wrong_project` rather than `role_insufficient` to give callers
+/// a clearer reason.
+pub async fn open_org_tx<'p>(
+    pool: &'p PgPool,
+    principal: &Principal,
+    path_org_id: &str,
+    min_role: Role,
+) -> Result<Transaction<'p, Postgres>, AuthzError> {
+    if principal.org_id != path_org_id {
+        return Err(AuthzError::WrongTenant);
+    }
+    if matches!(principal.scope, Scope::Project) {
+        // Project-scoped tokens cannot address org-scoped routes.
+        // The same code path the project-scoped flow uses for a
+        // mismatched project — keep the wire-shape consistent.
+        return Err(AuthzError::WrongProject);
+    }
+    if !principal.has_role_at_least(min_role) {
+        return Err(AuthzError::RoleInsufficient);
+    }
+    let tx = db::begin_bound(pool, &principal.org_id, None)
+        .await
+        .map_err(|_| AuthzError::Internal)?;
+    Ok(tx)
+}

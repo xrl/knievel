@@ -235,14 +235,14 @@ impl AdLibraryApi {
                 }
             },
             Err(e) => {
-                let m = format!("{e}");
-                if m.contains("duplicate key") || m.contains("unique constraint") {
+                let kind = crate::sql::classify_pg_error(&e);
+                if kind.is_external_id_conflict() {
                     CreateResp::Conflict(Json(err(
                         "external_id_conflict",
                         "external_id already taken in this org",
                     )))
                 } else {
-                    tracing::error!(error = %e, "ad_library insert failed");
+                    tracing::error!(error = %e, kind = ?kind, "ad_library insert failed");
                     CreateResp::Internal(Json(err("db_error", "insert failed")))
                 }
             }

@@ -215,19 +215,19 @@ impl AdsApi {
                 }
             },
             Err(e) => {
-                let m = format!("{e}");
-                if m.contains("duplicate key") || m.contains("unique constraint") {
+                let kind = crate::sql::classify_pg_error(&e);
+                if kind.is_external_id_conflict() {
                     CreateResp::Conflict(Json(err(
                         "external_id_conflict",
                         "external_id is already taken in this project",
                     )))
-                } else if m.contains("foreign key") {
+                } else if kind.is_fk_violation() {
                     CreateResp::Unprocessable(Json(err(
                         "fk_not_found",
                         "flight_id or creative_id does not exist in this project",
                     )))
                 } else {
-                    tracing::error!(error = %e, "ad insert failed");
+                    tracing::error!(error = %e, kind = ?kind, "ad insert failed");
                     CreateResp::Internal(Json(err("db_error", "insert failed")))
                 }
             }

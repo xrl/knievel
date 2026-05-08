@@ -242,14 +242,20 @@ impl CreativeTemplatesApi {
                 }
             },
             Err(e) => {
-                let m = format!("{e}");
-                if m.contains("duplicate key") || m.contains("unique constraint") {
+                let kind = crate::sql::classify_pg_error(&e);
+                // creative_templates has two unique keys —
+                // (project_id, external_id) and (project_id, name).
+                // The 409 surface treats both as `external_id_conflict`
+                // for v0; `is_unique_violation()` catches both.
+                // Caller-side disambiguation can come later via the
+                // constraint-name suffix.
+                if kind.is_unique_violation() {
                     CreateResp::Conflict(Json(err(
                         "external_id_conflict",
                         "external_id or name is already taken in this project",
                     )))
                 } else {
-                    tracing::error!(error = %e, "creative_template insert failed");
+                    tracing::error!(error = %e, kind = ?kind, "creative_template insert failed");
                     CreateResp::Internal(Json(err("db_error", "insert failed")))
                 }
             }

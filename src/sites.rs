@@ -236,14 +236,19 @@ impl SitesApi {
                 }
             },
             Err(e) => {
-                let m = format!("{e}");
-                if m.contains("duplicate key") || m.contains("unique constraint") {
+                let kind = crate::sql::classify_pg_error(&e);
+                // sites has two unique keys — (project_id, external_id)
+                // and (project_id, url). Both surface as 409
+                // `external_id_conflict` for v0; the URL collision
+                // path will get its own code when O10 (atomic
+                // upsert_by_url) lands.
+                if kind.is_unique_violation() {
                     CreateResp::Conflict(Json(err(
                         "external_id_conflict",
                         "external_id or url is already taken in this project",
                     )))
                 } else {
-                    tracing::error!(error = %e, "site insert failed");
+                    tracing::error!(error = %e, kind = ?kind, "site insert failed");
                     CreateResp::Internal(Json(err("db_error", "insert failed")))
                 }
             }
