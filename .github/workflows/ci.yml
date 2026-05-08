@@ -459,6 +459,16 @@ jobs:
           gem install --no-document ../knievel-ruby/pkg/*.gem
           ruby examples/compose/gem_smoke.rb
 
+      # Always-on log dump so failures in the smoke step (which
+      # runs after compose is already up) don't lose server +
+      # seeder context. The earlier `if: failure()` step only
+      # triggers on failures BEFORE smoke (e.g. boot-time
+      # postgres crashes).
+      - name: Dump full compose logs (always)
+        if: always()
+        working-directory: knievel
+        run: docker compose -f examples/compose/compose.yaml logs --no-color || true
+
       - name: Compose teardown (always)
         if: always()
         working-directory: knievel
