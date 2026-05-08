@@ -120,14 +120,11 @@ jobs:
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-latest
             cross: true
-          # Apple silicon + Intel — native runners avoid the
-          # cross-compile dance for Mach-O. Use `macos-15-intel`
-          # (the canonical x86_64 macOS runner label, supported
-          # through Aug 2027) — the older `macos-13` label was
-          # retired Dec 4 2025 and queues forever.
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-            cross: false
+          # Apple silicon only — Intel Macs are sunsetting and the
+          # canonical x86_64 macOS runner label `macos-15-intel`
+          # will EOL in Aug 2027 anyway. Users on Intel Macs can
+          # build from source or run the linux/amd64 image under
+          # Docker Desktop.
           - target: aarch64-apple-darwin
             runner: macos-14
             cross: false
@@ -257,6 +254,10 @@ jobs:
           # Linux x86_64
           curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/knievel-cli-${VERSION}-x86_64-unknown-linux-musl.tar.gz \\
             | tar -xz --strip-components=1 -C \$HOME/.local/bin knievel-cli-${VERSION}-x86_64-unknown-linux-musl/knievel-cli
+
+          # Linux arm64
+          curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/knievel-cli-${VERSION}-aarch64-unknown-linux-musl.tar.gz \\
+            | tar -xz --strip-components=1 -C \$HOME/.local/bin knievel-cli-${VERSION}-aarch64-unknown-linux-musl/knievel-cli
 
           # Apple silicon
           curl -fsSL https://github.com/${{ github.repository }}/releases/download/${VERSION}/knievel-cli-${VERSION}-aarch64-apple-darwin.tar.gz \\
