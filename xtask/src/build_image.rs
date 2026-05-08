@@ -117,7 +117,9 @@ fn stage_context() -> Result<()> {
         .status()
         .context("spawning cp")?;
     if !status.success() {
-        return Err(anyhow!("cp -r web/admin/dist {dest_parent} failed: {status}"));
+        return Err(anyhow!(
+            "cp -r web/admin/dist {dest_parent} failed: {status}"
+        ));
     }
     println!("xtask build-image: staged context at {STAGE_DIR}/");
     Ok(())
