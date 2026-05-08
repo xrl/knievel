@@ -2,11 +2,13 @@ name: Release Ruby gem
 
 # Regenerates the knievel-ads/knievel-ruby client from the
 # committed `openapi.yaml` whenever a `v*` tag is pushed on
-# this repo, then commits + tags the matching version on
-# knievel-ruby. RubyGems publish is intentionally out of scope
-# for this phase — having the regenerated source available at a
-# matching tag in knievel-ruby is sufficient for downstream
-# consumers via Bundler `git:`/`tag:` references.
+# this repo, commits + tags the matching version on
+# knievel-ruby, and publishes the gem to RubyGems.org.
+#
+# The build + smoke is owned by the `gem-build` CI job (per-PR
+# and main-push) — by the time a tag lands here, the regen +
+# build + docker smoke have already passed against the
+# tagged tree. This workflow is purely the publish path.
 
 on:
   push:
@@ -85,7 +87,7 @@ jobs:
           working-directory: knievel-ruby
           bundler-cache: false
 
-      - name: Build + smoke-test gem
+      - name: Build + load-check gem
         working-directory: knievel-ruby
         run: |
           set -eu
@@ -101,72 +103,6 @@ jobs:
           unpack_dir=$(mktemp -d)
           gem unpack "$gem_file" --target "$unpack_dir" >/dev/null
           ruby -I "$unpack_dir"/*/lib -e "require 'knievel'; puts Knievel::VERSION"
-
-      # End-to-end gem smoke against a freshly built knievel
-      # image + the freshly generated gem. Closes the
-      # REQUIREMENTS.md § 8 item 3 promise: "a third party can
-      # integrate from the gem alone." If the wrapper code
-      # (knievel-ruby `lib/knievel/{client,resources/*}.rb`) is
-      # broken against the live server, this fails and we never
-      # tag a release. Local equivalent:
-      # `docker compose -f examples/compose/compose.yaml up -d
-      #  && KNIEVEL_TOKEN=$(cat tmp/knievel-dev-token)
-      #     ruby examples/compose/gem_smoke.rb`.
-
-      - name: Build local knievel docker image
-        working-directory: knievel
-        env:
-          KNIEVEL_IMAGE: knievel:gem-smoke
-        run: docker compose -f examples/compose/compose.yaml build knievel
-
-      - name: Boot compose stack (postgres + knievel + seed-demo)
-        working-directory: knievel
-        env:
-          KNIEVEL_IMAGE: knievel:gem-smoke
-        run: |
-          set -eu
-          docker compose -f examples/compose/compose.yaml up -d \
-            knievel-postgres knievel knievel-seed
-
-      - name: Wait for /healthz + capture seed token
-        working-directory: knievel
-        run: |
-          set -eu
-          deadline=$((SECONDS + 90))
-          until curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "knievel /healthz never came up" >&2
-              docker compose -f examples/compose/compose.yaml logs knievel >&2
-              exit 1
-            fi
-            sleep 2
-          done
-          # seed-demo writes the bearer to ./tmp/knievel-dev-token
-          # (mounted from ../../tmp inside the sidecar). Wait for
-          # the file with a short bound — the sidecar runs once
-          # and exits.
-          deadline=$((SECONDS + 30))
-          until [ -s tmp/knievel-dev-token ]; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "seed-demo never wrote the token file" >&2
-              docker compose -f examples/compose/compose.yaml logs knievel-seed >&2
-              exit 1
-            fi
-            sleep 1
-          done
-          echo "KNIEVEL_TOKEN=$(cat tmp/knievel-dev-token)" >> "$GITHUB_ENV"
-
-      - name: Install built gem + run end-to-end smoke
-        working-directory: knievel
-        run: |
-          set -eu
-          gem install --no-document ../knievel-ruby/pkg/*.gem
-          ruby examples/compose/gem_smoke.rb
-
-      - name: Compose teardown (always)
-        if: always()
-        working-directory: knievel
-        run: docker compose -f examples/compose/compose.yaml down -v
 
       - name: Upload built gem as workflow artifact
         uses: actions/upload-artifact@v4
@@ -199,3 +135,18 @@ jobs:
           fi
           git tag -a "$TAG" -m "Generated from knievel $TAG"
           git push origin "$TAG"
+
+      # RubyGems publish runs last — knievel-ruby tag is already
+      # in place, so a transient `gem push` failure leaves source
+      # available via Bundler `git:`/`tag:` while we retry. The
+      # API key lives in the `RUBYGEMS_API_KEY` repo secret;
+      # `gem push` reads it from `GEM_HOST_API_KEY` natively.
+      - name: Publish gem to RubyGems
+        working-directory: knievel-ruby
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: |
+          set -eu
+          gem_file=$(ls pkg/*.gem | head -n1)
+          test -n "$gem_file"
+          gem push "$gem_file"

@@ -281,6 +281,152 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  gem-build:
+    # Regenerate the knievel-ruby client from this PR's
+    # openapi.yaml, build the gem, and run the end-to-end
+    # `examples/compose/gem_smoke.rb` against a freshly built
+    # knievel docker image. Catches Dockerfile/compose +
+    # openapi-generator + wrapper-code regressions pre-merge so
+    # `release-ruby-gem.yml` has nothing left to discover at tag
+    # time. Mirrors the smoke step previously inlined into the
+    # release workflow.
+    name: gem build + smoke
+    needs: openapi-drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint knievel-pipelines installation token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.KNIEVEL_PIPELINES_APP_ID }}
+          private-key: ${{ secrets.KNIEVEL_PIPELINES_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            knievel
+            knievel-ruby
+
+      - name: Checkout knievel (server, for openapi.yaml + config)
+        uses: actions/checkout@v4
+        with:
+          path: knievel
+
+      - name: Checkout knievel-ruby (regeneration target, read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/knievel-ruby
+          path: knievel-ruby
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Seed/refresh openapi-generator config in knievel-ruby
+        run: |
+          set -eu
+          cp knievel/.github/ruby-client/openapi-generator-config.json \
+             knievel-ruby/openapi-generator-config.json
+          cp knievel/.github/ruby-client/.openapi-generator-ignore \
+             knievel-ruby/.openapi-generator-ignore
+
+      - name: Generate Ruby client from openapi.yaml
+        uses: openapi-generators/openapitools-generator-action@v1
+        with:
+          generator: ruby
+          config-file: knievel-ruby/openapi-generator-config.json
+          openapi-file: knievel/openapi.yaml
+          # CI-only placeholder version — never published, never tagged.
+          command-args: >-
+            --additional-properties=gemVersion=0.0.0-ci,library=faraday
+            --output=knievel-ruby
+
+      - name: Ensure Gemfile.lock is gitignored
+        run: |
+          set -eu
+          touch knievel-ruby/.gitignore
+          if ! grep -qx 'Gemfile.lock' knievel-ruby/.gitignore; then
+            echo Gemfile.lock >> knievel-ruby/.gitignore
+          fi
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: knievel-ruby
+          bundler-cache: false
+
+      - name: Build + load-check gem
+        working-directory: knievel-ruby
+        run: |
+          set -eu
+          bundle config set --local frozen false
+          bundle install --jobs=4
+          rake build
+          gem_file=$(ls pkg/*.gem | head -n1)
+          test -n "$gem_file"
+          unpack_dir=$(mktemp -d)
+          gem unpack "$gem_file" --target "$unpack_dir" >/dev/null
+          ruby -I "$unpack_dir"/*/lib -e "require 'knievel'; puts Knievel::VERSION"
+
+      # Admin UI bundle must exist before docker compose build —
+      # the Dockerfile's last stage `COPY web/admin/dist
+      # /var/lib/knievel/admin` is not optional. Mirror Phase 7.11
+      # in release.yml.
+      - uses: ./knievel/.github/actions/node-setup
+      - name: Build admin UI bundle
+        working-directory: knievel
+        run: pnpm --dir web/admin build
+
+      - name: Build local knievel docker image
+        working-directory: knievel
+        env:
+          KNIEVEL_IMAGE: knievel:gem-smoke
+        run: docker compose -f examples/compose/compose.yaml build knievel
+
+      - name: Boot compose stack (postgres + knievel + seed-demo)
+        working-directory: knievel
+        env:
+          KNIEVEL_IMAGE: knievel:gem-smoke
+        run: |
+          set -eu
+          docker compose -f examples/compose/compose.yaml up -d \
+            knievel-postgres knievel knievel-seed
+
+      - name: Wait for /healthz + capture seed token
+        working-directory: knievel
+        run: |
+          set -eu
+          deadline=$((SECONDS + 90))
+          until curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "knievel /healthz never came up" >&2
+              docker compose -f examples/compose/compose.yaml logs knievel >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          deadline=$((SECONDS + 30))
+          until [ -s tmp/knievel-dev-token ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "seed-demo never wrote the token file" >&2
+              docker compose -f examples/compose/compose.yaml logs knievel-seed >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "KNIEVEL_TOKEN=$(cat tmp/knievel-dev-token)" >> "$GITHUB_ENV"
+
+      - name: Install built gem + run end-to-end smoke
+        working-directory: knievel
+        run: |
+          set -eu
+          gem install --no-document ../knievel-ruby/pkg/*.gem
+          ruby examples/compose/gem_smoke.rb
+
+      - name: Compose teardown (always)
+        if: always()
+        working-directory: knievel
+        run: docker compose -f examples/compose/compose.yaml down -v
+
   acceptance:
     # ACC-01..30 partitioned across 4 nextest shards per
     # `TESTING.md` § 12.6. The binary runs in-process via
