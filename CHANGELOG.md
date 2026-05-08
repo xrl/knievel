@@ -23,6 +23,29 @@ authoritative per-commit log is `git log` plus `PHASES.md`.
 
 (none)
 
+## [0.1.24] — 2026-05-08
+
+### Added
+
+(none)
+
+### Changed
+
+(none)
+
+### Fixed
+
+- **Admin UI loads correctly under `/admin/`.** Vite was emitting
+  root-anchored `<script src="/assets/...">` while the poem
+  server mounts the SPA bundle under `/admin/`, so every asset
+  404'd and the page rendered blank. Set `base: '/admin/'` in
+  `web/admin/vite.config.ts` and `basepath: '/admin'` on the
+  TanStack Router so client-side `navigate({ to: '/login' })`
+  produces `/admin/login`, matching the server-side mount in
+  `mount_admin_ui` (`src/server.rs`). Regression-guarded by a
+  post-build asset-path check (`web/admin/scripts/check-base-path.mjs`)
+  and a Playwright smoke test.
+
 ## [0.1.23] — 2026-05-08
 
 ### Added
@@ -357,7 +380,8 @@ authoritative per-commit log is `git log` plus `PHASES.md`.
 Squatted `knievel` on RubyGems. No public release; first real
 release was `0.1.1`.
 
-[Unreleased]: https://github.com/knievel-ads/knievel/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/knievel-ads/knievel/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/knievel-ads/knievel/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/knievel-ads/knievel/compare/v0.1.16...v0.1.23
 [0.1.22]: https://github.com/knievel-ads/knievel/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/knievel-ads/knievel/compare/v0.1.20...v0.1.21
