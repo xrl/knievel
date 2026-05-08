@@ -2,13 +2,18 @@ name: Release Ruby gem
 
 # Regenerates the knievel-ads/knievel-ruby client from the
 # committed `openapi.yaml` whenever a `v*` tag is pushed on
-# this repo, commits + tags the matching version on
-# knievel-ruby, and publishes the gem to RubyGems.org.
+# this repo, then commits + tags the matching version on
+# knievel-ruby. The downstream RubyGems publish lives in
+# knievel-ruby's own `publish-rubygems.yml`, triggered by
+# the `v*` tag we push here. (App-token-pushed tags DO trigger
+# downstream workflows, unlike pushes via the default
+# GITHUB_TOKEN — that's what makes the chain work.)
 #
 # The build + smoke is owned by the `gem-build` CI job (per-PR
 # and main-push) — by the time a tag lands here, the regen +
 # build + docker smoke have already passed against the
-# tagged tree. This workflow is purely the publish path.
+# tagged tree. This workflow is purely the source-publish
+# half of the chain.
 
 on:
   push:
@@ -135,18 +140,7 @@ jobs:
           fi
           git tag -a "$TAG" -m "Generated from knievel $TAG"
           git push origin "$TAG"
-
-      # RubyGems publish runs last — knievel-ruby tag is already
-      # in place, so a transient `gem push` failure leaves source
-      # available via Bundler `git:`/`tag:` while we retry. The
-      # API key lives in the `RUBYGEMS_API_KEY` repo secret;
-      # `gem push` reads it from `GEM_HOST_API_KEY` natively.
-      - name: Publish gem to RubyGems
-        working-directory: knievel-ruby
-        env:
-          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: |
-          set -eu
-          gem_file=$(ls pkg/*.gem | head -n1)
-          test -n "$gem_file"
-          gem push "$gem_file"
+          # knievel-ruby's `publish-rubygems.yml` picks up from
+          # here: tag push triggers it, it builds the gem fresh
+          # from the tagged source, and runs `gem push` with
+          # `secrets.RUBYGEMS_ORG_API_KEY` (scoped to that repo).

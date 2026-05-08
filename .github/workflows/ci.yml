@@ -371,10 +371,27 @@ jobs:
       # the Dockerfile's last stage `COPY web/admin/dist
       # /var/lib/knievel/admin` is not optional. Mirror Phase 7.11
       # in release.yml.
-      - uses: ./knievel/.github/actions/node-setup
+      #
+      # Inline pnpm + node-setup (instead of the
+      # `node-setup` composite) because this job checks knievel
+      # out into `./knievel/`, but the composite's
+      # `cache-dependency-path` is hard-coded to
+      # `web/admin/pnpm-lock.yaml` relative to the runner's
+      # workspace root.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: knievel/web/admin/pnpm-lock.yaml
+      - name: pnpm install (web/admin)
+        working-directory: knievel/web/admin
+        run: pnpm install --frozen-lockfile
       - name: Build admin UI bundle
-        working-directory: knievel
-        run: pnpm --dir web/admin build
+        working-directory: knievel/web/admin
+        run: pnpm build
 
       - name: Build local knievel docker image
         working-directory: knievel

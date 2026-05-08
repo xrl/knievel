@@ -20,6 +20,10 @@ jobs:
   ci:
     name: per-PR CI on tag
     uses: ./.github/workflows/ci.yml
+    # The `gem build + smoke` job needs the knievel-pipelines
+    # App credentials to mint a token for cross-repo checkout;
+    # `workflow_call` does not pass secrets implicitly.
+    secrets: inherit
 
   publish-image:
     name: publish container image
