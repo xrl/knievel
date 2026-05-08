@@ -188,21 +188,30 @@ async fn seed_default_taxonomy_is_idempotent() -> Result<()> {
                 .bind(pj)
                 .fetch_one(&mut *tx)
                 .await?;
-        assert_eq!(channel_count, 3, "expected exactly 3 channels after double-seed");
+        assert_eq!(
+            channel_count, 3,
+            "expected exactly 3 channels after double-seed"
+        );
 
         let (priority_count,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM knievel.priorities WHERE project_id = $1")
                 .bind(pj)
                 .fetch_one(&mut *tx)
                 .await?;
-        assert_eq!(priority_count, 3, "expected exactly 3 priorities after double-seed");
+        assert_eq!(
+            priority_count, 3,
+            "expected exactly 3 priorities after double-seed"
+        );
 
         let (ad_type_count,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM knievel.ad_types WHERE project_id = $1")
                 .bind(pj)
                 .fetch_one(&mut *tx)
                 .await?;
-        assert_eq!(ad_type_count, 4, "expected exactly 4 ad_types after double-seed");
+        assert_eq!(
+            ad_type_count, 4,
+            "expected exactly 4 ad_types after double-seed"
+        );
     }
 
     testlib::db::ephemeral_drop(db).await?;
@@ -247,12 +256,13 @@ async fn channel_name_must_be_unique_per_project() -> Result<()> {
     // Second insert of the same (project_id, name) must be rejected.
     {
         let mut tx = testlib::tenant::begin_bound(&db.pool, "org_uniq", Some(pj)).await?;
-        let result =
-            sqlx::query("INSERT INTO knievel.channels (org_id, project_id, name) VALUES ($1, $2, 'Web')")
-                .bind("org_uniq")
-                .bind(pj)
-                .execute(&mut *tx)
-                .await;
+        let result = sqlx::query(
+            "INSERT INTO knievel.channels (org_id, project_id, name) VALUES ($1, $2, 'Web')",
+        )
+        .bind("org_uniq")
+        .bind(pj)
+        .execute(&mut *tx)
+        .await;
         let err = result.expect_err("expected unique_violation for duplicate channel name");
         let kind = knievel::sql::classify_pg_error(&err);
         assert!(

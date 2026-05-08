@@ -116,8 +116,6 @@ impl AppState {
     /// blocks across handlers. New handlers that need the pool should
     /// use this rather than re-inlining the match.
     pub fn require_db(&self) -> Result<&sqlx::PgPool, (&'static str, &'static str)> {
-        self.db
-            .as_ref()
-            .ok_or(("no_db", "no database configured"))
+        self.db.as_ref().ok_or(("no_db", "no database configured"))
     }
 }
