@@ -450,7 +450,18 @@ jobs:
             fi
             sleep 1
           done
-          echo "KNIEVEL_TOKEN=$(cat tmp/knievel-dev-token)" >> "$GITHUB_ENV"
+          # seed-demo writes the file as the distroless `nonroot`
+          # UID (65532) with mode 0o600. The runner user (1001)
+          # cannot read that, and `$(cat ...)` failure inside a
+          # variable assignment does not propagate out under
+          # `set -eu`, so we'd silently end up with an empty bearer
+          # and the gem's first call would 401. Loosen perms with
+          # sudo (passwordless on GitHub-hosted runners), then
+          # require the captured value to be non-empty.
+          sudo chmod 0644 tmp/knievel-dev-token
+          token=$(cat tmp/knievel-dev-token)
+          test -n "$token"
+          echo "KNIEVEL_TOKEN=$token" >> "$GITHUB_ENV"
 
       - name: Install built gem + run end-to-end smoke
         working-directory: knievel
