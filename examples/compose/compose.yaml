@@ -22,9 +22,15 @@ name: knievel
 services:
   knievel-postgres:
     image: postgres:16
+    # Bootstrap as the default `postgres` superuser and have
+    # init.sql CREATE the app role NOSUPERUSER from the start.
+    # Postgres 16.13 rejects self-NOSUPERUSER (CLAUDE.md gotcha
+    # #17), so we can't bootstrap as `knievel_app` and then drop
+    # superuser; the same workaround is used by ci.yml's
+    # db-integ / api-contract / acceptance jobs.
     environment:
-      POSTGRES_USER: knievel_app
-      POSTGRES_PASSWORD: dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: knievel
     volumes:
       - knievel-pgdata:/var/lib/postgresql/data

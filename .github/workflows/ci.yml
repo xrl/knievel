@@ -408,6 +408,14 @@ jobs:
           docker compose -f examples/compose/compose.yaml up -d \
             knievel-postgres knievel knievel-seed
 
+      # If anything between Boot and Smoke trips, dump every
+      # service's logs before teardown so the failure shows up in
+      # the workflow log instead of vanishing with the runner.
+      - name: Dump compose logs on failure
+        if: failure()
+        working-directory: knievel
+        run: docker compose -f examples/compose/compose.yaml logs --no-color || true
+
       - name: Wait for /healthz + capture seed token
         working-directory: knievel
         run: |
