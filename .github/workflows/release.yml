@@ -399,13 +399,88 @@ jobs:
             dist/checksums.txt
 
   publish-helm:
+    # Package and push the chart to GHCR as an OCI artifact, with
+    # `version` and `appVersion` driven from the git tag (stripped
+    # of `v`). Source `Chart.yaml` stays at 0.1.0 — `helm package
+    # --version --app-version` overrides at package time so we
+    # never need to commit a version bump back to main.
+    #
+    # The chart's image.tag defaults to .Chart.AppVersion, which
+    # this job sets to the release version, so the chart can't
+    # ship before the image manifest exists — hence the `needs:`.
     name: publish helm chart
-    needs: github-release
+    needs: publish-image-merge
     runs-on: ubuntu-latest
-    if: false   # Phase 4.4 lands the chart; 5.8 wires the publish.
+    permissions:
+      contents: read
+      packages: write       # ghcr push (chart as OCI artifact)
+      id-token: write       # cosign keyless via GitHub OIDC
     steps:
       - uses: actions/checkout@v4
-      - run: echo "TODO — Phase 5.8 — helm package + chart index push"
+
+      - name: Resolve chart version (strip leading v)
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Log in to GHCR (helm OCI)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | helm registry login ${{ env.REGISTRY }} \
+            --username ${{ github.actor }} --password-stdin
+
+      - name: Package chart
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          helm package charts/knievel \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            --destination .
+
+      - name: Push chart to GHCR
+        id: push
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # `helm push` resolves the OCI path by appending the chart
+          # name from Chart.yaml, so this lands at
+          # oci://${REGISTRY}/${{ github.repository_owner }}/charts/knievel:$VERSION.
+          # Capture stderr to extract the manifest digest for cosign.
+          out=$(helm push "knievel-${VERSION}.tgz" \
+            oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts 2>&1 | tee /dev/stderr)
+          digest=$(echo "$out" | awk '/Digest:/ {print $2}')
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign chart artifact (keyless via GitHub OIDC)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/knievel@${DIGEST}"
+
+      - name: Verify pull (smoke)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir _verify && cd _verify
+          # Reuses the helm registry login from earlier in this job,
+          # so the smoke pull works even before the package's GHCR
+          # visibility is flipped to public.
+          helm pull oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/knievel \
+            --version "$VERSION"
+          ls -la "knievel-${VERSION}.tgz"
 
   release-ruby-gem:
     # Regenerate the knievel-ads/knievel-ruby client from the
