@@ -97,8 +97,16 @@ iai-callgrind = "0.16"
 # unaffected.
 dhat          = "0.3"
 poem          = { workspace = true, features = ["test"] }
+reqwest       = { workspace = true }
 serde_json    = { workspace = true }
 sqlx          = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate"] }
+# Phase 3.26 follow-up — Keycloak round-trip test
+# (`tests/integration_oidc.rs`). Pinned to 0.27 to match the
+# testcontainers API surface (`with_copy_to`, `CopyDataSource::Data`,
+# `ContainerAsync::get_host_port_ipv4`). The test self-skips when
+# Docker is unreachable so the "no docker in sandbox" baseline from
+# `CLAUDE.md` is preserved.
+testcontainers = "0.27"
 testlib       = { path = "testlib" }
 tokio         = { workspace = true }
 
