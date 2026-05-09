@@ -1081,6 +1081,39 @@ manager and leader election running.
       mapping evaluator is a v0-stub follow-up. Boot-time
       auth lint (warn on misconfigured policies) hangs off the
       same commit as the wiremock harness.
+
+      **Note (3.26 E2E coverage):** Closes the
+      missing-real-Keycloak-token coverage that turned the
+      `claude/jwt-bearer-wiring` follow-up (PR #23) into a
+      three-round "fix + deploy-to-PR-preview" chase across
+      knievel + scientist-hq/infra + scientist-hq/k3-applications.
+      The PR #23 unit tests covered the structural validator
+      (`validate(...)`) but never proved that
+      `JwtVerifier::verify` — the runtime path wired into
+      `BearerAuth::verify_bearer` — accepts a real
+      Keycloak-minted JWT. `tests/integration_oidc.rs` boots
+      `quay.io/keycloak/keycloak:25.0` via testcontainers with a
+      pre-imported `knievel-test` realm whose shape mirrors
+      `scientist-hq/infra/terraform/keycloak/client-knievel-pr.tf`
+      (public PKCE client + `directAccessGrantsEnabled: true`,
+      realm-level `knievel` scope with audience mapper,
+      hardcoded `knievel`-claim mapper emitting
+      `{scope:org, org_id:scientist-com-pr, role:editor}`),
+      mints an access token via the resource-owner-password
+      grant, hits `/v1/whoami` via `poem::test::TestClient`,
+      and asserts the principal round-trips. Two negative
+      cases — flipped-byte signature and a token signed by an
+      unrelated RSA key — pin the signature-verify branch.
+      Self-skips when Docker is unreachable (mirrors the
+      `tests/integration_migrations.rs` `DATABASE_URL` skip);
+      runs in CI's `db-integ` job via the existing
+      `binary(/^integration/)` nextest filter — no new job
+      shape needed. Realm fixture lives at
+      `tests/fixtures/keycloak-realm.json`; future drift
+      between the chart's claim mapping and what knievel's
+      validator accepts now fails CI before the chart is
+      cut.
+
 - [x] **3.27** `/version` real auth block — issuers, audiences,
       algorithms, claim source (`claim` or `claim_mapping` rule
       count), JWKS URL. Mirrors the startup INFO log line. Updates
