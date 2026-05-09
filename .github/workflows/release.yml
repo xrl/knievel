@@ -28,30 +28,136 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/knievel
 
 jobs:
+  # Per-arch native build → single-platform image push by digest.
+  #
+  # The cargo build is a bare workflow step (NOT inside a docker
+  # build) so failures surface as plain GitHub Actions logs and
+  # the Rust cache is the standard Swatinem/rust-cache rather
+  # than buildx's opaque cache mounts. The runtime Dockerfile
+  # just packages the binaries — no compilation inside the
+  # container.
+  #
+  # No QEMU: amd64 builds on `ubuntu-latest`, arm64 builds on
+  # `ubuntu-24.04-arm` (GitHub-hosted Linux/aarch64 runner). Each
+  # runner builds its own platform natively. Replaces the prior
+  # single-runner multi-arch build that compiled the arm64 leg
+  # under QEMU emulation — ~10–20× slower than native — which
+  # dominated release wall-time at ~30–45 min for the arm64 leg.
+  #
+  # Rust caching: each matrix leg uses Swatinem/rust-cache via
+  # the `rust-setup` composite, with a per-arch shared-key so the
+  # two legs maintain independent caches.
+  #
+  # The `publish-image-merge` job below stitches the two per-arch
+  # digests into a manifest list, signs it, and attests provenance.
   publish-image:
-    name: publish container image
-    runs-on: ubuntu-latest
+    name: publish image (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write       # ghcr push
       id-token: write       # cosign keyless via GitHub OIDC
-      attestations: write   # provenance attestation
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      tag: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      # Phase 7.11: build the admin UI bundle BEFORE
-      # docker/build-push-action so the build context picks
-      # up the populated `web/admin/dist/` (the Dockerfile's
-      # COPY step expects it to exist).
+      # Native Rust toolchain + rust-cache, scoped per-arch so
+      # the matrix legs don't share/clobber.
+      - uses: ./.github/actions/rust-setup
+        with:
+          shared-key: knievel-publish-${{ matrix.arch }}
+
+      # Admin UI bundle. Built outside the container so pnpm's
+      # store cache works natively on the runner.
       - uses: ./.github/actions/node-setup
       - run: pnpm --dir web/admin build
 
-      # buildx + qemu so we can produce both amd64 and arm64 from
-      # the GitHub-hosted x86_64 runner.
-      - uses: docker/setup-qemu-action@v3
+      - name: Build knievel + knievel-cli (native release)
+        run: |
+          cargo build --release --locked --bin knievel --bin knievel-cli
+          strip target/release/knievel target/release/knievel-cli
+
+      - name: Stage docker build context
+        # Dockerfile expects:
+        #   ./knievel              (server binary, this arch)
+        #   ./knievel-cli          (CLI binary, this arch)
+        #   ./web/admin/dist/      (admin SPA bundle)
+        # Stage them in a clean dir so the build context stays
+        # tiny — no Cargo.toml, no `target/`, no source tree.
+        run: |
+          set -eu
+          mkdir -p docker-context/web/admin
+          cp target/release/knievel       docker-context/knievel
+          cp target/release/knievel-cli   docker-context/knievel-cli
+          cp -r web/admin/dist            docker-context/web/admin/dist
+          cp Dockerfile                   docker-context/Dockerfile
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          platforms: ${{ matrix.platform }}
+          # push-by-digest=true uploads without claiming any
+          # tag; the merge job below stitches the per-arch
+          # digests into a manifest list and tags that.
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export per-arch digest
+        # Filename = digest (sha256:<hex> with the prefix
+        # stripped). The merge job downloads every artifact and
+        # builds an `imagetools create` invocation from the
+        # filenames.
+        run: |
+          set -eu
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-image-merge:
+    name: publish image (manifest)
+    needs: publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write       # ghcr push (manifest list)
+      id-token: write       # cosign keyless
+      attestations: write   # provenance attestation
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+      tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -74,35 +180,40 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push multi-arch
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
+      - name: Create manifest list and push
+        id: merge
+        working-directory: /tmp/digests
+        run: |
+          set -eu
+          # Build `-t <tag1> -t <tag2> ...` from metadata-action's JSON.
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$DOCKER_METADATA_OUTPUT_JSON")
+          # Each digest filename was created from a successful
+          # per-arch push, so `<image>@sha256:<file>` resolves.
+          refs=$(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $tags $refs
+          # Resolve the merged manifest's digest for cosign + attest.
+          version="${{ steps.meta.outputs.version }}"
+          digest=$(docker buildx imagetools inspect \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$version" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Sign image (keyless via GitHub OIDC)
+      - name: Sign manifest list (keyless via GitHub OIDC)
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.merge.outputs.digest }}
         run: |
           cosign sign --yes \
             ${REGISTRY}/${IMAGE_NAME}@${DIGEST}
 
-      - name: Attest build provenance
+      - name: Attest build provenance (manifest list)
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true
 
   build-cli:
@@ -199,7 +310,7 @@ jobs:
 
   github-release:
     name: github release
-    needs: [publish-image, build-cli]
+    needs: [publish-image-merge, build-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -235,7 +346,7 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          DIGEST: ${{ needs.publish-image.outputs.digest }}
+          DIGEST: ${{ needs.publish-image-merge.outputs.digest }}
         shell: bash
         run: |
           cat > RELEASE_NOTES.md <<EOF

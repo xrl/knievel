@@ -259,34 +259,49 @@ jobs:
             -summary /tmp/knievel-rendered.yaml
 
   build-image:
-    # Per Phase 4.3: tag-only publish, but PR / main-branch CI
-    # still BUILDS the image (no push) to catch Dockerfile rot
-    # before a release attempt ships a broken artifact. Single
-    # platform here keeps the wall-time small; the multi-arch
-    # publish lives in release.yml.
+    # PR-time regression guard for the publish-image flow in
+    # release.yml. Single-platform (linux/amd64, the runner's
+    # native arch) so wall-time stays small. Multi-arch publish
+    # lives in release.yml.
     #
-    # Phase 7.11 adds the admin UI bundle. The Node build runs
-    # in this job (pnpm-store cached natively via setup-node)
-    # BEFORE docker/build-push-action so the build context
-    # picks up the populated `web/admin/dist/` for the
-    # Dockerfile's `COPY` step.
+    # Mirrors release.yml's pattern exactly: `cargo build` is a
+    # bare workflow step (NOT inside the Dockerfile), then a
+    # thin `docker build` COPYs the binaries + admin bundle into
+    # the runtime image. Keeps the Rust build debuggable from
+    # plain workflow logs and exercises the same code path the
+    # tag workflow ships.
     name: build container image (no push)
     needs: prime
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/rust-setup
       - uses: ./.github/actions/node-setup
       - run: pnpm --dir web/admin build
+
+      - name: Build knievel + knievel-cli (native release)
+        run: |
+          cargo build --release --locked --bin knievel --bin knievel-cli
+          strip target/release/knievel target/release/knievel-cli
+
+      - name: Stage docker build context
+        run: |
+          set -eu
+          mkdir -p docker-context/web/admin
+          cp target/release/knievel       docker-context/knievel
+          cp target/release/knievel-cli   docker-context/knievel-cli
+          cp -r web/admin/dist            docker-context/web/admin/dist
+          cp Dockerfile                   docker-context/Dockerfile
+
       - uses: docker/setup-buildx-action@v3
       - name: Build (linux/amd64, no push)
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: docker-context
           platforms: linux/amd64
           push: false
           load: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   gem-build:
     # Regenerate the knievel-ruby client from this PR's
@@ -404,11 +419,45 @@ jobs:
         working-directory: knievel/web/admin
         run: pnpm build
 
+      # The runtime Dockerfile is thin (just COPYs pre-built
+      # binaries in), so we cargo-build natively here, then
+      # stage the binaries + admin bundle and run a plain
+      # `docker build`. Mirrors release.yml's publish-image.
+      #
+      # rust-setup composite isn't usable here — this job checks
+      # knievel out into `./knievel/`, not the workspace root —
+      # so we inline the toolchain + cache like the pnpm setup
+      # above does for the same reason.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.94'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: knievel
+          shared-key: knievel-gem-build
+          cache-on-failure: 'true'
+
+      - name: Build knievel + knievel-cli (native release)
+        working-directory: knievel
+        run: |
+          cargo build --release --locked --bin knievel --bin knievel-cli
+          strip target/release/knievel target/release/knievel-cli
+
+      - name: Stage docker build context
+        working-directory: knievel
+        run: |
+          set -eu
+          mkdir -p docker-context/web/admin
+          cp target/release/knievel       docker-context/knievel
+          cp target/release/knievel-cli   docker-context/knievel-cli
+          cp -r web/admin/dist            docker-context/web/admin/dist
+          cp Dockerfile                   docker-context/Dockerfile
+
       - name: Build local knievel docker image
         working-directory: knievel
-        env:
-          KNIEVEL_IMAGE: knievel:gem-smoke
-        run: docker compose -f examples/compose/compose.yaml build knievel
+        run: docker build -t knievel:gem-smoke docker-context
 
       - name: Boot compose stack (postgres + knievel only)
         working-directory: knievel
