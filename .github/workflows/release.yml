@@ -427,12 +427,17 @@ jobs:
         with:
           version: v3.16.2
 
-      - name: Log in to GHCR (helm OCI)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "$GH_TOKEN" | helm registry login ${{ env.REGISTRY }} \
-            --username ${{ github.actor }} --password-stdin
+      - name: Log in to GHCR
+        # Used by both `helm push` (helm 3.8+ reads ~/.docker/config.json
+        # for OCI auth) and `cosign sign` (which reads docker config —
+        # NOT the helm-specific config that `helm registry login` writes,
+        # which is why a `helm registry login` alone leaves cosign
+        # unauthenticated on the GHCR signature push).
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package chart
         env:
@@ -475,8 +480,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir _verify && cd _verify
-          # Reuses the helm registry login from earlier in this job,
-          # so the smoke pull works even before the package's GHCR
+          # Reuses the docker login from earlier in this job, so the
+          # smoke pull works even before the package's GHCR
           # visibility is flipped to public.
           helm pull oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/knievel \
             --version "$VERSION"
