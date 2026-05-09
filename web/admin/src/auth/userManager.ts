@@ -23,8 +23,8 @@ export function initUserManager(cfg: RuntimeConfig): UserManager | null {
   manager = new UserManager({
     authority: cfg.oidc.issuer,
     client_id: cfg.oidc.client_id,
-    redirect_uri: `${window.location.origin}/oidc/callback`,
-    post_logout_redirect_uri: window.location.origin,
+    redirect_uri: `${window.location.origin}/admin/oidc/callback`,
+    post_logout_redirect_uri: `${window.location.origin}/admin/`,
     response_type: 'code',
     scope: cfg.oidc.scopes.join(' '),
     // Persist tokens in sessionStorage — survives tab refresh,

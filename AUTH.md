@@ -254,10 +254,12 @@ the service-account one above:
 - **Proof Key for Code Exchange (PKCE)**: required, method
   `S256`. Set "Advanced → Proof Key for Code Exchange Code
   Challenge Method" to `S256`.
-- **Valid redirect URIs**:
-  - `https://admin.knievel.example.com/oidc/callback`
-  - `http://localhost:5173/oidc/callback` (dev)
-- **Valid post-logout redirect URIs**: the admin UI's root URL.
+- **Valid redirect URIs** (the SPA mounts under `/admin/`, so the
+  callback route resolves under that basepath):
+  - `https://admin.knievel.example.com/admin/oidc/callback`
+  - `http://localhost:5173/admin/oidc/callback` (dev)
+- **Valid post-logout redirect URIs**: the admin UI's root URL,
+  including the `/admin/` mount (e.g. `https://admin.knievel.example.com/admin/`).
 - **Web origins**: same hosts as the redirect URIs (Keycloak
   uses this for its own CORS allow-list on the token endpoint).
 - **Access token lifespan**: 15 minutes (knievel's default
