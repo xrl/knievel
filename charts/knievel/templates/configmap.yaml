@@ -48,3 +48,21 @@ data:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     {{- end }}
+
+    {{- if or .Values.adminUi.oidc.issuer .Values.adminUi.oidc.clientId }}
+    admin_ui:
+      oidc:
+        {{- with .Values.adminUi.oidc.issuer }}
+        issuer: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.adminUi.oidc.clientId }}
+        client_id: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.adminUi.oidc.scopes }}
+        scopes:
+          {{- range . }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- end }}
+        require_oidc: {{ .Values.adminUi.oidc.requireOidc }}
+    {{- end }}
