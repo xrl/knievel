@@ -82,6 +82,30 @@ api:
   publicBaseUrl: ""
   bindAddr: "0.0.0.0:8080"
 
+# Admin UI runtime config. Surfaced verbatim to the SPA at
+# GET /admin/config.json so one image works across envs. See
+# AUTH.md "Keycloak Setup — Human Admin UI (PKCE)" and the
+# `admin_ui` block in config.example.yaml.
+#
+# When both `oidc.issuer` and `oidc.clientId` are empty (the
+# default), the chart skips the admin_ui block in config.yaml
+# entirely and the SPA falls through to the paste-a-token form.
+adminUi:
+  oidc:
+    # OIDC issuer URL (e.g. https://identity.example.com/realms/foo).
+    issuer: ""
+    # Public PKCE client ID. No client secret — PKCE replaces it.
+    clientId: ""
+    # Scopes requested by the SPA. `knievel` triggers the Keycloak
+    # claim mapper that emits the `knievel` JWT claim.
+    scopes:
+      - openid
+      - profile
+      - knievel
+    # When true, the SPA hides the paste-a-token fallback so
+    # SSO/MFA/audit policy can't be sidestepped.
+    requireOidc: false
+
 ingress:
   enabled: false
   className: nginx
