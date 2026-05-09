@@ -48,9 +48,59 @@ pub struct Config {
     pub partitions: PartitionsConfig,
     #[serde(default)]
     pub admin_ui: AdminUiConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
     // Sections not yet typed are tolerated by serde via the
     // `default` attribute on the top-level struct; deeper typing
     // lands per-feature.
+}
+
+/// `auth` block — issuer policies for JWT validation.
+///
+/// Phase 3.26 follow-up: real signature verification + JWKS fetch.
+/// `auth.jwt.issuers` is a list of trusted OIDC issuers; the first
+/// whose `iss` claim matches an incoming token is used. JWKS is
+/// auto-discovered from `{issuer}/.well-known/openid-configuration`
+/// unless `jwks_url` is set explicitly.
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct AuthConfig {
+    #[serde(default)]
+    pub jwt: JwtConfig,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct JwtConfig {
+    #[serde(default)]
+    pub issuers: Vec<JwtIssuerConfig>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct JwtIssuerConfig {
+    /// OIDC issuer URL — must match the `iss` claim verbatim
+    /// (Keycloak emits e.g. `https://identity.example.com/realms/foo`).
+    pub issuer: String,
+    /// Required `aud` membership.
+    pub audience: String,
+    /// Asymmetric algorithms accepted for this issuer's tokens.
+    /// `alg: none` and HS* are rejected unconditionally.
+    #[serde(default = "default_jwt_algorithms")]
+    pub algorithms: Vec<String>,
+    /// JWKS URL. Empty = derive from
+    /// `{issuer}/.well-known/openid-configuration` at first request.
+    #[serde(default)]
+    pub jwks_url: String,
+    /// Where the knievel authz claim lives in the JWT.
+    /// Defaults to `knievel`.
+    #[serde(default = "default_jwt_claim")]
+    pub claim: String,
+}
+
+fn default_jwt_algorithms() -> Vec<String> {
+    vec!["RS256".into(), "ES256".into()]
+}
+
+fn default_jwt_claim() -> String {
+    "knievel".into()
 }
 
 #[derive(Deserialize, Debug, Clone)]

@@ -66,3 +66,25 @@ data:
         {{- end }}
         require_oidc: {{ .Values.adminUi.oidc.requireOidc }}
     {{- end }}
+
+    {{- with .Values.auth.jwt.issuers }}
+    auth:
+      jwt:
+        issuers:
+          {{- range . }}
+          - issuer: {{ .issuer | quote }}
+            audience: {{ .audience | quote }}
+            {{- with .algorithms }}
+            algorithms:
+              {{- range . }}
+              - {{ . | quote }}
+              {{- end }}
+            {{- end }}
+            {{- with .jwksUrl }}
+            jwks_url: {{ . | quote }}
+            {{- end }}
+            {{- with .claim }}
+            claim: {{ . | quote }}
+            {{- end }}
+          {{- end }}
+    {{- end }}

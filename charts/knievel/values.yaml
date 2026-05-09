@@ -106,6 +106,25 @@ adminUi:
     # SSO/MFA/audit policy can't be sidestepped.
     requireOidc: false
 
+# API-side JWT validation policies. Each entry is a trusted OIDC
+# issuer; the first whose `iss` claim matches the incoming token is
+# used. JWKS is auto-discovered from
+# `{issuer}/.well-known/openid-configuration` when `jwksUrl` is left
+# empty. With an empty list, the API only accepts opaque (`kvl_…`)
+# tokens — the JWT path is disabled.
+#
+# Example (Keycloak human admin UI):
+#   auth:
+#     jwt:
+#       issuers:
+#         - issuer: "https://identity.example.com/realms/foo"
+#           audience: "knievel"
+#           algorithms: ["RS256"]
+#           claim: "knievel"
+auth:
+  jwt:
+    issuers: []
+
 ingress:
   enabled: false
   className: nginx

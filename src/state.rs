@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use sqlx::PgPool;
 
+use crate::auth::jwt::JwtVerifier;
 use crate::config::AdminUiConfig;
 use crate::events::EventSender;
 use crate::image_upload::ImageStore;
@@ -54,6 +55,11 @@ pub struct AppState {
     /// Phase 7.11 `StaticFilesEndpoint` mount. Empty defaults
     /// run as a headless API with no admin console served.
     pub admin_ui: AdminUiConfig,
+    /// JWT verifier (Phase 3.26 follow-up). Empty-policy default
+    /// disables the JWT path; production deployments populate it
+    /// from `auth.jwt.issuers` so `BearerAuth` can accept Keycloak
+    /// (and other OIDC) tokens alongside opaque ones.
+    pub jwt_verifier: JwtVerifier,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -106,6 +112,11 @@ impl AppState {
 
     pub fn with_admin_ui(mut self, admin_ui: AdminUiConfig) -> Self {
         self.admin_ui = admin_ui;
+        self
+    }
+
+    pub fn with_jwt_verifier(mut self, verifier: JwtVerifier) -> Self {
+        self.jwt_verifier = verifier;
         self
     }
 }

@@ -1,22 +1,29 @@
-//! `poem-openapi` Bearer security scheme — opaque-token path.
+//! `poem-openapi` Bearer security scheme — opaque + JWT paths.
 //!
-//! Phase 3.3. JWT path lands in 3.26 alongside the JWKS cache.
+//! Phase 3.3 wired the opaque path; Phase 3.26 follow-up wired the
+//! JWT path on top.
 //!
 //! Flow:
 //!   1. `poem-openapi` parses `Authorization: Bearer <token>`.
 //!   2. `verify_bearer` is called with the bearer token.
-//!   3. We `auth::opaque::parse` it. Structural failure → `None`
-//!      → `poem-openapi` returns `401`.
-//!   4. We open a transaction with `db::begin_auth_lookup` so the
-//!      `api_tokens` RLS auth-bootstrap branch unlocks a single
-//!      row by primary key. The query also filters out revoked /
-//!      expired tokens at the DB layer.
-//!   5. We verify argon2id and build a `Principal`. Any failure
-//!      short-circuits to `None` → `401`.
+//!   3. Token shape is sniffed: three dot-separated segments whose
+//!      first base64url-segment decodes to a JSON object with an
+//!      `alg` field is treated as a JWT and dispatched to
+//!      `JwtVerifier::verify`. Anything else falls through to the
+//!      opaque-token path (`auth::opaque::parse`).
+//!   4. Opaque path: open a transaction with `db::begin_auth_lookup`
+//!      so the `api_tokens` RLS auth-bootstrap branch unlocks a
+//!      single row by primary key, verify argon2id, build a
+//!      `Principal`. Any failure short-circuits to `None` → `401`.
+//!   5. JWT path: `JwtVerifier` runs JWKS fetch + signature
+//!      verification + claim extraction. Returns `None` on any
+//!      failure (caller sees 401).
 //!
-//! The transaction is rolled back on drop; the auth-bootstrap
-//! GUC is therefore scoped to this single lookup.
+//! The opaque-path transaction is rolled back on drop; the
+//! auth-bootstrap GUC is therefore scoped to this single lookup.
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use poem::Request;
 use poem_openapi::auth::Bearer;
 use poem_openapi::SecurityScheme;
@@ -32,6 +39,19 @@ pub struct BearerAuth(pub Principal);
 
 async fn verify_bearer(req: &Request, bearer: Bearer) -> Option<Principal> {
     let state = req.data::<AppState>()?;
+
+    // Sniff JWT first — opaque tokens never contain `.`, so this is
+    // both unambiguous and cheap.
+    if state.jwt_verifier.is_enabled() && looks_like_jwt(&bearer.token) {
+        match state.jwt_verifier.verify(&bearer.token).await {
+            Ok(principal) => return Some(principal),
+            Err(err) => {
+                tracing::debug!(?err, "JWT bearer verification failed");
+                return None;
+            }
+        }
+    }
+
     let pool = state.db.as_ref()?;
 
     let parsed = opaque::parse(&bearer.token).ok()?;
@@ -71,4 +91,22 @@ async fn verify_bearer(req: &Request, bearer: Bearer) -> Option<Principal> {
         role,
         actor_id: db_id,
     })
+}
+
+/// Cheap JWT-shape detection. A real JWT has exactly two `.`
+/// separators and a base64url-encoded JSON object with an `alg`
+/// field as its first segment. Opaque tokens (`kvl_…`) carry no
+/// `.`, so the first check is enough to reject them.
+fn looks_like_jwt(token: &str) -> bool {
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let Ok(header_bytes) = URL_SAFE_NO_PAD.decode(parts[0]) else {
+        return false;
+    };
+    let Ok(header) = serde_json::from_slice::<serde_json::Value>(&header_bytes) else {
+        return false;
+    };
+    header.get("alg").and_then(|v| v.as_str()).is_some()
 }

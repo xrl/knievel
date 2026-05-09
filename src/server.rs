@@ -209,11 +209,20 @@ pub fn mount_admin_ui(route: Route, static_dir: Option<&str>) -> Route {
 }
 
 async fn build_state(cfg: &Config) -> AppState {
+    let jwt_verifier = crate::auth::jwt::JwtVerifier::new(cfg.auth.jwt.issuers.clone());
+    if jwt_verifier.is_enabled() {
+        tracing::info!(
+            issuer_count = jwt_verifier.policies().len(),
+            "JWT bearer verification enabled"
+        );
+    }
+
     let mut state = AppState::new()
         .with_decisions(DecisionFlags {
             force_overrides_enabled: cfg.decisions.force_overrides_enabled,
         })
         .with_admin_ui(cfg.admin_ui.clone())
+        .with_jwt_verifier(jwt_verifier)
         // In-process store as the v0 default. The S3 / MinIO /
         // GCS-compat adapter is a 3.29 follow-up; both share the
         // `ImageStore` trait so flipping the backend is a config
