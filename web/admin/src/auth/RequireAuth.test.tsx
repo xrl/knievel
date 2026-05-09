@@ -6,7 +6,7 @@
 //     children.
 //   - Paste-token mode + no credential → calls
 //     navigate({ to: '/login', ...}) with return_to
-//     pointing at the current pathname + search.
+//     pointing at the current location.href.
 //   - Runtime config not yet loaded → renders the loading
 //     spinner.
 //
@@ -30,7 +30,11 @@ const { runtimeMock, sessionMock, routerMock } = vi.hoisted(() => ({
   },
   routerMock: {
     navigate: vi.fn(),
-    location: { pathname: '/orgs/org_a/projects/pj_x', search: '' },
+    location: {
+      pathname: '/orgs/org_a/projects/pj_x',
+      search: '',
+      href: '/orgs/org_a/projects/pj_x',
+    },
   },
 }));
 
@@ -100,6 +104,7 @@ describe('RequireAuth (paste-token mode)', () => {
     routerMock.location = {
       pathname: '/orgs/org_a/projects/pj_x/advertisers',
       search: '?q=acme',
+      href: '/orgs/org_a/projects/pj_x/advertisers?q=acme',
     };
 
     render(
