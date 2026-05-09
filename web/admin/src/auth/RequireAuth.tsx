@@ -47,19 +47,18 @@ export function RequireAuth({ children }: Props) {
 function RequireOidcAuth({ children }: Props) {
   const auth = useAuth();
   const navigate = useNavigate();
-  const location = useRouterState({ select: (s) => s.location });
+  const returnTo = useRouterState({ select: (s) => s.location.href });
 
   useEffect(() => {
     if (auth.isLoading || auth.activeNavigator) return;
     if (!auth.isAuthenticated && !hasCredential()) {
-      const returnTo = location.pathname + location.search;
       navigate({
         to: '/oidc/login',
         search: { return_to: returnTo },
         replace: true,
       });
     }
-  }, [auth.isLoading, auth.isAuthenticated, auth.activeNavigator, location, navigate]);
+  }, [auth.isLoading, auth.isAuthenticated, auth.activeNavigator, returnTo, navigate]);
 
   if (auth.isLoading || auth.activeNavigator) {
     return (
@@ -74,18 +73,17 @@ function RequireOidcAuth({ children }: Props) {
 
 function RequirePasteAuth({ children }: Props) {
   const navigate = useNavigate();
-  const location = useRouterState({ select: (s) => s.location });
+  const returnTo = useRouterState({ select: (s) => s.location.href });
 
   useEffect(() => {
     if (!hasCredential()) {
-      const returnTo = location.pathname + location.search;
       navigate({
         to: '/login',
         search: { return_to: returnTo },
         replace: true,
       });
     }
-  }, [location, navigate]);
+  }, [returnTo, navigate]);
 
   if (!hasCredential()) return null;
   return <>{children}</>;
