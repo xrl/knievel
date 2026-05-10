@@ -30,6 +30,12 @@ data:
       level: {{ .Values.logging.level | quote }}
       format: {{ .Values.logging.format | quote }}
       decisions_sample_rate: {{ .Values.logging.decisionsSampleRate }}
+      request_log_enabled: {{ .Values.logging.requestLogEnabled }}
+      request_log_skip_paths:
+        {{- range .Values.logging.requestLogSkipPaths }}
+        - {{ . | quote }}
+        {{- end }}
+      request_log_slow_ms: {{ .Values.logging.requestLogSlowMs }}
 
     {{- if .Values.sentry.enabled }}
     sentry:

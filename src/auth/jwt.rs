@@ -414,7 +414,11 @@ impl JwtVerifier {
             .lookup_jwk(&policy.issuer, &policy.jwks_url, kid)
             .await
             .map_err(|err| {
-                tracing::debug!(?err, issuer = %policy.issuer, "JWKS lookup failed");
+                // WARN: JWKS-fetch failure is a deployment problem
+                // (issuer URL wrong, network egress blocked, JWKS
+                // rotated and cache stale). Default INFO operators
+                // need to see this.
+                tracing::warn!(?err, issuer = %policy.issuer, "JWKS lookup failed");
                 JwtError::Signature
             })?;
 

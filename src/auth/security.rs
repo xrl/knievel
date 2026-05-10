@@ -46,7 +46,18 @@ async fn verify_bearer(req: &Request, bearer: Bearer) -> Option<Principal> {
         match state.jwt_verifier.verify(&bearer.token).await {
             Ok(principal) => return Some(principal),
             Err(err) => {
-                tracing::debug!(?err, "JWT bearer verification failed");
+                // WARN, not DEBUG: bearer rejection causes (signature,
+                // audience, issuer, expired, claim-missing, etc.) are
+                // a deployment-correctness signal, not noise. An
+                // attacker probing the endpoint already knows the
+                // request was rejected; hiding *why* helped nobody
+                // and made OIDC integration debugging miserable.
+                // The `bearer_rejected=` field is the canonical grep
+                // target for "why is my client 401ing?".
+                tracing::warn!(
+                    bearer_rejected = ?err,
+                    "JWT bearer verification failed"
+                );
                 return None;
             }
         }

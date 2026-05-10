@@ -36,6 +36,7 @@ pub mod observability;
 pub mod orgs;
 pub mod pagination;
 pub mod partitions;
+pub mod request_log;
 pub mod rollup;
 pub mod selection;
 pub mod server;
