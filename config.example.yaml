@@ -35,6 +35,17 @@ database:
   # Run sqlx migrations at startup. Knievel keeps migrations small and
   # additive; impactful ones are flagged in release notes.
   auto_migrate: true
+  # When true (default), a missing or unreachable database causes the
+  # process to exit 1 at boot → CrashLoopBackOff on Kubernetes.
+  # Set to false only in dev environments where you want the server to
+  # start without a database (project-scoped endpoints will 503).
+  required: true
+  # Exponential-backoff retry on the initial connection. The server
+  # retries `attempts` times before treating the failure as fatal.
+  connect_retry:
+    attempts: 5
+    initial_backoff_ms: 1000
+    max_backoff_ms: 16000
 
 snapshot:
   # Notify + version-poll hybrid. NOTIFY is the fast path; the poll

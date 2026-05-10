@@ -223,7 +223,8 @@ impl Default for DatabaseConfig {
             auto_migrate: false,
             // Tests use Config::default() without a real database;
             // keep the no-DB path open so they don't need to wire
-            // a `database.url`.
+            // a `database.url`. `required: false` lets `build_state`
+            // return `Ok(state_no_db)`.
             required: false,
             connect_retry: ConnectRetryConfig::default(),
         }
