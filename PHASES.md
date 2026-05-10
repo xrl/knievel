@@ -1712,6 +1712,64 @@ flows from a working binary in a real container.
       `RELEASE_CHECKLIST.md` (transitive release-readiness
       signal: every tag is cut from a main commit that
       already passed this gate).
+- [x] **4.12** Per-request structured logging + bearer-rejection
+      visibility. New `src/request_log.rs` middleware emits one
+      `tracing` event per completed request with
+      `method`/`path`/`status`/`latency_ms`/`request_id`; 5xx logs
+      at ERROR with the inner error chain attached, slow-but-OK
+      requests bump to WARN. Inbound `x-request-id` is honored
+      when ASCII-printable and 8..128 chars; otherwise a fresh
+      32-hex ID is minted (OsRng via the existing argon2 dep, no
+      new uuid dep). Response always carries the effective
+      `x-request-id`. Bodies, `Authorization`, `Cookie`, and
+      query strings are deliberately NOT logged. Knobs
+      (`logging.request_log_enabled`,
+      `logging.request_log_skip_paths`,
+      `logging.request_log_slow_ms`) wired into `LoggingConfig`,
+      `charts/knievel/values.yaml`, and the configmap template.
+      Same commit bumps `src/auth/security.rs::verify_bearer`'s
+      JWT-failure log from `debug!` to `warn!` and
+      `src/auth/jwt.rs::lookup_jwk`'s JWKS-fetch failure from
+      `debug!` to `warn!` so default-INFO operators see *why* a
+      bearer was rejected. Closes the OIDC-debugging blind spot
+      that produced the Phase 3.26 follow-up sessions.
+      Refs: `REQUIREMENTS.md` § 10.2, `AUTH.md` "JWKS handling".
+
+      **Note (4.12, choice points):**
+      - **URI path, not matched route.** Poem's `Endpoint` trait
+        doesn't expose the matched route in a stable way after
+        the inner endpoint resolves. URI path is concrete and
+        always available.
+      - **No query string in the log line.** The cost of a
+        query-key allow-list missing a secret-bearing key is
+        higher than the cost of operators losing query
+        visibility. Documented in `request_log.rs`.
+      - **Skip-list, not sampling, on the hot path.** The v0
+        lever for "per-request log too expensive on
+        `POST /v1/projects/:project_id/decisions`" is to add it
+        to `logging.request_log_skip_paths`. A real sampler is
+        a future task; the existing `decisions_sample_rate`
+        knob in the chart is a separate sampler that does not
+        gate this middleware.
+      - **Custom in-test capture layer**, not `tracing-test`,
+        for the unit tests. The 30-line `CaptureLayer` in
+        `src/request_log.rs::tests` is small enough to inline
+        and avoids a dev-dep purely for two assertions.
+
+      **Note (4.12, parent-session bug):** The parent session
+      that motivated this change was chasing a 500 on
+      `GET /v1/orgs/:org_id` in a PR-preview pod that turned
+      out to be downstream of `auto_migrate failed; /readyz
+      will report 503 until resolved -- error: "creating
+      knievel schema"`. The schema-creation bug itself
+      (likely the Postgres role lacking `CREATE` on the
+      target database, or the `CREATE SCHEMA knievel`
+      migration missing from the published image) is OUT OF
+      SCOPE for this task. With this middleware landed the
+      next operator hitting it will see the per-request 500
+      *and* the `auto_migrate failed` ERROR line at boot
+      together, instead of having to read between two
+      unrelated lines.
 
 **Milestone:** `docker compose up` boots a working knievel against
 Postgres + MinIO + wiremock; `helm install` against a real

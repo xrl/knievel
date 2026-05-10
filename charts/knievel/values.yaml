@@ -90,6 +90,21 @@ logging:
   level: info
   format: json
   decisionsSampleRate: 0.01
+  # Per-request structured log line (method/path/status/latency_ms/
+  # request_id, plus an x-request-id response header). Defaults to
+  # true. Disable on hot-path-only fleets that ship per-request
+  # observability via OTel spans instead.
+  requestLogEnabled: true
+  # Exact-match path skip-list for the request logger. The default
+  # excludes the kubelet probe paths so /healthz + /readyz traffic
+  # doesn't drown the log stream. Add hot endpoints (e.g. the
+  # decision endpoint at high QPS) here when needed.
+  requestLogSkipPaths:
+    - /healthz
+    - /readyz
+  # Latency above which a request is logged at warn level
+  # regardless of status. Helps surface slow-but-200 paths.
+  requestLogSlowMs: 1000
 
 api:
   publicBaseUrl: ""
