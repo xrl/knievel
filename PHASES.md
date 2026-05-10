@@ -2109,6 +2109,41 @@ checklist green.
       `unset DATABASE_URL && cargo xtask bench-all --skip-iai
       --skip-dhat` smoke documented in `bench/README.md`.
 
+- [x] **5.10** Boot hygiene — fail-fast on bad DB config,
+      surface full error chains to operators.
+      Refs: `REQUIREMENTS.md` § 8 (operational guarantees).
+
+      **What landed:**
+      - `format_error_chain` (pub) walks `anyhow::Error::chain()`
+        and joins all causes with `: ` so the root `sqlx::Error`
+        (e.g. `42501 insufficient_privilege`) is always visible
+        in the log — previously only the topmost `.context()`
+        label was emitted.
+      - `build_state` now returns `Result<AppState>`. On failure
+        `server::run` propagates it; `main.rs` catches the `Err`,
+        emits `error_chain` at error level, then calls
+        `std::process::exit(1)`. Kubelet sees exit code 1 →
+        CrashLoopBackOff — operators find the misconfiguration
+        from the exit code and structured log, not from a
+        perpetually 503-ing pod that appears "Running."
+      - Exponential-backoff retry on connect. Configurable via
+        `database.connect_retry` (`attempts`, `initial_backoff_ms`,
+        `max_backoff_ms`); defaults 5 attempts, 1 s → 16 s cap.
+      - `database.required: bool` (serde default `true` in
+        prod config; `false` in `DatabaseConfig::Default` so
+        unit tests using `Config::default()` need no live DB).
+      - Operator hints for sqlstate codes: `28000` (auth
+        rejected), `28P01` (wrong password), `3D000` (database
+        missing) on connect; `42501` (insufficient privilege) on
+        migrate.
+      - Boot summary INFO line: `db=connected schema=migrated
+        jwt_issuers=N image_store=in_memory events=on
+        leader=follower "knievel boot ready"`.
+      - Nine new unit tests covering all helpers and the three
+        `build_state` code paths.
+      - `charts/knievel/values.yaml` documents `database.required`
+        and `database.connectRetry` knobs.
+
 - [ ] **5.8** Release-tagging workflow — first
       checklist-gated cut. Multi-arch image published, gem
       published, GitHub Release created.

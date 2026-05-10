@@ -156,6 +156,49 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
     #[serde(default)]
     pub auto_migrate: bool,
+    /// When `true` (the production default), a missing or unusable
+    /// database is a fatal boot error — the process exits 1 rather
+    /// than continuing with `db = None`.
+    #[serde(default = "default_db_required")]
+    pub required: bool,
+    /// Exponential-backoff retry settings for the initial Postgres
+    /// connection.
+    #[serde(default)]
+    pub connect_retry: ConnectRetryConfig,
+}
+
+/// Exponential-backoff retry settings for the initial Postgres connect.
+#[derive(Deserialize, Debug, Clone)]
+pub struct ConnectRetryConfig {
+    #[serde(default = "default_retry_attempts")]
+    pub attempts: u32,
+    #[serde(default = "default_retry_initial_backoff_ms")]
+    pub initial_backoff_ms: u64,
+    #[serde(default = "default_retry_max_backoff_ms")]
+    pub max_backoff_ms: u64,
+}
+
+impl Default for ConnectRetryConfig {
+    fn default() -> Self {
+        Self {
+            attempts: default_retry_attempts(),
+            initial_backoff_ms: default_retry_initial_backoff_ms(),
+            max_backoff_ms: default_retry_max_backoff_ms(),
+        }
+    }
+}
+
+fn default_retry_attempts() -> u32 {
+    5
+}
+fn default_retry_initial_backoff_ms() -> u64 {
+    1_000
+}
+fn default_retry_max_backoff_ms() -> u64 {
+    16_000
+}
+fn default_db_required() -> bool {
+    true
 }
 
 // Manual Default — `#[derive(Default)]` would default `schema` to
@@ -168,6 +211,10 @@ impl Default for DatabaseConfig {
             schema: default_schema(),
             max_connections: default_max_connections(),
             auto_migrate: false,
+            // Tests use Config::default() without a real DB;
+            // required=false lets build_state return Ok(state_no_db).
+            required: false,
+            connect_retry: ConnectRetryConfig::default(),
         }
     }
 }

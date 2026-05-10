@@ -44,6 +44,19 @@ database:
   passwordKey: password
   maxConnections: 8
   autoMigrate: true
+  # When true (the default), a missing or unusable database is a
+  # fatal boot error: the process exits 1 so kubelet enters
+  # CrashLoopBackOff. Set to false only in development clusters
+  # where you want the pod to start without a database (all
+  # project-scoped endpoints will 503 until the DB is reachable).
+  required: true
+  # Exponential-backoff retry settings for the initial Postgres
+  # connection. The server attempts `attempts` times before
+  # treating the failure as fatal (subject to `required` above).
+  connectRetry:
+    attempts: 5
+    initialBackoffMs: 1000
+    maxBackoffMs: 16000
 
 events:
   retentionDays: 30

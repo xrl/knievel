@@ -53,7 +53,12 @@ pub async fn run(cfg: Config) -> Result<()> {
     let addr = SocketAddr::from_str(&cfg.api.bind_addr)
         .with_context(|| format!("invalid api.bind_addr: {}", cfg.api.bind_addr))?;
 
-    let state = build_state(&cfg).await;
+    // Phase 5.10: build_state now returns Result. A fatal DB error
+    // exits before the listener binds — kubelet sees exit(1) and
+    // enters CrashLoopBackOff. The caller (main.rs) does the actual
+    // process::exit(1) so tests can catch Err without killing the
+    // test runner.
+    let state = build_state(&cfg).await?;
     let r = routes();
     let r = mount_admin_ui(r, cfg.admin_ui.static_dir.as_deref());
     let routes = r.data(state);
@@ -208,7 +213,86 @@ pub fn mount_admin_ui(route: Route, static_dir: Option<&str>) -> Route {
     }
 }
 
-async fn build_state(cfg: &Config) -> AppState {
+/// Format an anyhow error chain as a single string for structured
+/// logging. Joins each cause in the chain with `: ` so operators
+/// see the full path from the outermost context label to the root
+/// cause in one log field.
+///
+/// Example: `anyhow::Error::msg("inner").context("middle").context("outer")`
+/// produces `"outer: middle: inner"`.
+pub fn format_error_chain(e: &anyhow::Error) -> String {
+    e.chain()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
+/// Extract the sqlstate code from an anyhow error chain if any
+/// cause's Display matches the sqlx pattern `(code: XXXXX)`.
+fn extract_sqlstate(e: &anyhow::Error) -> Option<String> {
+    for cause in e.chain() {
+        if let Some(code) = extract_sqlstate_from_str(&cause.to_string()) {
+            return Some(code);
+        }
+    }
+    None
+}
+
+fn extract_sqlstate_from_str(s: &str) -> Option<String> {
+    let lower = s.to_lowercase();
+    for prefix in &["(code: ", "sqlstate: ", "sqlstate "] {
+        if let Some(pos) = lower.find(prefix) {
+            let rest = &s[pos + prefix.len()..];
+            let code: String = rest.chars().take_while(|c| c.is_alphanumeric()).collect();
+            if code.len() >= 5 {
+                return Some(code.to_uppercase());
+            }
+        }
+    }
+    None
+}
+
+fn operator_hint_for_connect_sqlstate(code: &str) -> Option<&'static str> {
+    match code {
+        "28000" => Some(
+            "sqlstate 28000 — role or authentication method rejected. \
+             Check KNIEVEL_DATABASE__URL and the pg_hba.conf entry for this role.",
+        ),
+        "28P01" => Some(
+            "sqlstate 28P01 — password did not match. \
+             KNIEVEL_DATABASE__URL's password likely doesn't match the secret value. \
+             Check the database secret's password key.",
+        ),
+        "3D000" => Some(
+            "sqlstate 3D000 — database does not exist. \
+             Check the database name in KNIEVEL_DATABASE__URL. \
+             The database must be created before knievel starts.",
+        ),
+        _ => None,
+    }
+}
+
+fn operator_hint_for_migrate_sqlstate(code: &str) -> Option<&'static str> {
+    match code {
+        "42501" => Some(
+            "sqlstate 42501 — the role lacks a required privilege. \
+             The database role likely needs CREATE on the knievel schema \
+             or CONNECT on the database. Pre-create the schema or grant the privilege.",
+        ),
+        _ => None,
+    }
+}
+
+/// Build `AppState` with boot-hygiene fail-fast behaviour.
+///
+/// - `database.url` absent + `required = false` -> warn, return DB-less state.
+/// - `database.url` absent + `required = true` -> fatal `Err`.
+/// - Connect failure -> retry with exponential backoff; exhaust -> `Err`.
+/// - Migration failure -> non-retryable `Err`.
+///
+/// Returns `Result<AppState>` so the test suite can assert `Err` without
+/// actually invoking `process::exit`. The `exit(1)` lives in `main.rs`.
+pub async fn build_state(cfg: &Config) -> Result<AppState> {
     let jwt_verifier = crate::auth::jwt::JwtVerifier::new(cfg.auth.jwt.issuers.clone());
     if jwt_verifier.is_enabled() {
         tracing::info!(
@@ -217,59 +301,104 @@ async fn build_state(cfg: &Config) -> AppState {
         );
     }
 
-    let mut state = AppState::new()
+    let base_state = AppState::new()
         .with_decisions(DecisionFlags {
             force_overrides_enabled: cfg.decisions.force_overrides_enabled,
         })
         .with_admin_ui(cfg.admin_ui.clone())
         .with_jwt_verifier(jwt_verifier)
-        // In-process store as the v0 default. The S3 / MinIO /
-        // GCS-compat adapter is a 3.29 follow-up; both share the
-        // `ImageStore` trait so flipping the backend is a config
-        // change, not a code change.
         .with_image_store(Arc::new(InMemoryStore::default()));
 
     let Some(url) = &cfg.database.url else {
-        tracing::info!("no database.url configured; /readyz will report ok: no_db_configured");
-        return state;
-    };
-
-    let pool = match connect_pool(url, cfg.database.max_connections).await {
-        Ok(p) => {
-            tracing::info!("connected to Postgres");
-            p
-        }
-        Err(e) => {
+        if cfg.database.required {
             tracing::error!(
-                error = %e,
-                "DB connection failed at boot; /readyz will report 503"
+                "database.required = true but database.url is not set; \
+                 knievel cannot start. Set KNIEVEL_DATABASE__URL or \
+                 database.url in the config file."
             );
-            return state;
+            return Err(anyhow!(
+                "database.required = true but database.url is not configured"
+            ));
         }
+        tracing::warn!("running without a database; project-scoped endpoints will 503");
+        tracing::info!(
+            db = "none",
+            schema = "n/a",
+            jwt_issuers = cfg.auth.jwt.issuers.len(),
+            image_store = "in_memory",
+            "knievel boot ready"
+        );
+        return Ok(base_state);
     };
 
-    if cfg.database.auto_migrate {
-        match crate::migrate::run(&pool).await {
-            Ok(()) => tracing::info!("auto_migrate: migrations applied"),
+    let retry = &cfg.database.connect_retry;
+    let mut last_err: anyhow::Error = anyhow!("no attempt made");
+    let mut backoff_ms = retry.initial_backoff_ms;
+
+    for attempt in 1..=retry.attempts {
+        match connect_pool(url, cfg.database.max_connections).await {
+            Ok(pool) => {
+                tracing::info!(attempt, "connected to Postgres");
+                return finish_state_with_pool(base_state, pool, cfg).await;
+            }
             Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    "auto_migrate failed; /readyz will report 503 until resolved"
-                );
-                return state;
+                let chain = format_error_chain(&e);
+                if attempt < retry.attempts {
+                    tracing::warn!(
+                        attempt,
+                        max_attempts = retry.attempts,
+                        backoff_ms,
+                        error_chain = %chain,
+                        "DB connect failed; will retry"
+                    );
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                    backoff_ms = (backoff_ms * 2).min(retry.max_backoff_ms);
+                }
+                last_err = e;
             }
         }
     }
 
-    // Events flusher — bounded mpsc + COPY drain
-    // (Phase 3.21).
-    let (sender, _flusher) = events::spawn(pool.clone(), cfg.events.channel_capacity);
+    let chain = format_error_chain(&last_err);
+    let hint = extract_sqlstate(&last_err)
+        .and_then(|code| operator_hint_for_connect_sqlstate(&code))
+        .map(|h| format!("  hint: {h}"))
+        .unwrap_or_default();
+    tracing::error!(
+        attempts = retry.attempts,
+        error_chain = %chain,
+        "DB connect exhausted retries.{hint}"
+    );
+    Err(last_err.context("DB connect exhausted retries"))
+}
 
-    // Leader election + leader-gated maintenance loops
-    // (Phases 3.22 / 3.23 / 3.24). The handles loop forever; we
-    // hold them via `tokio::spawn` so the runtime keeps them
-    // alive for the process lifetime, dropping them on shutdown
-    // is harmless since each spawned future logs and exits.
+async fn finish_state_with_pool(
+    base_state: AppState,
+    pool: sqlx::PgPool,
+    cfg: &Config,
+) -> Result<AppState> {
+    let schema_status;
+    if cfg.database.auto_migrate {
+        match crate::migrate::run(&pool).await {
+            Ok(()) => {
+                tracing::info!("auto_migrate: migrations applied");
+                schema_status = "migrated";
+            }
+            Err(e) => {
+                let chain = format_error_chain(&e);
+                let hint = extract_sqlstate(&e)
+                    .and_then(|code| operator_hint_for_migrate_sqlstate(&code))
+                    .map(|h| format!("  hint: {h}"))
+                    .unwrap_or_default();
+                tracing::error!(error_chain = %chain, "auto_migrate failed.{hint}");
+                return Err(e.context("auto_migrate failed"));
+            }
+        }
+    } else {
+        schema_status = "skipped";
+    }
+
+    let (sender, _flusher) = events::spawn(pool.clone(), cfg.events.channel_capacity);
     let leader_handle = LeaderHandle::new();
     let _leader_task = leader::spawn(pool.clone(), leader_handle.clone());
     let _partition_task = partitions::spawn(
@@ -279,11 +408,20 @@ async fn build_state(cfg: &Config) -> AppState {
     );
     let _rollup_task = rollup::spawn(pool.clone(), leader_handle.clone());
 
-    state = state
+    tracing::info!(
+        db = "connected",
+        schema = schema_status,
+        jwt_issuers = cfg.auth.jwt.issuers.len(),
+        image_store = "in_memory",
+        events = "on",
+        leader = "follower",
+        "knievel boot ready"
+    );
+
+    Ok(base_state
         .with_db(pool)
         .with_events(sender)
-        .with_leader(leader_handle);
-    state
+        .with_leader(leader_handle))
 }
 
 /// Connect with the same `after_connect` recipe `testlib` uses
@@ -327,5 +465,102 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = term.recv() => tracing::info!("received SIGTERM"),
         _ = int.recv()  => tracing::info!("received SIGINT"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_error_chain_joins_causes() {
+        let e = anyhow::anyhow!("inner").context("middle").context("outer");
+        assert_eq!(format_error_chain(&e), "outer: middle: inner");
+    }
+
+    #[test]
+    fn format_error_chain_single_error() {
+        let e = anyhow::anyhow!("only error");
+        assert_eq!(format_error_chain(&e), "only error");
+    }
+
+    #[test]
+    fn extract_sqlstate_from_str_finds_code_prefix() {
+        let s = "error returned from database: permission denied (code: 42501)";
+        assert_eq!(extract_sqlstate_from_str(s), Some("42501".to_string()));
+    }
+
+    #[test]
+    fn extract_sqlstate_from_str_missing_returns_none() {
+        let s = "connection timed out after 30s";
+        assert_eq!(extract_sqlstate_from_str(s), None);
+    }
+
+    #[test]
+    fn operator_hint_known_codes() {
+        assert!(operator_hint_for_connect_sqlstate("28P01").is_some());
+        assert!(operator_hint_for_connect_sqlstate("28000").is_some());
+        assert!(operator_hint_for_connect_sqlstate("3D000").is_some());
+        assert!(operator_hint_for_migrate_sqlstate("42501").is_some());
+    }
+
+    #[test]
+    fn operator_hint_unknown_code_returns_none() {
+        assert!(operator_hint_for_connect_sqlstate("00000").is_none());
+        assert!(operator_hint_for_migrate_sqlstate("00000").is_none());
+    }
+
+    /// Bogus URL + required=true must return Err without blocking on
+    /// retries (attempts=1, backoff=0).
+    #[tokio::test]
+    async fn build_state_bogus_url_returns_err() {
+        use crate::config::{ConnectRetryConfig, DatabaseConfig};
+        let cfg = Config {
+            database: DatabaseConfig {
+                url: Some("postgres://bad:bad@127.0.0.1:1/no_such_db".into()),
+                required: true,
+                auto_migrate: false,
+                connect_retry: ConnectRetryConfig {
+                    attempts: 1,
+                    initial_backoff_ms: 0,
+                    max_backoff_ms: 0,
+                },
+                ..DatabaseConfig::default()
+            },
+            ..Config::default()
+        };
+        let result = build_state(&cfg).await;
+        assert!(result.is_err(), "expected Err from bogus DB url");
+    }
+
+    /// required=false + no URL -> Ok with no pool.
+    #[tokio::test]
+    async fn build_state_no_url_required_false_ok() {
+        let cfg = Config::default(); // required=false, url=None
+        let result = build_state(&cfg).await;
+        assert!(
+            result.is_ok(),
+            "expected Ok for no-DB required=false config"
+        );
+        assert!(result.unwrap().db.is_none());
+    }
+
+    /// required=true + no URL -> Err.
+    #[tokio::test]
+    async fn build_state_no_url_required_true_err() {
+        use crate::config::DatabaseConfig;
+        let cfg = Config {
+            database: DatabaseConfig {
+                required: true,
+                url: None,
+                ..DatabaseConfig::default()
+            },
+            ..Config::default()
+        };
+        let result = build_state(&cfg).await;
+        assert!(
+            result.is_err(),
+            "expected Err when required=true but url unset"
+        );
     }
 }
