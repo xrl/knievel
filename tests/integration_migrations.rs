@@ -51,3 +51,29 @@ async fn migrations_apply_and_config_version_increments() -> Result<()> {
     testlib::db::ephemeral_drop(db).await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn migrate_run_is_idempotent_when_schema_preexists() -> Result<()> {
+    if std::env::var("DATABASE_URL").is_err() {
+        eprintln!(
+            "DATABASE_URL not set; skipping. CI's Postgres service \
+             container provides this."
+        );
+        return Ok(());
+    }
+
+    // ephemeral() already provisions the knievel schema + pgcrypto
+    // and runs the migrator, mirroring the operator-equivalent
+    // bootstrap from MIGRATION_RX.md "One-time provisioning".
+    // Calling migrate::run on the resulting pool exercises the
+    // no-op path: the SELECT-first guard sees both objects already
+    // exist and skips the privileged CREATE statements entirely.
+    // Regression guard for the Aurora "permission denied for
+    // database" failure mode where `CREATE … IF NOT EXISTS` would
+    // still trip Postgres' pre-existence privilege check.
+    let db = testlib::db::ephemeral().await?;
+    knievel::migrate::run(&db.pool).await?;
+
+    testlib::db::ephemeral_drop(db).await?;
+    Ok(())
+}
