@@ -88,9 +88,12 @@ progress log.
 - Postgres `FORCE ROW LEVEL SECURITY` on every table that holds
   per-tenant data. Tested cross-tenant: 47 project-scoped endpoints,
   all with explicit `tests/cross_tenant_manifest.toml` coverage.
-- `knievel-cli seed-demo` for fresh-install bootstrap (drops a bearer
-  + creates one of each resource so `docker compose up` produces a
-  decisioning system in under a minute).
+- `knievel-cli seed-demo` for fresh-install bootstrap with a sample
+  fixture (drops a bearer + creates one of each resource so
+  `docker compose up` produces a decisioning system in under a minute).
+- `knievel-cli admin create-org --external-id <id> --name <name>` for
+  production tenant provisioning — adds one row in `organizations`
+  plus an org-admin bootstrap token, with no demo fixture chain.
 
 **Observability**
 - Structured JSON logs via `tracing`, OTLP-exported OpenTelemetry

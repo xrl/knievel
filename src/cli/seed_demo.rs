@@ -68,7 +68,7 @@ pub struct SeedDemoOutput {
 pub async fn run(args: SeedDemoArgs) -> Result<SeedDemoOutput> {
     let pool = connect(&args.database_url).await?;
 
-    let (org_id, _) = upsert_org(&pool, &args.org_external_id).await?;
+    let (org_id, _) = upsert_org(&pool, &args.org_external_id, "Demo Org").await?;
     let (project_id, project_was_new) =
         upsert_project(&pool, &org_id, &args.project_external_id).await?;
     if project_was_new {
@@ -96,7 +96,7 @@ pub async fn run(args: SeedDemoArgs) -> Result<SeedDemoOutput> {
     let site_id = upsert_site(&pool, &org_id, &project_id).await?;
     let zone_id = upsert_zone(&pool, &org_id, &project_id, site_id).await?;
 
-    let token = upsert_token(&pool, &org_id, args.token.as_deref()).await?;
+    let token = upsert_token(&pool, &org_id, args.token.as_deref(), "seed-demo bootstrap").await?;
 
     if let Some(path) = args.write_token_to.as_deref() {
         write_token_file(path, &token).context("writing token file")?;
@@ -118,7 +118,7 @@ pub async fn run(args: SeedDemoArgs) -> Result<SeedDemoOutput> {
     })
 }
 
-async fn connect(url: &str) -> Result<PgPool> {
+pub(crate) async fn connect(url: &str) -> Result<PgPool> {
     PgPoolOptions::new()
         .max_connections(2)
         .after_connect(|conn, _| {
@@ -134,7 +134,7 @@ async fn connect(url: &str) -> Result<PgPool> {
         .context("connecting to Postgres")
 }
 
-/// Upsert the demo org by deterministically deriving its `id` from
+/// Upsert an org by deterministically deriving its `id` from
 /// `external_id`. Direct `SELECT … WHERE external_id = …` on
 /// `organizations` is RLS-blocked when no `knievel.org_id` is bound
 /// (chicken-and-egg: we don't know the id yet); going through
@@ -142,21 +142,30 @@ async fn connect(url: &str) -> Result<PgPool> {
 /// the lookup entirely. The 48-bit derived id has astronomically
 /// low collision probability for v0 fixture use.
 ///
+/// `display_name` is stored in `organizations.name` on first insert;
+/// re-runs preserve whatever name is already on the row (we don't
+/// clobber operator-edited names with a fixture default).
+///
 /// Returns `(org_id, was_new)`. `was_new` is `true` exactly when
 /// this call inserted a fresh row (Postgres's `xmax = 0` test on
 /// the returning row).
-async fn upsert_org(pool: &PgPool, external_id: &str) -> Result<(String, bool)> {
+pub(crate) async fn upsert_org(
+    pool: &PgPool,
+    external_id: &str,
+    display_name: &str,
+) -> Result<(String, bool)> {
     let id = derive_org_id(external_id);
     let mut tx = db::begin_bound(pool, &id, None).await?;
     let was_new: bool = sqlx::query_scalar(
         "INSERT INTO knievel.organizations (id, external_id, name)
-         VALUES ($1, $2, 'Demo Org')
+         VALUES ($1, $2, $3)
          ON CONFLICT (id) DO UPDATE
            SET name = knievel.organizations.name
          RETURNING (xmax = 0)",
     )
     .bind(&id)
     .bind(external_id)
+    .bind(display_name)
     .fetch_one(&mut *tx)
     .await
     .context("upsert org")?;
@@ -198,7 +207,7 @@ async fn upsert_project(pool: &PgPool, org_id: &str, external_id: &str) -> Resul
     Ok((id, true))
 }
 
-fn derive_org_id(external_id: &str) -> String {
+pub(crate) fn derive_org_id(external_id: &str) -> String {
     let h = Sha256::digest(external_id.as_bytes());
     format!("org_{}", &hex::encode(h)[..12])
 }
@@ -469,12 +478,22 @@ async fn upsert_zone(pool: &PgPool, org_id: &str, project_id: &str, site_id: i64
     Ok(id)
 }
 
-/// Mint or reuse the demo bearer. When `supplied` is `Some(t)`,
+/// Mint or reuse a bootstrap bearer. When `supplied` is `Some(t)`,
 /// parses it (must be `kvl_<env>_org_<id_short>_<secret>`) and
 /// either upserts the matching row in `api_tokens` or rotates the
-/// hash so the wire token always works after `seed-demo` returns.
+/// hash so the wire token always works after the call returns.
 /// When `None`, generates a random `kvl_dev_org_<id>_<secret>`.
-async fn upsert_token(pool: &PgPool, org_id: &str, supplied: Option<&str>) -> Result<String> {
+///
+/// `display_name` lands in `api_tokens.name` (the same column
+/// `GET /v1/orgs/.../tokens` surfaces) so re-issued tokens are
+/// distinguishable by provenance — `seed-demo bootstrap` vs
+/// `create-org bootstrap` etc.
+pub(crate) async fn upsert_token(
+    pool: &PgPool,
+    org_id: &str,
+    supplied: Option<&str>,
+    display_name: &str,
+) -> Result<String> {
     let plaintext = match supplied {
         Some(t) => t.to_string(),
         None => {
@@ -498,13 +517,14 @@ async fn upsert_token(pool: &PgPool, org_id: &str, supplied: Option<&str>) -> Re
     sqlx::query(
         "INSERT INTO knievel.api_tokens
             (id, org_id, scope, role, name, secret_hash)
-         VALUES ($1, $2, 'org', 'org-admin', 'seed-demo bootstrap', $3)
+         VALUES ($1, $2, 'org', 'org-admin', $3, $4)
          ON CONFLICT (id) DO UPDATE
            SET secret_hash = EXCLUDED.secret_hash,
                revoked_at  = NULL",
     )
     .bind(&db_id)
     .bind(org_id)
+    .bind(display_name)
     .bind(&hash)
     .execute(&mut *tx)
     .await
@@ -513,7 +533,7 @@ async fn upsert_token(pool: &PgPool, org_id: &str, supplied: Option<&str>) -> Re
     Ok(plaintext)
 }
 
-fn write_token_file(path: &Path, token: &str) -> Result<()> {
+pub(crate) fn write_token_file(path: &Path, token: &str) -> Result<()> {
     use std::io::Write;
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -530,7 +550,7 @@ fn write_token_file(path: &Path, token: &str) -> Result<()> {
     Ok(())
 }
 
-fn random_hex(bytes: usize) -> Result<String> {
+pub(crate) fn random_hex(bytes: usize) -> Result<String> {
     use argon2::password_hash::rand_core::{OsRng, RngCore};
     let mut buf = vec![0u8; bytes];
     let mut rng = OsRng;
