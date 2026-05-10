@@ -3,15 +3,15 @@
 //! Emits one structured tracing event per completed HTTP request,
 //! regardless of status. The shape is deliberately spartan:
 //!
-//! - `method`        — HTTP method
-//! - `path`          — URI path (no query string, no matched route);
-//!                     see "Choices" below
-//! - `status`        — final HTTP status code
-//! - `latency_ms`    — wall-clock from middleware-enter to
-//!                     middleware-exit, integer milliseconds
-//! - `request_id`    — minted at middleware-enter (32 hex chars from
-//!                     OsRng) unless an inbound `x-request-id` is
-//!                     present and looks safe to honor
+//! - `method` — HTTP method
+//! - `path` — URI path (no query string, no matched route); see
+//!   "Choices" below
+//! - `status` — final HTTP status code
+//! - `latency_ms` — wall-clock from middleware-enter to
+//!   middleware-exit, integer milliseconds
+//! - `request_id` — minted at middleware-enter (32 hex chars from
+//!   OsRng) unless an inbound `x-request-id` is present and looks
+//!   safe to honor
 //!
 //! For 5xx the line is at `tracing::error!` level; for slow
 //! requests crossing `slow_ms` it bumps to `tracing::warn!`. Every
@@ -367,7 +367,9 @@ mod tests {
 
     #[handler]
     fn forbidden_handler() -> Response {
-        Response::builder().status(StatusCode::FORBIDDEN).body("nope")
+        Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body("nope")
     }
 
     #[handler]
@@ -449,10 +451,7 @@ mod tests {
             .iter()
             .find(|e| e.contains("path=/slow"))
             .unwrap_or_else(|| panic!("no /slow line in {events:?}"));
-        assert!(
-            line.starts_with("WARN"),
-            "slow request should warn: {line}"
-        );
+        assert!(line.starts_with("WARN"), "slow request should warn: {line}");
         assert!(line.contains("slow=true"));
     }
 
