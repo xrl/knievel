@@ -169,6 +169,21 @@ logging:
   level: ${KNIEVEL_LOG_LEVEL:info}
   format: json
   decisions_sample_rate: 0.01
+  # Per-request structured log line + x-request-id response header
+  # (Phase 4.12). Default true. The line carries
+  # method/path/status/latency_ms/request_id; 5xx logs at ERROR
+  # with the inner error chain attached, slow-but-OK requests bump
+  # to WARN. Set to false on hot-path-only fleets that ship
+  # per-request observability via OTel spans instead.
+  request_log_enabled: true
+  # Exact-match path skip-list. Default skips probe traffic; add
+  # the decision endpoint here on high-QPS deploys if the per-
+  # request line is too noisy.
+  request_log_skip_paths:
+    - /healthz
+    - /readyz
+  # Latency above which requests log at WARN regardless of status.
+  request_log_slow_ms: 1000
 
 tracing:
   otel:

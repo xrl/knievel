@@ -40,6 +40,7 @@ use crate::image_upload::InMemoryStore;
 use crate::leader::{self, LeaderHandle};
 use crate::orgs::OrgApi;
 use crate::partitions;
+use crate::request_log::{RequestLog, RequestLogConfig};
 use crate::rollup;
 use crate::sites::SitesApi;
 use crate::state::{AppState, DecisionFlags};
@@ -72,6 +73,28 @@ pub async fn run(cfg: Config) -> Result<()> {
             routes.with(cors).boxed()
         }
         None => routes.boxed(),
+    };
+
+    // Per-request structured logger + x-request-id stamping.
+    // Installed AFTER CORS so the log-line latency reflects the
+    // full request including any preflight handling. Operators
+    // can disable via `logging.request_log_enabled = false` —
+    // useful for hot-path-only fleets that ship per-request
+    // observability via OTel spans instead.
+    let app: poem::endpoint::BoxEndpoint<'static> = if cfg.logging.request_log_enabled {
+        let mw = RequestLog::new(RequestLogConfig {
+            skip_paths: std::sync::Arc::new(cfg.logging.request_log_skip_paths.clone()),
+            slow_ms: cfg.logging.request_log_slow_ms,
+        });
+        tracing::info!(
+            skip_paths = ?cfg.logging.request_log_skip_paths,
+            slow_ms = cfg.logging.request_log_slow_ms,
+            "request logging enabled"
+        );
+        app.with(mw).boxed()
+    } else {
+        tracing::info!("request logging disabled (logging.request_log_enabled = false)");
+        app
     };
 
     tracing::info!(

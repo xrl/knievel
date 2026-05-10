@@ -156,6 +156,59 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
     #[serde(default)]
     pub auto_migrate: bool,
+    /// When `true` (the production default), a missing or unusable
+    /// database is a fatal boot error — the process exits 1 rather
+    /// than continuing with `db = None`. When `false`, a missing
+    /// `url` emits a WARN and the server runs in DB-less mode (all
+    /// project-scoped endpoints return 503). Tests use
+    /// `Config::default()` which keeps `required: false` so the
+    /// no-DB path stays usable without a Postgres instance.
+    #[serde(default = "default_db_required")]
+    pub required: bool,
+    /// Retry policy for the initial connection attempt. Applied
+    /// only when `url` is set. Operators who want fail-fast with no
+    /// retry set `attempts: 1`.
+    #[serde(default)]
+    pub connect_retry: ConnectRetryConfig,
+}
+
+/// Exponential-backoff retry knobs for the boot-time DB connect.
+#[derive(Deserialize, Debug, Clone)]
+pub struct ConnectRetryConfig {
+    /// Total number of attempts (including the first). Default 5.
+    #[serde(default = "default_retry_attempts")]
+    pub attempts: u32,
+    /// Initial backoff in milliseconds. Doubles each retry.
+    /// Default 1 000 ms.
+    #[serde(default = "default_retry_initial_backoff_ms")]
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff cap in milliseconds. Default 16 000 ms.
+    #[serde(default = "default_retry_max_backoff_ms")]
+    pub max_backoff_ms: u64,
+}
+
+impl Default for ConnectRetryConfig {
+    fn default() -> Self {
+        Self {
+            attempts: default_retry_attempts(),
+            initial_backoff_ms: default_retry_initial_backoff_ms(),
+            max_backoff_ms: default_retry_max_backoff_ms(),
+        }
+    }
+}
+
+fn default_retry_attempts() -> u32 {
+    5
+}
+fn default_retry_initial_backoff_ms() -> u64 {
+    1_000
+}
+fn default_retry_max_backoff_ms() -> u64 {
+    16_000
+}
+
+fn default_db_required() -> bool {
+    true
 }
 
 // Manual Default — `#[derive(Default)]` would default `schema` to
@@ -168,6 +221,11 @@ impl Default for DatabaseConfig {
             schema: default_schema(),
             max_connections: default_max_connections(),
             auto_migrate: false,
+            // Tests use Config::default() without a real database;
+            // keep the no-DB path open so they don't need to wire
+            // a `database.url`.
+            required: false,
+            connect_retry: ConnectRetryConfig::default(),
         }
     }
 }
@@ -185,6 +243,21 @@ pub struct LoggingConfig {
     pub level: String,
     #[serde(default = "default_log_format")]
     pub format: String,
+    /// Per-request structured log line emitted by
+    /// `crate::request_log::RequestLog`. Default `true`. Hot-path-
+    /// aware operators may want it off entirely.
+    #[serde(default = "default_request_log_enabled")]
+    pub request_log_enabled: bool,
+    /// Exact-match path skip-list for the request logger. Defaults
+    /// to `/healthz` and `/readyz` so probe traffic doesn't drown
+    /// the log stream. Operators may add the decision endpoint or
+    /// other hot paths.
+    #[serde(default = "default_request_log_skip_paths")]
+    pub request_log_skip_paths: Vec<String>,
+    /// Latency above which a request is logged at `warn!`
+    /// regardless of status. Surfaces slow-but-successful paths.
+    #[serde(default = "default_request_log_slow_ms")]
+    pub request_log_slow_ms: u64,
 }
 
 impl Default for LoggingConfig {
@@ -192,6 +265,9 @@ impl Default for LoggingConfig {
         Self {
             level: default_log_level(),
             format: default_log_format(),
+            request_log_enabled: default_request_log_enabled(),
+            request_log_skip_paths: default_request_log_skip_paths(),
+            request_log_slow_ms: default_request_log_slow_ms(),
         }
     }
 }
@@ -201,6 +277,15 @@ fn default_log_level() -> String {
 }
 fn default_log_format() -> String {
     "json".into()
+}
+fn default_request_log_enabled() -> bool {
+    true
+}
+fn default_request_log_skip_paths() -> Vec<String> {
+    vec!["/healthz".into(), "/readyz".into()]
+}
+fn default_request_log_slow_ms() -> u64 {
+    1000
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
