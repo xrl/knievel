@@ -158,11 +158,6 @@ pub struct DatabaseConfig {
     pub auto_migrate: bool,
     /// When `true` (the production default), a missing or unusable
     /// database is a fatal boot error — the process exits 1 rather
-    /// than continuing with `db = None`.
-    #[serde(default = "default_db_required")]
-    pub required: bool,
-    /// Exponential-backoff retry settings for the initial Postgres
-    /// connection.
     /// than continuing with `db = None`. When `false`, a missing
     /// `url` emits a WARN and the server runs in DB-less mode (all
     /// project-scoped endpoints return 503). Tests use
@@ -177,13 +172,6 @@ pub struct DatabaseConfig {
     pub connect_retry: ConnectRetryConfig,
 }
 
-/// Exponential-backoff retry settings for the initial Postgres connect.
-#[derive(Deserialize, Debug, Clone)]
-pub struct ConnectRetryConfig {
-    #[serde(default = "default_retry_attempts")]
-    pub attempts: u32,
-    #[serde(default = "default_retry_initial_backoff_ms")]
-    pub initial_backoff_ms: u64,
 /// Exponential-backoff retry knobs for the boot-time DB connect.
 #[derive(Deserialize, Debug, Clone)]
 pub struct ConnectRetryConfig {
@@ -233,11 +221,10 @@ impl Default for DatabaseConfig {
             schema: default_schema(),
             max_connections: default_max_connections(),
             auto_migrate: false,
-            // Tests use Config::default() without a real DB;
-            // required=false lets build_state return Ok(state_no_db).
             // Tests use Config::default() without a real database;
             // keep the no-DB path open so they don't need to wire
-            // a `database.url`.
+            // a `database.url`. `required: false` lets `build_state`
+            // return `Ok(state_no_db)`.
             required: false,
             connect_retry: ConnectRetryConfig::default(),
         }
